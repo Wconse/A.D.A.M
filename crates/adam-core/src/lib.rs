@@ -4,6 +4,7 @@ pub mod cohort;
 pub mod demand;
 pub mod event;
 pub mod ids;
+pub mod production;
 pub mod rng;
 mod simulation;
 pub mod time;
@@ -15,7 +16,10 @@ pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
 pub use event::{DomainEvent, EventEnvelope, EventLog};
-pub use ids::{ActorId, CohortId, CountryId, GoodId, NeedProfileId, PowerNodeId, RegionId};
+pub use ids::{
+    ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, RecipeId, RegionId,
+};
+pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
 pub use time::{SimDate, TimeError};
 pub use value::{BasisPoints, Money, Population, QuantityMilli, RatePpm, ValueError};
@@ -25,4 +29,4 @@ pub use world::{
 };
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 5;
+pub const SIMULATION_VERSION: u32 = 6;

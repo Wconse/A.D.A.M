@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, CohortId, ConsumptionProfile, CountryId, DomainEvent, EventLog, Good,
-    GoodId, HouseholdCohort, Money, NeedProfileId, Population, PowerNodeId, RegionId, SimDate,
-    TimeError, WorldSeed,
+    ActorId, BasisPoints, CohortId, ConsumptionProfile, CountryId, DomainEvent, EventLog, Firm,
+    FirmId, Good, GoodId, HouseholdCohort, Money, NeedProfileId, Population, PowerNodeId,
+    ProductionRecipe, RecipeId, RegionId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -341,6 +341,8 @@ impl Influence {
 pub enum WorldError {
     DuplicateCountry(CountryId),
     DuplicateGood(GoodId),
+    DuplicateFirm(FirmId),
+    DuplicateRecipe(RecipeId),
     DuplicateNeedProfile(NeedProfileId),
     DuplicateCohort(CohortId),
     DuplicateRegion(RegionId),
@@ -352,6 +354,7 @@ pub enum WorldError {
     },
     UnknownCountry(CountryId),
     UnknownGood(GoodId),
+    UnknownRecipe(RecipeId),
     UnknownNeedProfile(NeedProfileId),
     MissingRegionalPrice {
         region: RegionId,
@@ -364,6 +367,7 @@ pub enum WorldError {
     InvalidCohort(&'static str),
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
+    InvalidProduction(&'static str),
     PopulationAccounting {
         region: RegionId,
         region_population: Population,
@@ -378,6 +382,8 @@ impl fmt::Display for WorldError {
         match self {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
             Self::DuplicateGood(id) => write!(formatter, "good {id} already exists"),
+            Self::DuplicateFirm(id) => write!(formatter, "firm {id} already exists"),
+            Self::DuplicateRecipe(id) => write!(formatter, "production recipe {id} already exists"),
             Self::DuplicateNeedProfile(id) => write!(formatter, "need profile {id} already exists"),
             Self::DuplicateCohort(id) => write!(formatter, "cohort {id} already exists"),
             Self::DuplicateRegion(id) => write!(formatter, "region {id} already exists"),
@@ -391,6 +397,7 @@ impl fmt::Display for WorldError {
             }
             Self::UnknownCountry(id) => write!(formatter, "unknown country {id}"),
             Self::UnknownGood(id) => write!(formatter, "unknown good {id}"),
+            Self::UnknownRecipe(id) => write!(formatter, "unknown production recipe {id}"),
             Self::UnknownNeedProfile(id) => write!(formatter, "unknown need profile {id}"),
             Self::MissingRegionalPrice { region, good } => write!(
                 formatter,
@@ -405,6 +412,9 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid consumption profile: {reason}")
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
+            Self::InvalidProduction(reason) => {
+                write!(formatter, "invalid production model: {reason}")
+            }
             Self::PopulationAccounting {
                 region,
                 region_population,
@@ -436,6 +446,8 @@ pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
     pub(crate) goods: BTreeMap<GoodId, Good>,
+    pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
+    pub(crate) firms: BTreeMap<FirmId, Firm>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -457,6 +469,8 @@ impl World {
             seed,
             date: start_date,
             goods: BTreeMap::new(),
+            production_recipes: BTreeMap::new(),
+            firms: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -637,6 +651,37 @@ impl World {
         &self.events
     }
 
+    fn write_production_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.production_recipes.len() as u64);
+        for (id, recipe) in &self.production_recipes {
+            hash.write_u32(id.get());
+            hash.write_str(recipe.name());
+            hash.write_u32(recipe.output_good().get());
+            hash.write_u64(recipe.output_per_batch().get());
+            hash.write_u64(recipe.labor_milli_worker_months());
+            hash.write_u64(recipe.inputs().len() as u64);
+            for input in recipe.inputs() {
+                hash.write_u32(input.good().get());
+                hash.write_u64(input.quantity_per_batch().get());
+            }
+        }
+        hash.write_u64(self.firms.len() as u64);
+        for (id, firm) in &self.firms {
+            hash.write_u32(id.get());
+            hash.write_str(firm.name());
+            hash.write_u32(firm.region().get());
+            hash.write_u32(firm.recipe().get());
+            hash.write_u64(firm.workers());
+            hash.write_u64(firm.capacity_batches());
+            hash.write_i64(firm.cash().minor_units());
+            hash.write_u64(firm.inventories().len() as u64);
+            for (good, quantity) in firm.inventories() {
+                hash.write_u32(good.get());
+                hash.write_u64(quantity.get());
+            }
+        }
+    }
+
     #[must_use]
     pub fn stable_fingerprint(&self) -> u64 {
         let mut hash = StableHasher::new();
@@ -649,6 +694,7 @@ impl World {
             hash.write_u32(id.get());
             hash.write_str(good.name());
         }
+        self.write_production_fingerprint(&mut hash);
         hash.write_u64(self.consumption_profiles.len() as u64);
         for (id, profile) in &self.consumption_profiles {
             hash.write_u32(id.get());

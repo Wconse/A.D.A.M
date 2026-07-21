@@ -49,8 +49,8 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 ### 0.6 Firms and production — ⬜
 
-- ⬜ Production units, ownership, capital, labor, inputs, technology.
-- ⬜ Inventories, expectations, production planning, investment, failure.
+- 🟡 Production units now have typed recipes, labor, capital capacity, cash, inventories, outputs, and intermediate inputs; ownership and technology remain planned.
+- 🟡 Deterministic physical production planning and inventories are implemented; execution, expectations, investment, sales, and failure remain planned.
 - ⬜ Qualification constraints and management capacity.
 
 ### 0.7 Spatial markets and logistics — ⬜
@@ -133,6 +133,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Documented material/institutional/social/information layers, propaganda, ideology, regimes, and depth criteria.
 - Added schema-v3 household cohorts with age, household, education, employment, income, wealth, debt, and exact regional accounting.
 - Added schema-v4 goods, need profiles, regional prices, and budget-constrained monthly household demand intentions.
+- Added the core firm/recipe model and physical monthly production constraints for labor, capacity, and intermediate inputs.
 
 ## Progress update rule
 

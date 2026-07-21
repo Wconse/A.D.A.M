@@ -27,6 +27,8 @@ macro_rules! typed_id {
 
 typed_id!(CountryId);
 typed_id!(GoodId);
+typed_id!(FirmId);
+typed_id!(RecipeId);
 typed_id!(NeedProfileId);
 typed_id!(CohortId);
 typed_id!(RegionId);
@@ -49,6 +51,8 @@ mod tests {
     fn ids_have_stable_compact_layout() {
         assert_eq!(size_of::<CountryId>(), size_of::<u32>());
         assert_eq!(size_of::<GoodId>(), size_of::<u32>());
+        assert_eq!(size_of::<FirmId>(), size_of::<u32>());
+        assert_eq!(size_of::<RecipeId>(), size_of::<u32>());
         assert_eq!(size_of::<NeedProfileId>(), size_of::<u32>());
         assert_eq!(size_of::<CohortId>(), size_of::<u32>());
         assert_eq!(size_of::<RegionId>(), size_of::<u32>());
