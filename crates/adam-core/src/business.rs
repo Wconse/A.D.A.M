@@ -96,6 +96,23 @@ impl FirmPolicy {
     pub const fn dividend(self) -> BasisPoints {
         self.dividend
     }
+    /// Returns a policy with a different marketing allocation.
+    /// # Errors
+    /// Returns [`WorldError::InvalidBusinessPolicy`] when total allocations exceed 100%.
+    pub fn with_marketing_budget(self, value: BasisPoints) -> Result<Self, WorldError> {
+        Self::new(
+            self.inventory_buffer_days,
+            self.price_markup,
+            value,
+            self.reinvestment,
+            self.dividend,
+        )
+    }
+    #[must_use]
+    pub const fn with_inventory_buffer_days(mut self, value: u16) -> Self {
+        self.inventory_buffer_days = value;
+        self
+    }
 }
 
 #[derive(
@@ -247,6 +264,47 @@ impl World {
     pub fn can_control_firm(&self, actor: ActorId, firm: FirmId) -> bool {
         self.can_perform_corporate_action(actor, firm, CorporateAction::SetOverallPolicy)
     }
+    /// Changes only marketing allocation under marketing-scoped authority.
+    /// # Errors
+    /// Returns an authority, missing-policy, or allocation error without mutation.
+    pub fn set_marketing_budget(
+        &mut self,
+        actor: ActorId,
+        firm: FirmId,
+        value: BasisPoints,
+    ) -> Result<(), WorldError> {
+        if !self.can_perform_corporate_action(actor, firm, CorporateAction::SetMarketingPolicy) {
+            return Err(WorldError::UnauthorizedFirmControl { actor, firm });
+        }
+        let current = *self
+            .firm_policies
+            .get(&firm)
+            .ok_or(WorldError::MissingFirmPolicy(firm))?;
+        let updated = current.with_marketing_budget(value)?;
+        self.firm_policies.insert(firm, updated);
+        Ok(())
+    }
+    /// Changes inventory buffer under operations-scoped authority.
+    /// # Errors
+    /// Returns an authority or missing-policy error without mutation.
+    pub fn set_inventory_buffer(
+        &mut self,
+        actor: ActorId,
+        firm: FirmId,
+        days: u16,
+    ) -> Result<(), WorldError> {
+        if !self.can_perform_corporate_action(actor, firm, CorporateAction::SetOperationsPolicy) {
+            return Err(WorldError::UnauthorizedFirmControl { actor, firm });
+        }
+        let current = *self
+            .firm_policies
+            .get(&firm)
+            .ok_or(WorldError::MissingFirmPolicy(firm))?;
+        self.firm_policies
+            .insert(firm, current.with_inventory_buffer_days(days));
+        Ok(())
+    }
+
     /// Changes policy only for an actor with majority voting control.
     /// # Errors
     /// Returns [`WorldError::UnauthorizedFirmControl`] without changing state when authority is absent.

@@ -379,6 +379,7 @@ pub enum WorldError {
     InvalidPrice,
     InvalidProduction(&'static str),
     InvalidBusinessPolicy(&'static str),
+    MissingFirmPolicy(FirmId),
     UnauthorizedFirmControl {
         actor: ActorId,
         firm: FirmId,
@@ -444,6 +445,7 @@ impl fmt::Display for WorldError {
             Self::InvalidBusinessPolicy(reason) => {
                 write!(formatter, "invalid business policy: {reason}")
             }
+            Self::MissingFirmPolicy(firm) => write!(formatter, "firm {firm} has no policy"),
             Self::UnauthorizedFirmControl { actor, firm } => {
                 write!(formatter, "actor {actor} cannot control firm {firm}")
             }

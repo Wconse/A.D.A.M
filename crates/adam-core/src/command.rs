@@ -1,7 +1,17 @@
-use crate::{ActorId, FirmId, FirmPolicy, World, WorldError};
+use crate::{ActorId, BasisPoints, FirmId, FirmPolicy, World, WorldError};
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
     AdvanceYears(u32),
+    SetMarketingBudget {
+        actor: ActorId,
+        firm: FirmId,
+        value: BasisPoints,
+    },
+    SetInventoryBuffer {
+        actor: ActorId,
+        firm: FirmId,
+        days: u16,
+    },
     SetFirmPolicy {
         actor: ActorId,
         firm: FirmId,
@@ -15,6 +25,12 @@ impl WorldCommand {
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
             Self::AdvanceYears(years) => world.advance_years(*years),
+            Self::SetMarketingBudget { actor, firm, value } => {
+                world.set_marketing_budget(*actor, *firm, *value)
+            }
+            Self::SetInventoryBuffer { actor, firm, days } => {
+                world.set_inventory_buffer(*actor, *firm, *days)
+            }
             Self::SetFirmPolicy {
                 actor,
                 firm,
