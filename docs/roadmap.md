@@ -171,6 +171,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added multi-layer conflict reports and explicit save/mod-set compatibility diagnostics.
 - Added strict versioned save envelopes, exact pre-payload compatibility checks, round-trip tests, and migration-chain contracts.
 - Added complete binary world snapshots and verified save/load continuation against uninterrupted history.
+- Added checksummed atomic save files, `.bak` recovery, corruption tests, and a verification CLI.
 - Enforced that every definition belongs to the declaring mod namespace, preventing namespace hijacking.
 
 ## Progress update rule
