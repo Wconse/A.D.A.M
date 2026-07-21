@@ -76,6 +76,14 @@ impl InvestmentProject {
     pub const fn capacity_batches(&self) -> u64 {
         self.capacity_batches
     }
+    #[must_use]
+    pub const fn duration_months(&self) -> u32 {
+        self.duration_months
+    }
+    #[must_use]
+    pub const fn elapsed_months(&self) -> u32 {
+        self.elapsed_months
+    }
     fn advance(&mut self) -> Result<bool, WorldError> {
         if matches!(
             self.status,

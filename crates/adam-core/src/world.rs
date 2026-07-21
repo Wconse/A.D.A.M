@@ -749,6 +749,26 @@ impl World {
         &self.events
     }
 
+    fn write_investment_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.investment_projects.len() as u64);
+        for (id, project) in &self.investment_projects {
+            hash.write_u32(id.get());
+            hash.write_u32(project.firm().get());
+            hash.write_u32(project.region().get());
+            hash.write_i64(project.budget().minor_units());
+            hash.write_i64(project.spent().minor_units());
+            hash.write_u32(project.duration_months());
+            hash.write_u32(project.elapsed_months());
+            hash.write_u64(project.capacity_batches());
+            hash.write_u8(match project.status() {
+                crate::InvestmentStatus::Planned => 1,
+                crate::InvestmentStatus::Building => 2,
+                crate::InvestmentStatus::Completed => 3,
+                crate::InvestmentStatus::Cancelled => 4,
+            });
+        }
+    }
+
     fn write_board_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.board_resolutions.len() as u64);
         for (id, resolution) in &self.board_resolutions {
@@ -889,6 +909,7 @@ impl World {
         self.write_production_fingerprint(&mut hash);
         self.write_business_fingerprint(&mut hash);
         self.write_board_fingerprint(&mut hash);
+        self.write_investment_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
             hash.write_u32(actor.get());
