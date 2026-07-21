@@ -1,6 +1,20 @@
-use crate::{ActorId, BasisPoints, FirmId, FirmPolicy, World, WorldError};
+use crate::{
+    ActorId, BasisPoints, BoardResolution, BoardVote, FirmId, FirmPolicy, ResolutionId, World,
+    WorldError,
+};
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    ProposeBoardResolution(BoardResolution),
+    CastBoardVote {
+        resolution: ResolutionId,
+        actor: ActorId,
+        vote: BoardVote,
+    },
+    CloseBoardResolution {
+        resolution: ResolutionId,
+        quorum: BasisPoints,
+        approval: BasisPoints,
+    },
     AdvanceYears(u32),
     SetMarketingBudget {
         actor: ActorId,
@@ -24,6 +38,19 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::ProposeBoardResolution(value) => world.propose_board_resolution(value.clone()),
+            Self::CastBoardVote {
+                resolution,
+                actor,
+                vote,
+            } => world.cast_board_vote(*resolution, *actor, *vote),
+            Self::CloseBoardResolution {
+                resolution,
+                quorum,
+                approval,
+            } => world
+                .close_board_resolution(*resolution, *quorum, *approval)
+                .map(|_| ()),
             Self::AdvanceYears(years) => world.advance_years(*years),
             Self::SetMarketingBudget { actor, firm, value } => {
                 world.set_marketing_budget(*actor, *firm, *value)

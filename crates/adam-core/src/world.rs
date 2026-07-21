@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, CohortId, ConsumptionProfile, CorporateRole, CountryId, DomainEvent,
-    EventLog, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money,
-    NeedProfileId, OwnershipStake, Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId,
-    SimDate, TimeError, WorldSeed,
+    ActorId, BasisPoints, BoardResolution, CohortId, ConsumptionProfile, CorporateRole, CountryId,
+    DomainEvent, EventLog, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId,
+    HouseholdCohort, Money, NeedProfileId, OwnershipStake, Population, PowerNodeId,
+    ProductionRecipe, RecipeId, RegionId, ResolutionId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -346,6 +346,7 @@ pub enum WorldError {
     DuplicateGood(GoodId),
     DuplicateFirm(FirmId),
     DuplicateFirmAppointment,
+    DuplicateBoardResolution(ResolutionId),
     DuplicateOwnershipStake {
         firm: FirmId,
         owner: ActorId,
@@ -380,6 +381,9 @@ pub enum WorldError {
     InvalidProduction(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
+    UnknownBoardResolution(ResolutionId),
+    UnauthorizedBoardAction(ActorId),
+    InvalidBoardVote(&'static str),
     UnauthorizedFirmControl {
         actor: ActorId,
         firm: FirmId,
@@ -401,6 +405,9 @@ impl fmt::Display for WorldError {
             Self::DuplicateFirm(id) => write!(formatter, "firm {id} already exists"),
             Self::DuplicateFirmAppointment => {
                 formatter.write_str("duplicate corporate appointment")
+            }
+            Self::DuplicateBoardResolution(id) => {
+                write!(formatter, "board resolution {id} already exists")
             }
             Self::DuplicateOwnershipStake { firm, owner } => write!(
                 formatter,
@@ -446,6 +453,11 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid business policy: {reason}")
             }
             Self::MissingFirmPolicy(firm) => write!(formatter, "firm {firm} has no policy"),
+            Self::UnknownBoardResolution(id) => write!(formatter, "unknown board resolution {id}"),
+            Self::UnauthorizedBoardAction(actor) => {
+                write!(formatter, "actor {actor} cannot act on this board")
+            }
+            Self::InvalidBoardVote(reason) => write!(formatter, "invalid board vote: {reason}"),
             Self::UnauthorizedFirmControl { actor, firm } => {
                 write!(formatter, "actor {actor} cannot control firm {firm}")
             }
@@ -485,6 +497,7 @@ pub struct World {
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
+    pub(crate) board_resolutions: BTreeMap<ResolutionId, BoardResolution>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -511,6 +524,7 @@ impl World {
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
             firm_appointments: BTreeMap::new(),
+            board_resolutions: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),

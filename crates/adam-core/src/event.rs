@@ -1,12 +1,26 @@
 use crate::{
-    ActorId, BasisPoints, CohortId, CountryId, GoodId, Money, NeedProfileId, Population,
-    PowerNodeId, RatePpm, RegionId, SimDate,
+    ActorId, BasisPoints, BoardVote, CohortId, CountryId, FirmId, GoodId, Money, NeedProfileId,
+    Population, PowerNodeId, RatePpm, RegionId, ResolutionId, ResolutionStatus, SimDate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
     WorldFounded {
         seed: u64,
+    },
+    BoardResolutionProposed {
+        resolution: ResolutionId,
+        firm: FirmId,
+        proposer: ActorId,
+    },
+    BoardVoteCast {
+        resolution: ResolutionId,
+        actor: ActorId,
+        vote: BoardVote,
+    },
+    BoardResolutionClosed {
+        resolution: ResolutionId,
+        status: ResolutionStatus,
     },
     GoodRegistered {
         good: GoodId,

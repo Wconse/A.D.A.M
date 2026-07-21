@@ -1,4 +1,7 @@
-use crate::{ActorId, BasisPoints, CorporateAction, FirmId, ResolutionId};
+use crate::{
+    ActorId, BasisPoints, CorporateAction, CorporateRole, DomainEvent, FirmId, ResolutionId, World,
+    WorldError,
+};
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BoardVote {
@@ -111,6 +114,115 @@ impl BoardResolution {
         self.status
     }
 }
+impl World {
+    /// Proposes a board resolution through executive or director authority.
+    /// # Errors
+    /// Returns an error for duplicate IDs, unknown firms, or unauthorized proposers.
+    pub fn propose_board_resolution(
+        &mut self,
+        resolution: BoardResolution,
+    ) -> Result<(), WorldError> {
+        if self.board_resolutions.contains_key(&resolution.id()) {
+            return Err(WorldError::DuplicateBoardResolution(resolution.id()));
+        }
+        if !self.firms().contains_key(&resolution.firm()) {
+            return Err(WorldError::UnknownFirm(resolution.firm()));
+        }
+        let authorized = self.firm_appointments().contains_key(&(
+            resolution.firm(),
+            resolution.proposer(),
+            CorporateRole::ChiefExecutive,
+        )) || self.firm_appointments().contains_key(&(
+            resolution.firm(),
+            resolution.proposer(),
+            CorporateRole::BoardDirector,
+        ));
+        if !authorized {
+            return Err(WorldError::UnauthorizedBoardAction(resolution.proposer()));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::BoardResolutionProposed {
+                resolution: resolution.id(),
+                firm: resolution.firm(),
+                proposer: resolution.proposer(),
+            },
+        );
+        self.board_resolutions.insert(resolution.id(), resolution);
+        Ok(())
+    }
+    /// Casts a vote using current board membership.
+    /// # Errors
+    /// Returns an error for unknown resolution, non-director, or closed vote.
+    pub fn cast_board_vote(
+        &mut self,
+        id: ResolutionId,
+        actor: ActorId,
+        vote: BoardVote,
+    ) -> Result<(), WorldError> {
+        let firm = self
+            .board_resolutions
+            .get(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?
+            .firm();
+        let directors = self.directors(firm);
+        self.board_resolutions
+            .get_mut(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?
+            .cast_vote(&directors, actor, vote)
+            .map_err(WorldError::InvalidBoardVote)?;
+        self.events.append(
+            self.date,
+            DomainEvent::BoardVoteCast {
+                resolution: id,
+                actor,
+                vote,
+            },
+        );
+        Ok(())
+    }
+    /// Closes a resolution under current board membership and thresholds.
+    /// # Errors
+    /// Returns an error for an unknown resolution.
+    pub fn close_board_resolution(
+        &mut self,
+        id: ResolutionId,
+        quorum: BasisPoints,
+        approval: BasisPoints,
+    ) -> Result<ResolutionStatus, WorldError> {
+        let firm = self
+            .board_resolutions
+            .get(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?
+            .firm();
+        let directors = self.directors(firm);
+        let status = self
+            .board_resolutions
+            .get_mut(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?
+            .close(&directors, quorum, approval);
+        self.events.append(
+            self.date,
+            DomainEvent::BoardResolutionClosed {
+                resolution: id,
+                status,
+            },
+        );
+        Ok(status)
+    }
+    #[must_use]
+    pub fn board_resolutions(&self) -> &BTreeMap<ResolutionId, BoardResolution> {
+        &self.board_resolutions
+    }
+    fn directors(&self, firm: FirmId) -> BTreeSet<ActorId> {
+        self.firm_appointments()
+            .keys()
+            .filter(|(f, _, role)| *f == firm && *role == CorporateRole::BoardDirector)
+            .map(|(_, actor, _)| *actor)
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
