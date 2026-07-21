@@ -181,4 +181,108 @@ mod tests {
         );
         assert!(matches!(result, Err(WorldError::InvalidBusinessPolicy(_))));
     }
+    fn managed_world(voting: u16) -> (World, FirmPolicy) {
+        use crate::{
+            Actor, Country, CountryId, Firm, Good, GoodId, Money, Population, ProductionRecipe,
+            QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldSeed,
+        };
+        let mut world = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(1),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_actor(
+                Actor::new(ActorId::new(1), "Owner", RegionId::new(1), 1980).expect("actor"),
+            )
+            .expect("actor");
+        world
+            .register_good(Good::new(GoodId::new(1), "Service").expect("good"))
+            .expect("good");
+        world
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1000),
+                    1000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(1),
+                    "Firm",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::from_minor_units(1),
+                    BTreeMap::new(),
+                )
+                .expect("firm"),
+            )
+            .expect("firm");
+        world
+            .register_ownership_stake(OwnershipStake::new(
+                FirmId::new(1),
+                ActorId::new(1),
+                BasisPoints::new(voting).expect("rights"),
+                BasisPoints::new(voting).expect("rights"),
+            ))
+            .expect("stake");
+        let policy = FirmPolicy::new(
+            30,
+            BasisPoints::new(1000).expect("rate"),
+            BasisPoints::new(1000).expect("rate"),
+            BasisPoints::new(4000).expect("rate"),
+            BasisPoints::new(3000).expect("rate"),
+        )
+        .expect("policy");
+        (world, policy)
+    }
+    #[test]
+    fn strict_majority_can_apply_replayable_policy_command() {
+        use crate::WorldCommand;
+        let (mut world, policy) = managed_world(6000);
+        WorldCommand::SetFirmPolicy {
+            actor: ActorId::new(1),
+            firm: FirmId::new(1),
+            policy,
+        }
+        .apply(&mut world)
+        .expect("authorized");
+        assert_eq!(world.firm_policies()[&FirmId::new(1)], policy);
+    }
+    #[test]
+    fn half_ownership_cannot_unilaterally_change_policy() {
+        use crate::WorldCommand;
+        let (mut world, policy) = managed_world(5000);
+        let before = world.stable_fingerprint();
+        assert!(matches!(
+            WorldCommand::SetFirmPolicy {
+                actor: ActorId::new(1),
+                firm: FirmId::new(1),
+                policy
+            }
+            .apply(&mut world),
+            Err(WorldError::UnauthorizedFirmControl { .. })
+        ));
+        assert_eq!(world.stable_fingerprint(), before);
+    }
 }
