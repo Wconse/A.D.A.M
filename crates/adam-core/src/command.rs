@@ -1,9 +1,11 @@
 use crate::{
-    ActorId, BasisPoints, BoardResolution, BoardVote, FirmId, FirmPolicy, ResolutionId, World,
-    WorldError,
+    ActorId, BasisPoints, BoardResolution, BoardVote, FirmId, FirmPolicy, InvestmentProject,
+    ProjectId, ResolutionId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    LaunchInvestmentProject(InvestmentProject),
+    AdvanceInvestmentProject(ProjectId),
     ProposeBoardResolution(BoardResolution),
     ExecuteBoardResolution(ResolutionId),
     CastBoardVote {
@@ -39,6 +41,10 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::LaunchInvestmentProject(project) => {
+                world.launch_investment_project(project.clone())
+            }
+            Self::AdvanceInvestmentProject(id) => world.advance_investment_project(*id),
             Self::ProposeBoardResolution(value) => world.propose_board_resolution(value.clone()),
             Self::ExecuteBoardResolution(id) => world.execute_board_resolution(*id),
             Self::CastBoardVote {

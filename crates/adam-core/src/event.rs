@@ -1,6 +1,6 @@
 use crate::{
     ActorId, BasisPoints, BoardVote, CohortId, CountryId, FirmId, GoodId, Money, NeedProfileId,
-    Population, PowerNodeId, RatePpm, RegionId, ResolutionId, ResolutionStatus, SimDate,
+    Population, PowerNodeId, ProjectId, RatePpm, RegionId, ResolutionId, ResolutionStatus, SimDate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,18 @@ pub enum DomainEvent {
     DividendPaid {
         firm: FirmId,
         amount: Money,
+    },
+    InvestmentProjectLaunched {
+        project: ProjectId,
+        firm: FirmId,
+        budget: Money,
+    },
+    InvestmentProjectAdvanced {
+        project: ProjectId,
+    },
+    InvestmentProjectCompleted {
+        project: ProjectId,
+        firm: FirmId,
     },
     InvestmentCommitted {
         firm: FirmId,

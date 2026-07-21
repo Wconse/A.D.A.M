@@ -178,6 +178,13 @@ impl Firm {
     pub(crate) const fn set_cash(&mut self, value: Money) {
         self.cash = value;
     }
+    pub(crate) fn add_capacity(&mut self, value: u64) -> Result<(), WorldError> {
+        self.capacity_batches = self
+            .capacity_batches
+            .checked_add(value)
+            .ok_or(WorldError::ArithmeticOverflow("firm capacity"))?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

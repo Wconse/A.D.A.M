@@ -4,9 +4,9 @@ use std::fmt;
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile,
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
-    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money, NeedProfileId, OwnershipStake,
-    Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId, ResolutionId, ResolutionStatus,
-    SimDate, TimeError, WorldSeed,
+    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, InvestmentProject, Money, NeedProfileId,
+    OwnershipStake, Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId,
+    ResolutionId, ResolutionStatus, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -348,6 +348,7 @@ pub enum WorldError {
     DuplicateFirm(FirmId),
     DuplicateFirmAppointment,
     DuplicateBoardResolution(ResolutionId),
+    DuplicateInvestmentProject(ProjectId),
     DuplicateOwnershipStake {
         firm: FirmId,
         owner: ActorId,
@@ -383,6 +384,9 @@ pub enum WorldError {
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
     UnknownBoardResolution(ResolutionId),
+    UnknownInvestmentProject(ProjectId),
+    InsufficientCommittedInvestment(FirmId),
+    InvalidInvestmentProject(&'static str),
     MissingBoardMandate(ResolutionId),
     BoardResolutionNotApproved(ResolutionId),
     BoardResolutionAlreadyExecuted(ResolutionId),
@@ -404,6 +408,7 @@ pub enum WorldError {
 }
 
 impl fmt::Display for WorldError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
@@ -411,6 +416,9 @@ impl fmt::Display for WorldError {
             Self::DuplicateFirm(id) => write!(formatter, "firm {id} already exists"),
             Self::DuplicateFirmAppointment => {
                 formatter.write_str("duplicate corporate appointment")
+            }
+            Self::DuplicateInvestmentProject(id) => {
+                write!(formatter, "investment project {id} already exists")
             }
             Self::DuplicateBoardResolution(id) => {
                 write!(formatter, "board resolution {id} already exists")
@@ -460,6 +468,15 @@ impl fmt::Display for WorldError {
             }
             Self::MissingFirmPolicy(firm) => write!(formatter, "firm {firm} has no policy"),
             Self::UnknownBoardResolution(id) => write!(formatter, "unknown board resolution {id}"),
+            Self::UnknownInvestmentProject(id) => {
+                write!(formatter, "unknown investment project {id}")
+            }
+            Self::InsufficientCommittedInvestment(firm) => {
+                write!(formatter, "firm {firm} lacks committed investment funds")
+            }
+            Self::InvalidInvestmentProject(reason) => {
+                write!(formatter, "invalid investment project: {reason}")
+            }
             Self::MissingBoardMandate(id) => {
                 write!(formatter, "board resolution {id} has no executable mandate")
             }
@@ -521,6 +538,7 @@ pub struct World {
     pub(crate) board_resolutions: BTreeMap<ResolutionId, BoardResolution>,
     pub(crate) actor_cash: BTreeMap<ActorId, Money>,
     pub(crate) committed_investments: BTreeMap<FirmId, Money>,
+    pub(crate) investment_projects: BTreeMap<ProjectId, InvestmentProject>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -550,6 +568,7 @@ impl World {
             board_resolutions: BTreeMap::new(),
             actor_cash: BTreeMap::new(),
             committed_investments: BTreeMap::new(),
+            investment_projects: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),

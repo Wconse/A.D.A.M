@@ -41,6 +41,7 @@ typed_id!(GoodId);
 typed_id!(FirmId);
 typed_id!(RecipeId);
 typed_id!(ResolutionId);
+typed_id!(ProjectId);
 typed_id!(NeedProfileId);
 typed_id!(CohortId);
 typed_id!(RegionId);
@@ -66,6 +67,7 @@ mod tests {
         assert_eq!(size_of::<FirmId>(), size_of::<u32>());
         assert_eq!(size_of::<RecipeId>(), size_of::<u32>());
         assert_eq!(size_of::<ResolutionId>(), size_of::<u32>());
+        assert_eq!(size_of::<ProjectId>(), size_of::<u32>());
         assert_eq!(size_of::<NeedProfileId>(), size_of::<u32>());
         assert_eq!(size_of::<CohortId>(), size_of::<u32>());
         assert_eq!(size_of::<RegionId>(), size_of::<u32>());

@@ -7,6 +7,7 @@ pub mod command;
 pub mod demand;
 pub mod event;
 pub mod ids;
+pub mod investment;
 pub mod production;
 pub mod rng;
 mod simulation;
@@ -23,9 +24,10 @@ pub use demand::{
 };
 pub use event::{DomainEvent, EventEnvelope, EventLog};
 pub use ids::{
-    ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, RecipeId, RegionId,
-    ResolutionId,
+    ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, ProjectId, RecipeId,
+    RegionId, ResolutionId,
 };
+pub use investment::{InvestmentProject, InvestmentStatus};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
 pub use time::{SimDate, TimeError};
