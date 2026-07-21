@@ -1,6 +1,7 @@
 #![doc = "Versioned TOML content loading for A.D.A.M."]
 
 pub mod modding;
+pub mod registry;
 
 use std::fmt;
 

@@ -127,7 +127,8 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 ## Cross-cutting modding platform — 🟡
 
 - ✅ Strict mod manifests, namespaced identities, dependencies, load hints, deterministic ordering, and diagnostics foundation.
-- ⬜ Layered content registries and explicit patch operations.
+- ✅ Generic layered namespaced registry with provenance and explicit set/remove/append patch operations.
+- ⬜ Typed registries, schema-aware patch validation, and cross-reference validation after merge.
 - ⬜ Conflict reports, content hashes in saves/replays, compatibility ranges, and migrations.
 - ⬜ Standalone `validate-mod` command and authoring schemas.
 - ⬜ Declarative conditions, formulas, effects, and AI weights.
@@ -158,6 +159,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added the core firm/recipe model and physical monthly production constraints for labor, capacity, and intermediate inputs.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
+- Added the layered content registry with explicit non-silent patch operations and provenance.
 
 ## Progress update rule
 
