@@ -16,6 +16,7 @@ pub struct ModSetValidationReport {
     pub load_order: Vec<ModId>,
     pub goods: usize,
     pub recipes: usize,
+    pub package_fingerprint: u64,
 }
 /// Validates multiple mod folders and resolves their dependency order.
 /// # Errors
@@ -39,6 +40,7 @@ pub fn validate_mod_set(paths: &[PathBuf]) -> Result<ModSetValidationReport, Vec
     let load_order = resolve_load_order(reports.iter().map(|r| r.manifest.clone()).collect())
         .map_err(|e| vec![e.to_string()])?;
     Ok(ModSetValidationReport {
+        package_fingerprint: fingerprint_paths(paths)?,
         load_order,
         goods: reports.iter().map(|r| r.goods).sum(),
         recipes: reports.iter().map(|r| r.recipes).sum(),
@@ -114,6 +116,41 @@ pub fn validate_mod_folder(path: &Path) -> Result<ModValidationReport, Vec<Strin
         Err(issues)
     }
 }
+fn fingerprint_paths(paths: &[PathBuf]) -> Result<u64, Vec<String>> {
+    let mut files = Vec::new();
+    for root in paths {
+        collect_toml(root, &mut files).map_err(|e| vec![e])?;
+    }
+    files.sort();
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for file in files {
+        let bytes = fs::read(&file).map_err(|e| vec![format!("{}: {e}", file.display())])?;
+        for byte in file.to_string_lossy().bytes().chain(bytes) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    Ok(hash)
+}
+fn collect_toml(path: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    if path.is_file() {
+        if path.extension().is_some_and(|e| e == "toml") {
+            output.push(path.to_owned());
+        }
+        return Ok(());
+    }
+    let entries = fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    for entry in entries {
+        let child = entry.map_err(|e| e.to_string())?.path();
+        if child.is_dir() {
+            collect_toml(&child, output)?;
+        } else if child.extension().is_some_and(|e| e == "toml") {
+            output.push(child);
+        }
+    }
+    Ok(())
+}
+
 fn load_files<T: for<'de> Deserialize<'de>>(
     dir: &Path,
     issues: &mut Vec<String>,

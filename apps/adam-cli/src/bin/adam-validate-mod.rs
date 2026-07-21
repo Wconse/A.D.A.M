@@ -8,8 +8,8 @@ fn main() {
     match validate_mod_set(&paths) {
         Ok(report) => {
             println!(
-                "valid mod set: goods={} recipes={}",
-                report.goods, report.recipes
+                "valid mod set: goods={} recipes={} fingerprint={:016x}",
+                report.goods, report.recipes, report.package_fingerprint
             );
             for id in report.load_order {
                 println!("load: {}", id.as_str());
