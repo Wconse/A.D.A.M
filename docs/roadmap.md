@@ -53,26 +53,39 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - 🟡 Deterministic physical production planning and inventories are implemented; execution, expectations, investment, sales, and failure remain planned.
 - ⬜ Qualification constraints and management capacity.
 
-### 0.7 Spatial markets and logistics — ⬜
+### 0.7 Playable business, ownership, and brands — ⬜
 
-- ⬜ Regional order matching and inventories.
+- ✅ Business, brand, governance, and logistics architecture documented.
+- 🟡 Core ownership stake and firm-policy value objects implemented.
+- ⬜ Legal forms, share classes, voting control, boards, executives, and delegated authority.
+- ⬜ Player/AI firm commands: sourcing, pricing, quality, inventory, wages, finance, investment, dividends.
+- ⬜ Product offers and audience-specific brand beliefs: awareness, trust, quality, familiarity, status, service reliability.
+- ⬜ Advertising through claims, channels, targeting, evidence, repetition, and backlash—not direct popularity points.
+- ⬜ Accounting, credit covenants, insolvency, takeovers, nationalization, inheritance, and succession.
+
+### 0.8 Spatial markets and logistics — ⬜
+
+- ⬜ Regional order matching, warehouses, and inventories.
+- ⬜ Route graph, shipment orders, fleet/terminal capacity, cost, delay, reliability, spoilage, and congestion.
+- ⬜ Logistics companies as ordinary playable firms with transport and warehousing products.
+- ⬜ Own-account shipping, spot freight, and long-term carrier contracts.
 - ⬜ Price formation from fill rate, cost, stocks, expectations, and market power.
 - ⬜ Transport capacity, delay, cost, borders, tariffs, sanctions, spoilage.
 - 🔬 Market convergence, shortage behavior, and performance tests.
 
-### 0.8 Labor, migration, and human capital — ⬜
+### 0.9 Labor, migration, and human capital — ⬜
 
 - ⬜ Job matching, wages, unemployment, bargaining, working conditions.
 - ⬜ Internal and international migration based on expected life outcomes.
 - ⬜ Skill formation, mismatch, automation, and brain drain.
 
-### 0.9 Government, banking, and finance — ⬜
+### 0.10 Government, banking, and finance — ⬜
 
 - ⬜ Taxes, budgets, procurement, debt, assets, and implementation capacity.
 - ⬜ Banks, credit, collateral, liquidity, insolvency, and guarantees.
 - ⬜ Inflation emerging from goods, money, production, and expectations.
 
-### 0.10 Institutions, ideologies, and political process — ⬜
+### 0.11 Institutions, ideologies, and political process — ⬜
 
 - ✅ Design framework documented.
 - ⬜ Multidimensional private beliefs, public platforms, salience, compromise.
@@ -81,7 +94,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - ⬜ Coalition bargaining and policy implementation.
 - ⬜ Elections, protest, repression, coups, reform, and state decay.
 
-### 0.11 Information, reputation, media, and propaganda — ⬜
+### 0.12 Information, reputation, media, and propaganda — ⬜
 
 - ✅ Hybrid audience-traits plus event-memory design selected.
 - ✅ Absurd propaganda, conformity, private/public belief split documented.
@@ -90,20 +103,20 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - ⬜ Rumor mutation, censorship, counter-messaging, polling uncertainty.
 - ⬜ Material events feeding information and political behavior.
 
-### 0.12 Contextual power network — ⬜
+### 0.13 Contextual power network — ⬜
 
 - ⬜ Replace universal influence weights with typed relationships.
 - ⬜ Formal authority, organizational control, assets, access, trust, obligation, fear.
 - ⬜ Actor knowledge and uncertainty about the network.
 - ⬜ Action-specific coalition and veto resolution.
 
-### 0.13 Diplomacy, trade, crisis, and war — ⬜
+### 0.14 Diplomacy, trade, crisis, and war — ⬜
 
 - ⬜ Bilateral beliefs, interests, trade exposure, commitments, and tension.
 - ⬜ Mobilization, sanctions, negotiation, escalation, and conflict.
 - ⬜ Minimal unified combat model for auto-resolution; no tactical UI yet.
 
-### 0.14 Chronicle experiment — ⬜
+### 0.15 Chronicle experiment — ⬜
 
 - ⬜ Importance scoring and causal-chain extraction.
 - ⬜ Competing contemporary narratives versus retrospective history.
@@ -134,6 +147,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added schema-v3 household cohorts with age, household, education, employment, income, wealth, debt, and exact regional accounting.
 - Added schema-v4 goods, need profiles, regional prices, and budget-constrained monthly household demand intentions.
 - Added the core firm/recipe model and physical monthly production constraints for labor, capacity, and intermediate inputs.
+- Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 
 ## Progress update rule
 

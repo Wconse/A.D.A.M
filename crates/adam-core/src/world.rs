@@ -368,6 +368,7 @@ pub enum WorldError {
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
     InvalidProduction(&'static str),
+    InvalidBusinessPolicy(&'static str),
     PopulationAccounting {
         region: RegionId,
         region_population: Population,
@@ -414,6 +415,9 @@ impl fmt::Display for WorldError {
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::InvalidProduction(reason) => {
                 write!(formatter, "invalid production model: {reason}")
+            }
+            Self::InvalidBusinessPolicy(reason) => {
+                write!(formatter, "invalid business policy: {reason}")
             }
             Self::PopulationAccounting {
                 region,

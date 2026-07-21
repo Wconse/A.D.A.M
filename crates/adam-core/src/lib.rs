@@ -1,5 +1,6 @@
 #![doc = "Deterministic, engine-independent simulation core for A.D.A.M."]
 
+pub mod business;
 pub mod cohort;
 pub mod demand;
 pub mod event;
@@ -11,6 +12,7 @@ pub mod time;
 pub mod value;
 pub mod world;
 
+pub use business::{FirmPolicy, OwnershipStake};
 pub use cohort::{AgeBand, EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType};
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
