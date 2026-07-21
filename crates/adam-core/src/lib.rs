@@ -1,5 +1,6 @@
 #![doc = "Deterministic, engine-independent simulation core for A.D.A.M."]
 
+pub mod board;
 pub mod business;
 pub mod cohort;
 pub mod command;
@@ -13,6 +14,7 @@ pub mod time;
 pub mod value;
 pub mod world;
 
+pub use board::{BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{AgeBand, EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType};
 pub use command::{WorldCommand, replay_commands};
@@ -22,6 +24,7 @@ pub use demand::{
 pub use event::{DomainEvent, EventEnvelope, EventLog};
 pub use ids::{
     ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, RecipeId, RegionId,
+    ResolutionId,
 };
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
