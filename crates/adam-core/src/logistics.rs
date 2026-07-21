@@ -252,6 +252,148 @@ fn search_paths(
     Ok(())
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RouteCapacityLedger {
+    reserved: std::collections::BTreeMap<RouteId, QuantityMilli>,
+}
+impl RouteCapacityLedger {
+    #[must_use]
+    pub fn reserved(&self) -> &std::collections::BTreeMap<RouteId, QuantityMilli> {
+        &self.reserved
+    }
+    /// Atomically reserves the same shipment quantity on every route in a plan.
+    /// # Errors
+    /// Returns [`WorldError::InsufficientRouteCapacity`] without partial reservations.
+    pub fn reserve(
+        &mut self,
+        plan: &MultiLegShipmentPlan,
+        quantity: QuantityMilli,
+        routes: &[LogisticsRoute],
+    ) -> Result<(), WorldError> {
+        let by_id: std::collections::BTreeMap<_, _> = routes.iter().map(|r| (r.id(), r)).collect();
+        for id in &plan.routes {
+            let route = by_id
+                .get(id)
+                .ok_or(WorldError::UnknownLogisticsRoute(*id))?;
+            let used = self.reserved.get(id).copied().unwrap_or_default().get();
+            let next = used
+                .checked_add(quantity.get())
+                .ok_or(WorldError::ArithmeticOverflow("route reservation"))?;
+            if next > route.capacity().get() {
+                return Err(WorldError::InsufficientRouteCapacity(*id));
+            }
+        }
+        for id in &plan.routes {
+            let used = self.reserved.get(id).copied().unwrap_or_default().get();
+            self.reserved
+                .insert(*id, QuantityMilli::new(used + quantity.get()));
+        }
+        Ok(())
+    }
+    /// Releases capacity after delivery or cancellation.
+    /// # Errors
+    /// Returns an error when release exceeds the current reservation.
+    pub fn release(
+        &mut self,
+        routes: &[RouteId],
+        quantity: QuantityMilli,
+    ) -> Result<(), WorldError> {
+        for id in routes {
+            let used = self.reserved.get(id).copied().unwrap_or_default().get();
+            if used < quantity.get() {
+                return Err(WorldError::InvalidLogistics("release exceeds reservation"));
+            }
+        }
+        for id in routes {
+            let used = self.reserved[id].get() - quantity.get();
+            if used == 0 {
+                self.reserved.remove(id);
+            } else {
+                self.reserved.insert(*id, QuantityMilli::new(used));
+            }
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ShipmentStatus {
+    Planned,
+    Reserved,
+    InTransit,
+    Delivered,
+    Cancelled,
+}
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipmentLifecycle {
+    id: ShipmentId,
+    routes: Vec<RouteId>,
+    quantity: QuantityMilli,
+    remaining_days: u32,
+    status: ShipmentStatus,
+}
+impl ShipmentLifecycle {
+    #[must_use]
+    pub fn from_plan(plan: &MultiLegShipmentPlan, quantity: QuantityMilli) -> Self {
+        Self {
+            id: plan.shipment,
+            routes: plan.routes.clone(),
+            quantity,
+            remaining_days: plan.arrival_days,
+            status: ShipmentStatus::Planned,
+        }
+    }
+    #[must_use]
+    pub const fn status(&self) -> ShipmentStatus {
+        self.status
+    }
+    #[must_use]
+    pub const fn remaining_days(&self) -> u32 {
+        self.remaining_days
+    }
+    /// Reserves route capacity and starts transit.
+    /// # Errors
+    /// Returns an error for invalid status or insufficient capacity.
+    pub fn start(
+        &mut self,
+        ledger: &mut RouteCapacityLedger,
+        routes: &[LogisticsRoute],
+    ) -> Result<(), WorldError> {
+        if self.status != ShipmentStatus::Planned {
+            return Err(WorldError::InvalidLogistics("shipment is not planned"));
+        }
+        ledger.reserve(
+            &MultiLegShipmentPlan {
+                shipment: self.id,
+                routes: self.routes.clone(),
+                total_cost: Money::default(),
+                arrival_days: self.remaining_days,
+            },
+            self.quantity,
+            routes,
+        )?;
+        self.status = ShipmentStatus::InTransit;
+        Ok(())
+    }
+    /// Advances transit and releases capacity on delivery.
+    /// # Errors
+    /// Returns an error unless shipment is in transit or release fails.
+    pub fn advance_days(
+        &mut self,
+        days: u32,
+        ledger: &mut RouteCapacityLedger,
+    ) -> Result<(), WorldError> {
+        if self.status != ShipmentStatus::InTransit {
+            return Err(WorldError::InvalidLogistics("shipment is not in transit"));
+        }
+        self.remaining_days = self.remaining_days.saturating_sub(days);
+        if self.remaining_days == 0 {
+            ledger.release(&self.routes, self.quantity)?;
+            self.status = ShipmentStatus::Delivered;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +473,39 @@ mod tests {
         let plan = plan_multileg_shipment(&order, &routes, 3).expect("plan");
         assert_eq!(plan.routes, vec![RouteId::new(1), RouteId::new(2)]);
         assert_eq!(plan.arrival_days, 5);
+    }
+    #[test]
+    fn shared_capacity_is_reserved_and_released() {
+        let route = LogisticsRoute::new(
+            RouteId::new(1),
+            RegionId::new(1),
+            RegionId::new(2),
+            TransportMode::Rail,
+            QuantityMilli::new(1000),
+            Money::from_minor_units(10),
+            2,
+            9500,
+        )
+        .expect("route");
+        let plan = MultiLegShipmentPlan {
+            shipment: ShipmentId::new(3),
+            routes: vec![RouteId::new(1)],
+            total_cost: Money::from_minor_units(10),
+            arrival_days: 2,
+        };
+        let mut ledger = RouteCapacityLedger::default();
+        let mut shipment = ShipmentLifecycle::from_plan(&plan, QuantityMilli::new(700));
+        shipment
+            .start(&mut ledger, std::slice::from_ref(&route))
+            .expect("start");
+        assert_eq!(ledger.reserved()[&RouteId::new(1)].get(), 700);
+        assert!(
+            ledger
+                .reserve(&plan, QuantityMilli::new(400), std::slice::from_ref(&route))
+                .is_err()
+        );
+        shipment.advance_days(2, &mut ledger).expect("deliver");
+        assert!(ledger.reserved().is_empty());
+        assert_eq!(shipment.status(), ShipmentStatus::Delivered);
     }
 }
