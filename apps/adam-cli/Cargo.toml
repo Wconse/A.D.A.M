@@ -1,0 +1,14 @@
+[package]
+name = "adam-cli"
+description = "Console runner for A.D.A.M Stage 0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+adam-core = { path = "../../crates/adam-core" }
+
+[lints]
+workspace = true

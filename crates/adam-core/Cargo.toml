@@ -1,0 +1,11 @@
+[package]
+name = "adam-core"
+description = "Deterministic headless simulation core for A.D.A.M"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

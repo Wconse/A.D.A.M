@@ -1,0 +1,15 @@
+schema_version = 1
+world_name = "Parallel Twenty-First Century"
+start_year = 2025
+
+[[countries]]
+id = 1
+name = "Aster Republic"
+
+[[countries]]
+id = 2
+name = "Boreal Union"
+
+[[countries]]
+id = 3
+name = "Cyrene Federation"
