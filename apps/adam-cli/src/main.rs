@@ -26,6 +26,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("seed: {}", world.seed().get());
     println!("date: {}", world.date());
     println!("countries: {}", world.countries().len());
+    println!("regions: {}", world.regions().len());
+    println!("actors: {}", world.actors().len());
+    println!("power nodes: {}", world.power_nodes().len());
+    println!("influence edges: {}", world.influences().len());
     println!("events: {}", world.events().len());
     println!("fingerprint: {:016x}", world.stable_fingerprint());
     Ok(())

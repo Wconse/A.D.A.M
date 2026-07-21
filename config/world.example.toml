@@ -13,3 +13,125 @@ name = "Boreal Union"
 [[countries]]
 id = 3
 name = "Cyrene Federation"
+
+[[regions]]
+id = 101
+country_id = 1
+name = "Aster Metropolitan Region"
+population = 7200000
+annual_output_minor = 31800000000000
+
+[[regions]]
+id = 201
+country_id = 2
+name = "North Boreal Industrial Belt"
+population = 11400000
+annual_output_minor = 40200000000000
+
+[[regions]]
+id = 301
+country_id = 3
+name = "Cyrene Coastal Corridor"
+population = 8900000
+annual_output_minor = 36700000000000
+
+[[actors]]
+id = 1001
+name = "Mara Venn"
+home_region_id = 101
+born_year = 1977
+
+[[actors]]
+id = 1002
+name = "Ilan Rook"
+home_region_id = 101
+born_year = 1984
+
+[[actors]]
+id = 2001
+name = "Oren Tal"
+home_region_id = 201
+born_year = 1972
+
+[[actors]]
+id = 3001
+name = "Sera Nahl"
+home_region_id = 301
+born_year = 1981
+
+[[power_nodes]]
+id = 10001
+country_id = 1
+name = "Aster Presidency"
+kind = "political_office"
+holder_actor_id = 1001
+
+[[power_nodes]]
+id = 10002
+country_id = 1
+name = "Venn Industrial Group"
+kind = "capital"
+holder_actor_id = 1002
+
+[[power_nodes]]
+id = 20001
+country_id = 2
+name = "Boreal General Staff"
+kind = "military_command"
+holder_actor_id = 2001
+
+[[power_nodes]]
+id = 20002
+country_id = 2
+name = "Northern Public Network"
+kind = "media_platform"
+holder_actor_id = 2001
+
+[[power_nodes]]
+id = 30001
+country_id = 3
+name = "Cyrene Federal Cabinet"
+kind = "political_office"
+holder_actor_id = 3001
+
+[[power_nodes]]
+id = 30002
+country_id = 3
+name = "Coastal Civic Congress"
+kind = "civic_organization"
+holder_actor_id = 3001
+
+[[influences]]
+actor_id = 1001
+node_id = 10001
+weight_bps = 8200
+
+[[influences]]
+actor_id = 1002
+node_id = 10002
+weight_bps = 9100
+
+[[influences]]
+actor_id = 1002
+node_id = 10001
+weight_bps = 2400
+
+[[influences]]
+actor_id = 2001
+node_id = 20001
+weight_bps = 8800
+
+[[influences]]
+actor_id = 2001
+node_id = 20002
+weight_bps = 5300
+
+[[influences]]
+actor_id = 3001
+node_id = 30001
+weight_bps = 7900
+
+[[influences]]
+actor_id = 3001
+node_id = 30002
+weight_bps = 6700

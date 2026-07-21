@@ -64,6 +64,12 @@ Windows PowerShell:
 
 The gate checks formatting, compilation, Clippy warnings, tests, and generated documentation.
 
+A reproducible foundation-scale probe is also available:
+
+```bash
+cargo run --release -p adam-core --example foundation_scale -- 100000
+```
+
 ## Non-negotiable invariants
 
 1. Same seed + same ordered inputs + same simulation version = identical history.

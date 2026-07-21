@@ -29,6 +29,10 @@ configuration / player input
 - **EventLog** is append-only and ordered by a monotonic sequence number.
 - **Chronicle** is a read model built from events; it never mutates the world.
 
+## Canonical values
+
+Stable entity IDs are typed 32-bit integers. Population is an integer count, money is signed 64-bit minor units, and normalized influence uses basis points. Raw floating-point values are excluded from canonical state until a separate numeric contract is accepted.
+
 ## Deterministic data structures
 
 Use ordered collections (`BTreeMap`, sorted vectors) in canonical state and serialization paths. A hash map may be used as an internal optimization only when its output is sorted before it can affect behavior.

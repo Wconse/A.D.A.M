@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::{CountryId, DomainEvent, EventLog, SimDate, TimeError, WorldSeed};
+use crate::{
+    ActorId, BasisPoints, CountryId, DomainEvent, EventLog, Money, Population, PowerNodeId,
+    RegionId, SimDate, TimeError, WorldSeed,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Country {
@@ -14,13 +17,12 @@ impl Country {
     ///
     /// # Errors
     ///
-    /// Returns [`WorldError::EmptyCountryName`] when the name is empty or whitespace.
+    /// Returns [`WorldError::EmptyName`] when the name is empty or whitespace.
     pub fn new(id: CountryId, name: impl Into<String>) -> Result<Self, WorldError> {
-        let name = name.into();
-        if name.trim().is_empty() {
-            return Err(WorldError::EmptyCountryName);
-        }
-        Ok(Self { id, name })
+        Ok(Self {
+            id,
+            name: validated_name("country", name.into())?,
+        })
     }
 
     #[must_use]
@@ -35,9 +37,234 @@ impl Country {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Region {
+    id: RegionId,
+    country: CountryId,
+    name: String,
+    population: Population,
+    annual_output: Money,
+}
+
+impl Region {
+    /// Creates an aggregate simulation region.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::EmptyName`] when the name is empty or whitespace.
+    pub fn new(
+        id: RegionId,
+        country: CountryId,
+        name: impl Into<String>,
+        population: Population,
+        annual_output: Money,
+    ) -> Result<Self, WorldError> {
+        Ok(Self {
+            id,
+            country,
+            name: validated_name("region", name.into())?,
+            population,
+            annual_output,
+        })
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> RegionId {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn country(&self) -> CountryId {
+        self.country
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn population(&self) -> Population {
+        self.population
+    }
+
+    #[must_use]
+    pub const fn annual_output(&self) -> Money {
+        self.annual_output
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Actor {
+    id: ActorId,
+    name: String,
+    home_region: RegionId,
+    born_year: i32,
+}
+
+impl Actor {
+    /// Creates a named human actor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::EmptyName`] when the name is empty or whitespace.
+    pub fn new(
+        id: ActorId,
+        name: impl Into<String>,
+        home_region: RegionId,
+        born_year: i32,
+    ) -> Result<Self, WorldError> {
+        Ok(Self {
+            id,
+            name: validated_name("actor", name.into())?,
+            home_region,
+            born_year,
+        })
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> ActorId {
+        self.id
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn home_region(&self) -> RegionId {
+        self.home_region
+    }
+
+    #[must_use]
+    pub const fn born_year(&self) -> i32 {
+        self.born_year
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum PowerNodeKind {
+    PoliticalOffice,
+    Capital,
+    MilitaryCommand,
+    MediaPlatform,
+    CivicOrganization,
+}
+
+impl PowerNodeKind {
+    const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::PoliticalOffice => 1,
+            Self::Capital => 2,
+            Self::MilitaryCommand => 3,
+            Self::MediaPlatform => 4,
+            Self::CivicOrganization => 5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PowerNode {
+    id: PowerNodeId,
+    country: CountryId,
+    name: String,
+    kind: PowerNodeKind,
+    holder: Option<ActorId>,
+}
+
+impl PowerNode {
+    /// Creates a node in the power network.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::EmptyName`] when the name is empty or whitespace.
+    pub fn new(
+        id: PowerNodeId,
+        country: CountryId,
+        name: impl Into<String>,
+        kind: PowerNodeKind,
+        holder: Option<ActorId>,
+    ) -> Result<Self, WorldError> {
+        Ok(Self {
+            id,
+            country,
+            name: validated_name("power node", name.into())?,
+            kind,
+            holder,
+        })
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> PowerNodeId {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn country(&self) -> CountryId {
+        self.country
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> PowerNodeKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub const fn holder(&self) -> Option<ActorId> {
+        self.holder
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Influence {
+    actor: ActorId,
+    node: PowerNodeId,
+    weight: BasisPoints,
+}
+
+impl Influence {
+    #[must_use]
+    pub const fn new(actor: ActorId, node: PowerNodeId, weight: BasisPoints) -> Self {
+        Self {
+            actor,
+            node,
+            weight,
+        }
+    }
+
+    #[must_use]
+    pub const fn actor(self) -> ActorId {
+        self.actor
+    }
+
+    #[must_use]
+    pub const fn node(self) -> PowerNodeId {
+        self.node
+    }
+
+    #[must_use]
+    pub const fn weight(self) -> BasisPoints {
+        self.weight
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorldError {
     DuplicateCountry(CountryId),
-    EmptyCountryName,
+    DuplicateRegion(RegionId),
+    DuplicateActor(ActorId),
+    DuplicatePowerNode(PowerNodeId),
+    DuplicateInfluence { actor: ActorId, node: PowerNodeId },
+    UnknownCountry(CountryId),
+    UnknownRegion(RegionId),
+    UnknownActor(ActorId),
+    UnknownPowerNode(PowerNodeId),
+    EmptyName(&'static str),
     Time(TimeError),
 }
 
@@ -45,7 +272,20 @@ impl fmt::Display for WorldError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
-            Self::EmptyCountryName => formatter.write_str("country name cannot be empty"),
+            Self::DuplicateRegion(id) => write!(formatter, "region {id} already exists"),
+            Self::DuplicateActor(id) => write!(formatter, "actor {id} already exists"),
+            Self::DuplicatePowerNode(id) => write!(formatter, "power node {id} already exists"),
+            Self::DuplicateInfluence { actor, node } => {
+                write!(
+                    formatter,
+                    "influence from actor {actor} to node {node} already exists"
+                )
+            }
+            Self::UnknownCountry(id) => write!(formatter, "unknown country {id}"),
+            Self::UnknownRegion(id) => write!(formatter, "unknown region {id}"),
+            Self::UnknownActor(id) => write!(formatter, "unknown actor {id}"),
+            Self::UnknownPowerNode(id) => write!(formatter, "unknown power node {id}"),
+            Self::EmptyName(kind) => write!(formatter, "{kind} name cannot be empty"),
             Self::Time(error) => error.fmt(formatter),
         }
     }
@@ -64,6 +304,10 @@ pub struct World {
     seed: WorldSeed,
     date: SimDate,
     countries: BTreeMap<CountryId, Country>,
+    regions: BTreeMap<RegionId, Region>,
+    actors: BTreeMap<ActorId, Actor>,
+    power_nodes: BTreeMap<PowerNodeId, PowerNode>,
+    influences: BTreeMap<(ActorId, PowerNodeId), Influence>,
     events: EventLog,
 }
 
@@ -77,6 +321,10 @@ impl World {
             seed,
             date: start_date,
             countries: BTreeMap::new(),
+            regions: BTreeMap::new(),
+            actors: BTreeMap::new(),
+            power_nodes: BTreeMap::new(),
+            influences: BTreeMap::new(),
             events,
         }
     }
@@ -98,6 +346,114 @@ impl World {
             },
         );
         self.countries.insert(country.id(), country);
+        Ok(())
+    }
+
+    /// Adds a region after validating its country reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns a duplicate or unknown-reference [`WorldError`] when validation fails.
+    pub fn register_region(&mut self, region: Region) -> Result<(), WorldError> {
+        if self.regions.contains_key(&region.id()) {
+            return Err(WorldError::DuplicateRegion(region.id()));
+        }
+        if !self.countries.contains_key(&region.country()) {
+            return Err(WorldError::UnknownCountry(region.country()));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::RegionRegistered {
+                region: region.id(),
+                country: region.country(),
+                name: region.name().to_owned(),
+            },
+        );
+        self.regions.insert(region.id(), region);
+        Ok(())
+    }
+
+    /// Adds a named actor after validating the home region.
+    ///
+    /// # Errors
+    ///
+    /// Returns a duplicate or unknown-reference [`WorldError`] when validation fails.
+    pub fn register_actor(&mut self, actor: Actor) -> Result<(), WorldError> {
+        if self.actors.contains_key(&actor.id()) {
+            return Err(WorldError::DuplicateActor(actor.id()));
+        }
+        if !self.regions.contains_key(&actor.home_region()) {
+            return Err(WorldError::UnknownRegion(actor.home_region()));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::ActorRegistered {
+                actor: actor.id(),
+                home_region: actor.home_region(),
+                name: actor.name().to_owned(),
+            },
+        );
+        self.actors.insert(actor.id(), actor);
+        Ok(())
+    }
+
+    /// Adds a power node after validating country and optional holder references.
+    ///
+    /// # Errors
+    ///
+    /// Returns a duplicate or unknown-reference [`WorldError`] when validation fails.
+    pub fn register_power_node(&mut self, node: PowerNode) -> Result<(), WorldError> {
+        if self.power_nodes.contains_key(&node.id()) {
+            return Err(WorldError::DuplicatePowerNode(node.id()));
+        }
+        if !self.countries.contains_key(&node.country()) {
+            return Err(WorldError::UnknownCountry(node.country()));
+        }
+        if let Some(holder) = node.holder() {
+            if !self.actors.contains_key(&holder) {
+                return Err(WorldError::UnknownActor(holder));
+            }
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::PowerNodeRegistered {
+                node: node.id(),
+                country: node.country(),
+                name: node.name().to_owned(),
+            },
+        );
+        self.power_nodes.insert(node.id(), node);
+        Ok(())
+    }
+
+    /// Adds one weighted actor-to-node relationship.
+    ///
+    /// # Errors
+    ///
+    /// Returns a duplicate or unknown-reference [`WorldError`] when validation fails.
+    pub fn establish_influence(&mut self, influence: Influence) -> Result<(), WorldError> {
+        let key = (influence.actor(), influence.node());
+        if self.influences.contains_key(&key) {
+            return Err(WorldError::DuplicateInfluence {
+                actor: influence.actor(),
+                node: influence.node(),
+            });
+        }
+        if !self.actors.contains_key(&influence.actor()) {
+            return Err(WorldError::UnknownActor(influence.actor()));
+        }
+        if !self.power_nodes.contains_key(&influence.node()) {
+            return Err(WorldError::UnknownPowerNode(influence.node()));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::InfluenceEstablished {
+                actor: influence.actor(),
+                node: influence.node(),
+                weight: influence.weight(),
+            },
+        );
+        self.influences.insert(key, influence);
         Ok(())
     }
 
@@ -135,6 +491,26 @@ impl World {
     }
 
     #[must_use]
+    pub fn regions(&self) -> &BTreeMap<RegionId, Region> {
+        &self.regions
+    }
+
+    #[must_use]
+    pub fn actors(&self) -> &BTreeMap<ActorId, Actor> {
+        &self.actors
+    }
+
+    #[must_use]
+    pub fn power_nodes(&self) -> &BTreeMap<PowerNodeId, PowerNode> {
+        &self.power_nodes
+    }
+
+    #[must_use]
+    pub fn influences(&self) -> &BTreeMap<(ActorId, PowerNodeId), Influence> {
+        &self.influences
+    }
+
+    #[must_use]
     pub const fn events(&self) -> &EventLog {
         &self.events
     }
@@ -148,10 +524,47 @@ impl World {
         hash.write_u16(self.date.day_of_year());
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {
-            hash.write_u64(id.get());
+            hash.write_u32(id.get());
             hash.write_str(country.name());
         }
+        hash.write_u64(self.regions.len() as u64);
+        for (id, region) in &self.regions {
+            hash.write_u32(id.get());
+            hash.write_u32(region.country().get());
+            hash.write_str(region.name());
+            hash.write_u64(region.population().people());
+            hash.write_i64(region.annual_output().minor_units());
+        }
+        hash.write_u64(self.actors.len() as u64);
+        for (id, actor) in &self.actors {
+            hash.write_u32(id.get());
+            hash.write_str(actor.name());
+            hash.write_u32(actor.home_region().get());
+            hash.write_i32(actor.born_year());
+        }
+        hash.write_u64(self.power_nodes.len() as u64);
+        for (id, node) in &self.power_nodes {
+            hash.write_u32(id.get());
+            hash.write_u32(node.country().get());
+            hash.write_str(node.name());
+            hash.write_u8(node.kind().fingerprint_tag());
+            hash.write_u32(node.holder().map_or(0, ActorId::get));
+        }
+        hash.write_u64(self.influences.len() as u64);
+        for ((actor, node), influence) in &self.influences {
+            hash.write_u32(actor.get());
+            hash.write_u32(node.get());
+            hash.write_u16(influence.weight().get());
+        }
         hash.finish()
+    }
+}
+
+fn validated_name(kind: &'static str, name: String) -> Result<String, WorldError> {
+    if name.trim().is_empty() {
+        Err(WorldError::EmptyName(kind))
+    } else {
+        Ok(name)
     }
 }
 
@@ -173,6 +586,10 @@ impl StableHasher {
         }
     }
 
+    fn write_u8(&mut self, value: u8) {
+        self.write(&value.to_le_bytes());
+    }
+
     fn write_u16(&mut self, value: u16) {
         self.write(&value.to_le_bytes());
     }
@@ -182,6 +599,10 @@ impl StableHasher {
     }
 
     fn write_i32(&mut self, value: i32) {
+        self.write(&value.to_le_bytes());
+    }
+
+    fn write_i64(&mut self, value: i64) {
         self.write(&value.to_le_bytes());
     }
 
@@ -203,8 +624,34 @@ impl StableHasher {
 mod tests {
     use super::*;
 
+    fn country(id: u32, name: &str) -> Country {
+        Country::new(CountryId::new(id), name).expect("valid country")
+    }
+
     #[test]
-    fn country_order_does_not_change_fingerprint() {
+    fn invalid_reference_does_not_emit_an_event() {
+        let mut world = World::new(
+            WorldSeed::new(1),
+            SimDate::new(2025, 1).expect("valid date"),
+        );
+        let before = world.events().len();
+        let region = Region::new(
+            RegionId::new(1),
+            CountryId::new(99),
+            "Nowhere",
+            Population::new(1),
+            Money::from_minor_units(1),
+        )
+        .expect("valid region values");
+        assert_eq!(
+            world.register_region(region),
+            Err(WorldError::UnknownCountry(CountryId::new(99)))
+        );
+        assert_eq!(world.events().len(), before);
+    }
+
+    #[test]
+    fn canonical_storage_ignores_country_insertion_order() {
         let build = |reverse: bool| {
             let mut world = World::new(
                 WorldSeed::new(1),
@@ -217,14 +664,11 @@ mod tests {
             };
             for (id, name) in countries {
                 world
-                    .register_country(
-                        Country::new(CountryId::new(id), name).expect("valid country"),
-                    )
+                    .register_country(country(id, name))
                     .expect("unique country");
             }
             world
         };
-
         assert_eq!(
             build(false).stable_fingerprint(),
             build(true).stable_fingerprint()
@@ -232,19 +676,51 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_country_is_rejected_without_an_event() {
+    fn complete_power_graph_is_validated() {
         let mut world = World::new(
             WorldSeed::new(1),
             SimDate::new(2025, 1).expect("valid date"),
         );
+        world.register_country(country(1, "A")).expect("country");
         world
-            .register_country(Country::new(CountryId::new(1), "A").expect("valid country"))
-            .expect("first insert succeeds");
-        let event_count = world.events().len();
-        let error = world
-            .register_country(Country::new(CountryId::new(1), "B").expect("valid country"))
-            .expect_err("duplicate must fail");
-        assert_eq!(error, WorldError::DuplicateCountry(CountryId::new(1)));
-        assert_eq!(world.events().len(), event_count);
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Capital",
+                    Population::new(100),
+                    Money::from_minor_units(1_000),
+                )
+                .expect("region"),
+            )
+            .expect("region reference");
+        world
+            .register_actor(
+                Actor::new(ActorId::new(1), "Ada", RegionId::new(1), 1980).expect("actor"),
+            )
+            .expect("actor reference");
+        world
+            .register_power_node(
+                PowerNode::new(
+                    PowerNodeId::new(1),
+                    CountryId::new(1),
+                    "Presidency",
+                    PowerNodeKind::PoliticalOffice,
+                    Some(ActorId::new(1)),
+                )
+                .expect("node"),
+            )
+            .expect("node references");
+        world
+            .establish_influence(Influence::new(
+                ActorId::new(1),
+                PowerNodeId::new(1),
+                BasisPoints::new(7_500).expect("weight"),
+            ))
+            .expect("influence references");
+        assert_eq!(world.regions().len(), 1);
+        assert_eq!(world.actors().len(), 1);
+        assert_eq!(world.power_nodes().len(), 1);
+        assert_eq!(world.influences().len(), 1);
     }
 }

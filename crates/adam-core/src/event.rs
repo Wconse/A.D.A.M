@@ -1,10 +1,37 @@
-use crate::{CountryId, SimDate};
+use crate::{ActorId, BasisPoints, CountryId, PowerNodeId, RegionId, SimDate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainEvent {
-    WorldFounded { seed: u64 },
-    CountryRegistered { country: CountryId, name: String },
-    YearAdvanced { year: i32 },
+    WorldFounded {
+        seed: u64,
+    },
+    CountryRegistered {
+        country: CountryId,
+        name: String,
+    },
+    RegionRegistered {
+        region: RegionId,
+        country: CountryId,
+        name: String,
+    },
+    ActorRegistered {
+        actor: ActorId,
+        home_region: RegionId,
+        name: String,
+    },
+    PowerNodeRegistered {
+        node: PowerNodeId,
+        country: CountryId,
+        name: String,
+    },
+    InfluenceEstablished {
+        actor: ActorId,
+        node: PowerNodeId,
+        weight: BasisPoints,
+    },
+    YearAdvanced {
+        year: i32,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -3,16 +3,16 @@ use core::fmt;
 macro_rules! typed_id {
     ($name:ident) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(u64);
+        pub struct $name(u32);
 
         impl $name {
             #[must_use]
-            pub const fn new(value: u64) -> Self {
+            pub const fn new(value: u32) -> Self {
                 Self(value)
             }
 
             #[must_use]
-            pub const fn get(self) -> u64 {
+            pub const fn get(self) -> u32 {
                 self.0
             }
         }
@@ -26,7 +26,9 @@ macro_rules! typed_id {
 }
 
 typed_id!(CountryId);
+typed_id!(RegionId);
 typed_id!(ActorId);
+typed_id!(PowerNodeId);
 
 #[cfg(test)]
 mod tests {
@@ -38,5 +40,13 @@ mod tests {
         let actor = ActorId::new(7);
         assert_eq!(country.get(), actor.get());
         assert_eq!(country.to_string(), "7");
+    }
+
+    #[test]
+    fn ids_have_stable_compact_layout() {
+        assert_eq!(size_of::<CountryId>(), size_of::<u32>());
+        assert_eq!(size_of::<RegionId>(), size_of::<u32>());
+        assert_eq!(size_of::<ActorId>(), size_of::<u32>());
+        assert_eq!(size_of::<PowerNodeId>(), size_of::<u32>());
     }
 }

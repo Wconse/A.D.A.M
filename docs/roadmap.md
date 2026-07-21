@@ -10,8 +10,9 @@
 ## Slice 1 — Minimal world
 
 - [x] Load three fictional countries from versioned data.
-- [ ] Add regions, named elite actors, offices, and influence links.
-- [x] Validate schema, required content, and country identity references at load time.
+- [x] Add regions, named elite actors, typed power nodes, and influence links.
+- [x] Validate schema, canonical values, and all cross-references at load time.
+- [x] Record an initial 100k-actor/100k-edge construction baseline.
 
 ## Slice 2 — Causal yearly loop
 
