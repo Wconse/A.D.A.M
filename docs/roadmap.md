@@ -129,7 +129,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - ✅ Strict mod manifests, namespaced identities, dependencies, load hints, deterministic ordering, and diagnostics foundation.
 - ✅ Generic layered namespaced registry with provenance and explicit set/remove/append patch operations.
 - ⬜ Typed registries, schema-aware patch validation, and cross-reference validation after merge.
-- ⬜ Conflict reports, content hashes in saves/replays, compatibility ranges, and migrations.
+- 🟡 Per-entry change provenance and canonical merged-content fingerprint are implemented; save/replay embedding, conflict reports, compatibility ranges, and migrations remain.
 - ⬜ Standalone `validate-mod` command and authoring schemas.
 - ⬜ Declarative conditions, formulas, effects, and AI weights.
 - ⬜ Sandboxed deterministic WebAssembly extension API after the core stabilizes.
@@ -160,6 +160,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.
+- Added per-entry patch history and an insertion-order-independent canonical fingerprint for merged mod content.
 
 ## Progress update rule
 

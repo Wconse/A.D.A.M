@@ -17,3 +17,4 @@ All notable project changes are documented here. The format follows Keep a Chang
 - Added world schema v3 household cohorts and deterministic regional population accounting.
 - Added world schema v4 goods, need hierarchies, regional prices, and household demand planning.
 - Added deterministic firm production planning constrained by labor, capital capacity, and intermediate inventories.
+- Added deterministic mod manifests, layered content patches, provenance history, and canonical merged-content fingerprints.
