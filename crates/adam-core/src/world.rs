@@ -383,6 +383,10 @@ pub enum WorldError {
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
     UnknownBoardResolution(ResolutionId),
+    MissingBoardMandate(ResolutionId),
+    BoardResolutionNotApproved(ResolutionId),
+    BoardResolutionAlreadyExecuted(ResolutionId),
+    InvalidBoardExecution(&'static str),
     UnauthorizedBoardAction(ActorId),
     InvalidBoardVote(&'static str),
     UnauthorizedFirmControl {
@@ -455,6 +459,18 @@ impl fmt::Display for WorldError {
             }
             Self::MissingFirmPolicy(firm) => write!(formatter, "firm {firm} has no policy"),
             Self::UnknownBoardResolution(id) => write!(formatter, "unknown board resolution {id}"),
+            Self::MissingBoardMandate(id) => {
+                write!(formatter, "board resolution {id} has no executable mandate")
+            }
+            Self::BoardResolutionNotApproved(id) => {
+                write!(formatter, "board resolution {id} is not approved")
+            }
+            Self::BoardResolutionAlreadyExecuted(id) => {
+                write!(formatter, "board resolution {id} was already executed")
+            }
+            Self::InvalidBoardExecution(reason) => {
+                write!(formatter, "invalid board execution: {reason}")
+            }
             Self::UnauthorizedBoardAction(actor) => {
                 write!(formatter, "actor {actor} cannot act on this board")
             }
@@ -726,6 +742,30 @@ impl World {
                 ResolutionStatus::Approved => 2,
                 ResolutionStatus::Rejected => 3,
             });
+            hash.write_u8(u8::from(resolution.executed()));
+            match resolution.mandate() {
+                None => hash.write_u8(0),
+                Some(crate::BoardMandate::AppointExecutive { actor, role }) => {
+                    hash.write_u8(1);
+                    hash.write_u32(actor.get());
+                    hash.write_u8(match role {
+                        CorporateRole::BoardDirector => 1,
+                        CorporateRole::ChiefExecutive => 2,
+                        CorporateRole::OperationsManager => 3,
+                        CorporateRole::MarketingManager => 4,
+                    });
+                }
+                Some(crate::BoardMandate::RemoveExecutive { actor, role }) => {
+                    hash.write_u8(2);
+                    hash.write_u32(actor.get());
+                    hash.write_u8(match role {
+                        CorporateRole::BoardDirector => 1,
+                        CorporateRole::ChiefExecutive => 2,
+                        CorporateRole::OperationsManager => 3,
+                        CorporateRole::MarketingManager => 4,
+                    });
+                }
+            }
             hash.write_u64(resolution.votes().len() as u64);
             for (actor, vote) in resolution.votes() {
                 hash.write_u32(actor.get());

@@ -5,6 +5,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
     ProposeBoardResolution(BoardResolution),
+    ExecuteBoardResolution(ResolutionId),
     CastBoardVote {
         resolution: ResolutionId,
         actor: ActorId,
@@ -39,6 +40,7 @@ impl WorldCommand {
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
             Self::ProposeBoardResolution(value) => world.propose_board_resolution(value.clone()),
+            Self::ExecuteBoardResolution(id) => world.execute_board_resolution(*id),
             Self::CastBoardVote {
                 resolution,
                 actor,

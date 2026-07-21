@@ -15,6 +15,11 @@ pub enum ResolutionStatus {
     Approved,
     Rejected,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum BoardMandate {
+    AppointExecutive { actor: ActorId, role: CorporateRole },
+    RemoveExecutive { actor: ActorId, role: CorporateRole },
+}
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BoardResolution {
     id: ResolutionId,
@@ -23,6 +28,8 @@ pub struct BoardResolution {
     proposer: ActorId,
     votes: BTreeMap<ActorId, BoardVote>,
     status: ResolutionStatus,
+    mandate: Option<BoardMandate>,
+    executed: bool,
 }
 impl BoardResolution {
     #[must_use]
@@ -39,7 +46,25 @@ impl BoardResolution {
             proposer,
             votes: BTreeMap::new(),
             status: ResolutionStatus::Open,
+            mandate: None,
+            executed: false,
         }
+    }
+    #[must_use]
+    pub const fn with_mandate(mut self, mandate: BoardMandate) -> Self {
+        self.mandate = Some(mandate);
+        self
+    }
+    #[must_use]
+    pub const fn mandate(&self) -> Option<BoardMandate> {
+        self.mandate
+    }
+    #[must_use]
+    pub const fn executed(&self) -> bool {
+        self.executed
+    }
+    fn mark_executed(&mut self) {
+        self.executed = true;
     }
     #[must_use]
     pub const fn id(&self) -> ResolutionId {
@@ -209,6 +234,50 @@ impl World {
             },
         );
         Ok(status)
+    }
+    /// Executes an approved, unexecuted personnel mandate exactly once.
+    /// # Errors
+    /// Returns a structured error without mutation when status, mandate, or appointment is invalid.
+    pub fn execute_board_resolution(&mut self, id: ResolutionId) -> Result<(), WorldError> {
+        let resolution = self
+            .board_resolutions
+            .get(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?;
+        if resolution.status() != ResolutionStatus::Approved {
+            return Err(WorldError::BoardResolutionNotApproved(id));
+        }
+        if resolution.executed() {
+            return Err(WorldError::BoardResolutionAlreadyExecuted(id));
+        }
+        let firm = resolution.firm();
+        let mandate = resolution
+            .mandate()
+            .ok_or(WorldError::MissingBoardMandate(id))?;
+        match mandate {
+            BoardMandate::AppointExecutive { actor, role } => {
+                self.register_firm_appointment(crate::FirmAppointment::new(firm, actor, role))?;
+            }
+            BoardMandate::RemoveExecutive { actor, role } => {
+                if self
+                    .firm_appointments
+                    .remove(&(firm, actor, role))
+                    .is_none()
+                {
+                    return Err(WorldError::InvalidBoardExecution(
+                        "appointment does not exist",
+                    ));
+                }
+            }
+        }
+        self.board_resolutions
+            .get_mut(&id)
+            .ok_or(WorldError::UnknownBoardResolution(id))?
+            .mark_executed();
+        self.events.append(
+            self.date,
+            DomainEvent::BoardResolutionExecuted { resolution: id },
+        );
+        Ok(())
     }
     #[must_use]
     pub fn board_resolutions(&self) -> &BTreeMap<ResolutionId, BoardResolution> {

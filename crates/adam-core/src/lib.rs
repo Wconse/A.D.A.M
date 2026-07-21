@@ -14,7 +14,7 @@ pub mod time;
 pub mod value;
 pub mod world;
 
-pub use board::{BoardResolution, BoardVote, ResolutionStatus};
+pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{AgeBand, EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType};
 pub use command::{WorldCommand, replay_commands};

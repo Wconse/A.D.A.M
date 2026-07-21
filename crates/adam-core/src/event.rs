@@ -18,6 +18,9 @@ pub enum DomainEvent {
         actor: ActorId,
         vote: BoardVote,
     },
+    BoardResolutionExecuted {
+        resolution: ResolutionId,
+    },
     BoardResolutionClosed {
         resolution: ResolutionId,
         status: ResolutionStatus,

@@ -162,6 +162,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Replaced universal corporate control with an action-specific owner/executive/manager/board authority matrix.
 - Added replayable marketing and inventory commands with field-level immutable policy updates.
 - Added deterministic board resolutions with director eligibility, quorum, voting thresholds, and closure.
+- Integrated typed board appointment/removal mandates, one-time execution, events, commands, save/replay, and fingerprinting.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.
