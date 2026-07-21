@@ -1,7 +1,12 @@
-use crate::{World, WorldError};
+use crate::{ActorId, FirmId, FirmPolicy, World, WorldError};
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
     AdvanceYears(u32),
+    SetFirmPolicy {
+        actor: ActorId,
+        firm: FirmId,
+        policy: FirmPolicy,
+    },
 }
 impl WorldCommand {
     /// Applies the same deterministic command regardless of player or AI origin.
@@ -10,6 +15,11 @@ impl WorldCommand {
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
             Self::AdvanceYears(years) => world.advance_years(*years),
+            Self::SetFirmPolicy {
+                actor,
+                firm,
+                policy,
+            } => world.set_firm_policy(*actor, *firm, *policy),
         }
     }
 }

@@ -3,8 +3,8 @@ use std::fmt;
 
 use crate::{
     ActorId, BasisPoints, CohortId, ConsumptionProfile, CountryId, DomainEvent, EventLog, Firm,
-    FirmId, Good, GoodId, HouseholdCohort, Money, NeedProfileId, Population, PowerNodeId,
-    ProductionRecipe, RecipeId, RegionId, SimDate, TimeError, WorldSeed,
+    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money, NeedProfileId, OwnershipStake,
+    Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -344,6 +344,11 @@ pub enum WorldError {
     DuplicateCountry(CountryId),
     DuplicateGood(GoodId),
     DuplicateFirm(FirmId),
+    DuplicateOwnershipStake {
+        firm: FirmId,
+        owner: ActorId,
+    },
+    OwnershipExceedsFull(FirmId),
     DuplicateRecipe(RecipeId),
     DuplicateNeedProfile(NeedProfileId),
     DuplicateCohort(CohortId),
@@ -356,6 +361,7 @@ pub enum WorldError {
     },
     UnknownCountry(CountryId),
     UnknownGood(GoodId),
+    UnknownFirm(FirmId),
     UnknownRecipe(RecipeId),
     UnknownNeedProfile(NeedProfileId),
     MissingRegionalPrice {
@@ -371,6 +377,10 @@ pub enum WorldError {
     InvalidPrice,
     InvalidProduction(&'static str),
     InvalidBusinessPolicy(&'static str),
+    UnauthorizedFirmControl {
+        actor: ActorId,
+        firm: FirmId,
+    },
     PopulationAccounting {
         region: RegionId,
         region_population: Population,
@@ -386,6 +396,13 @@ impl fmt::Display for WorldError {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
             Self::DuplicateGood(id) => write!(formatter, "good {id} already exists"),
             Self::DuplicateFirm(id) => write!(formatter, "firm {id} already exists"),
+            Self::DuplicateOwnershipStake { firm, owner } => write!(
+                formatter,
+                "actor {owner} already has an ownership stake in firm {firm}"
+            ),
+            Self::OwnershipExceedsFull(firm) => {
+                write!(formatter, "ownership rights exceed 100% for firm {firm}")
+            }
             Self::DuplicateRecipe(id) => write!(formatter, "production recipe {id} already exists"),
             Self::DuplicateNeedProfile(id) => write!(formatter, "need profile {id} already exists"),
             Self::DuplicateCohort(id) => write!(formatter, "cohort {id} already exists"),
@@ -400,6 +417,7 @@ impl fmt::Display for WorldError {
             }
             Self::UnknownCountry(id) => write!(formatter, "unknown country {id}"),
             Self::UnknownGood(id) => write!(formatter, "unknown good {id}"),
+            Self::UnknownFirm(id) => write!(formatter, "unknown firm {id}"),
             Self::UnknownRecipe(id) => write!(formatter, "unknown production recipe {id}"),
             Self::UnknownNeedProfile(id) => write!(formatter, "unknown need profile {id}"),
             Self::MissingRegionalPrice { region, good } => write!(
@@ -420,6 +438,9 @@ impl fmt::Display for WorldError {
             }
             Self::InvalidBusinessPolicy(reason) => {
                 write!(formatter, "invalid business policy: {reason}")
+            }
+            Self::UnauthorizedFirmControl { actor, firm } => {
+                write!(formatter, "actor {actor} cannot control firm {firm}")
             }
             Self::PopulationAccounting {
                 region,
@@ -454,6 +475,8 @@ pub struct World {
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
+    pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
+    pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -477,6 +500,8 @@ impl World {
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
+            ownership_stakes: BTreeMap::new(),
+            firm_policies: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -701,6 +726,22 @@ impl World {
             hash.write_str(good.name());
         }
         self.write_production_fingerprint(&mut hash);
+        hash.write_u64(self.ownership_stakes.len() as u64);
+        for ((firm, owner), stake) in &self.ownership_stakes {
+            hash.write_u32(firm.get());
+            hash.write_u32(owner.get());
+            hash.write_u16(stake.economic_rights().get());
+            hash.write_u16(stake.voting_rights().get());
+        }
+        hash.write_u64(self.firm_policies.len() as u64);
+        for (firm, policy) in &self.firm_policies {
+            hash.write_u32(firm.get());
+            hash.write_u16(policy.inventory_buffer_days());
+            hash.write_u16(policy.price_markup().get());
+            hash.write_u16(policy.marketing_budget().get());
+            hash.write_u16(policy.reinvestment().get());
+            hash.write_u16(policy.dividend().get());
+        }
         hash.write_u64(self.consumption_profiles.len() as u64);
         for (id, profile) in &self.consumption_profiles {
             hash.write_u32(id.get());
