@@ -3,13 +3,14 @@
 use std::fmt;
 
 use adam_core::{
-    Actor, ActorId, BasisPoints, Country, CountryId, CountryIndicators, Influence, Money,
-    Population, PowerNode, PowerNodeId, PowerNodeKind, Region, RegionId, SimDate, TimeError,
-    ValueError, World, WorldError, WorldSeed,
+    Actor, ActorId, AgeBand, BasisPoints, CohortId, Country, CountryId, CountryIndicators,
+    EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType, Influence, Money, Population,
+    PowerNode, PowerNodeId, PowerNodeKind, Region, RegionId, SimDate, TimeError, ValueError, World,
+    WorldError, WorldSeed,
 };
 use serde::Deserialize;
 
-pub const WORLD_SCHEMA_VERSION: u32 = 2;
+pub const WORLD_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorldBlueprint {
@@ -17,6 +18,7 @@ pub struct WorldBlueprint {
     start_year: i32,
     countries: Vec<Country>,
     regions: Vec<Region>,
+    cohorts: Vec<HouseholdCohort>,
     actors: Vec<Actor>,
     power_nodes: Vec<PowerNode>,
     influences: Vec<Influence>,
@@ -37,6 +39,7 @@ impl WorldBlueprint {
             start_year: raw.start_year,
             countries: parse_countries(raw.countries)?,
             regions: parse_regions(raw.regions)?,
+            cohorts: parse_cohorts(raw.cohorts)?,
             actors: parse_actors(raw.actors, raw.start_year)?,
             power_nodes: parse_power_nodes(raw.power_nodes)?,
             influences: parse_influences(raw.influences)?,
@@ -64,6 +67,14 @@ impl WorldBlueprint {
                 .register_region(region.clone())
                 .map_err(ContentError::Domain)?;
         }
+        for cohort in &self.cohorts {
+            world
+                .register_household_cohort(cohort.clone())
+                .map_err(ContentError::Domain)?;
+        }
+        world
+            .validate_population_accounting()
+            .map_err(ContentError::Domain)?;
         for actor in &self.actors {
             world
                 .register_actor(actor.clone())
@@ -100,6 +111,10 @@ impl WorldBlueprint {
     #[must_use]
     pub fn regions(&self) -> &[Region] {
         &self.regions
+    }
+    #[must_use]
+    pub fn cohorts(&self) -> &[HouseholdCohort] {
+        &self.cohorts
     }
 
     #[must_use]
@@ -180,6 +195,27 @@ fn parse_regions(raw: Vec<RawRegion>) -> Result<Vec<Region>, ContentError> {
                 region.name,
                 Population::new(region.population),
                 Money::from_minor_units(region.annual_output_minor),
+            )
+            .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_cohorts(raw: Vec<RawCohort>) -> Result<Vec<HouseholdCohort>, ContentError> {
+    raw.into_iter()
+        .map(|cohort| {
+            HouseholdCohort::new(
+                CohortId::new(non_zero_id("cohort", cohort.id)?),
+                RegionId::new(non_zero_id("cohort region", cohort.region_id)?),
+                Population::new(cohort.people),
+                cohort.households,
+                cohort.age_band.into(),
+                cohort.household_type.into(),
+                cohort.education.into(),
+                cohort.employment.into(),
+                Money::from_minor_units(cohort.annual_income_minor),
+                Money::from_minor_units(cohort.liquid_wealth_minor),
+                Money::from_minor_units(cohort.debt_minor),
             )
             .map_err(ContentError::Domain)
         })
@@ -361,6 +397,8 @@ struct RawWorld {
     #[serde(default)]
     regions: Vec<RawRegion>,
     #[serde(default)]
+    cohorts: Vec<RawCohort>,
+    #[serde(default)]
     actors: Vec<RawActor>,
     #[serde(default)]
     power_nodes: Vec<RawPowerNode>,
@@ -387,6 +425,104 @@ struct RawRegion {
     name: String,
     population: u64,
     annual_output_minor: i64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawAgeBand {
+    Child,
+    Youth,
+    Adult,
+    Mature,
+    Senior,
+}
+impl From<RawAgeBand> for AgeBand {
+    fn from(value: RawAgeBand) -> Self {
+        match value {
+            RawAgeBand::Child => Self::Child,
+            RawAgeBand::Youth => Self::Youth,
+            RawAgeBand::Adult => Self::Adult,
+            RawAgeBand::Mature => Self::Mature,
+            RawAgeBand::Senior => Self::Senior,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawHouseholdType {
+    FamilyWithChildren,
+    WorkingAge,
+    Multigenerational,
+    Retired,
+}
+impl From<RawHouseholdType> for HouseholdType {
+    fn from(value: RawHouseholdType) -> Self {
+        match value {
+            RawHouseholdType::FamilyWithChildren => Self::FamilyWithChildren,
+            RawHouseholdType::WorkingAge => Self::WorkingAge,
+            RawHouseholdType::Multigenerational => Self::Multigenerational,
+            RawHouseholdType::Retired => Self::Retired,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawEducationLevel {
+    None,
+    Basic,
+    Secondary,
+    Vocational,
+    Tertiary,
+}
+impl From<RawEducationLevel> for EducationLevel {
+    fn from(value: RawEducationLevel) -> Self {
+        match value {
+            RawEducationLevel::None => Self::None,
+            RawEducationLevel::Basic => Self::Basic,
+            RawEducationLevel::Secondary => Self::Secondary,
+            RawEducationLevel::Vocational => Self::Vocational,
+            RawEducationLevel::Tertiary => Self::Tertiary,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawEmploymentStatus {
+    Dependent,
+    Employed,
+    Unemployed,
+    Inactive,
+    Retired,
+}
+impl From<RawEmploymentStatus> for EmploymentStatus {
+    fn from(value: RawEmploymentStatus) -> Self {
+        match value {
+            RawEmploymentStatus::Dependent => Self::Dependent,
+            RawEmploymentStatus::Employed => Self::Employed,
+            RawEmploymentStatus::Unemployed => Self::Unemployed,
+            RawEmploymentStatus::Inactive => Self::Inactive,
+            RawEmploymentStatus::Retired => Self::Retired,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCohort {
+    id: u32,
+    region_id: u32,
+    people: u64,
+    households: u64,
+    age_band: RawAgeBand,
+    household_type: RawHouseholdType,
+    education: RawEducationLevel,
+    employment: RawEmploymentStatus,
+    annual_income_minor: i64,
+    liquid_wealth_minor: i64,
+    debt_minor: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -443,7 +579,7 @@ mod tests {
     use super::*;
 
     const VALID: &str = r#"
-schema_version = 2
+schema_version = 3
 world_name = "Test World"
 start_year = 2025
 
@@ -461,6 +597,19 @@ country_id = 1
 name = "Aster Capital"
 population = 1000000
 annual_output_minor = 5000000000
+
+[[cohorts]]
+id = 10000
+region_id = 10
+people = 1000000
+households = 400000
+age_band = "adult"
+household_type = "working_age"
+education = "secondary"
+employment = "employed"
+annual_income_minor = 300000000000
+liquid_wealth_minor = 100000000000
+debt_minor = 50000000000
 
 [[actors]]
 id = 100
@@ -492,6 +641,7 @@ weight_bps = 8000
             .expect("world builds");
         assert_eq!(first, second);
         assert_eq!(blueprint.regions().len(), 1);
+        assert_eq!(blueprint.cohorts().len(), 1);
         assert_eq!(blueprint.actors().len(), 1);
         assert_eq!(blueprint.power_nodes().len(), 1);
         assert_eq!(blueprint.influences().len(), 1);
@@ -499,13 +649,13 @@ weight_bps = 8000
 
     #[test]
     fn unsupported_schema_is_explicit() {
-        let source = VALID.replace("schema_version = 2", "schema_version = 3");
+        let source = VALID.replace("schema_version = 3", "schema_version = 4");
         let error = WorldBlueprint::parse_toml(&source).expect_err("schema must fail");
         assert!(matches!(
             error,
             ContentError::UnsupportedSchema {
-                expected: 2,
-                actual: 3
+                expected: 3,
+                actual: 4
             }
         ));
     }

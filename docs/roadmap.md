@@ -29,10 +29,12 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 ### 0.4 Demographic cohorts and households — ⬜ NEXT
 
-- ⬜ Adaptive cohort identity and split/merge rules.
+- ✅ Data-driven household cohort identity, dimensions, and regional population accounting.
+- ✅ Deterministic largest-remainder rescaling while the aggregate demographic harness remains.
+- ⬜ Adaptive cohort split/merge rules with conserved stocks.
 - ⬜ Age progression, births, deaths, household formation, health.
 - ⬜ Education and qualification pipelines.
-- ⬜ Income, wealth, debt, housing, and household budgets.
+- 🟡 Income, liquid wealth, debt, and household counts are represented; monthly budget flows and housing remain planned.
 - 🔬 Cohort compression accuracy and scale benchmark.
 
 ### 0.5 Needs and consumption — ⬜
@@ -126,6 +128,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added and verified the atomic annual causal harness.
 - Selected hybrid reputation model B+C.
 - Documented material/institutional/social/information layers, propaganda, ideology, regimes, and depth criteria.
+- Added schema-v3 household cohorts with age, household, education, employment, income, wealth, debt, and exact regional accounting.
 
 ## Progress update rule
 

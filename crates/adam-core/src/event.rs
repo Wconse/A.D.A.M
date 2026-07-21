@@ -1,5 +1,6 @@
 use crate::{
-    ActorId, BasisPoints, CountryId, Money, Population, PowerNodeId, RatePpm, RegionId, SimDate,
+    ActorId, BasisPoints, CohortId, CountryId, Money, Population, PowerNodeId, RatePpm, RegionId,
+    SimDate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,6 +31,15 @@ pub enum DomainEvent {
         actor: ActorId,
         node: PowerNodeId,
         weight: BasisPoints,
+    },
+    HouseholdCohortRegistered {
+        cohort: CohortId,
+        region: RegionId,
+        people: Population,
+    },
+    HouseholdCohortPopulationChanged {
+        cohort: CohortId,
+        people: Population,
     },
     RegionPopulationChanged {
         region: RegionId,

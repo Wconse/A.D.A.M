@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 world_name = "Parallel Twenty-First Century"
 start_year = 2025
 
@@ -46,6 +46,201 @@ country_id = 3
 name = "Cyrene Coastal Corridor"
 population = 8900000
 annual_output_minor = 36700000000000
+
+[[cohorts]]
+id = 10101
+region_id = 101
+people = 1200000
+households = 430000
+age_band = "child"
+household_type = "family_with_children"
+education = "basic"
+employment = "dependent"
+annual_income_minor = 0
+liquid_wealth_minor = 120000000000
+debt_minor = 0
+
+[[cohorts]]
+id = 10102
+region_id = 101
+people = 900000
+households = 420000
+age_band = "youth"
+household_type = "working_age"
+education = "secondary"
+employment = "inactive"
+annual_income_minor = 900000000000
+liquid_wealth_minor = 210000000000
+debt_minor = 80000000000
+
+[[cohorts]]
+id = 10103
+region_id = 101
+people = 2200000
+households = 980000
+age_band = "adult"
+household_type = "family_with_children"
+education = "tertiary"
+employment = "employed"
+annual_income_minor = 8800000000000
+liquid_wealth_minor = 4200000000000
+debt_minor = 2300000000000
+
+[[cohorts]]
+id = 10104
+region_id = 101
+people = 1800000
+households = 900000
+age_band = "mature"
+household_type = "working_age"
+education = "vocational"
+employment = "employed"
+annual_income_minor = 6300000000000
+liquid_wealth_minor = 7100000000000
+debt_minor = 1700000000000
+
+[[cohorts]]
+id = 10105
+region_id = 101
+people = 1100000
+households = 690000
+age_band = "senior"
+household_type = "retired"
+education = "secondary"
+employment = "retired"
+annual_income_minor = 2200000000000
+liquid_wealth_minor = 6100000000000
+debt_minor = 300000000000
+
+[[cohorts]]
+id = 20101
+region_id = 201
+people = 1700000
+households = 600000
+age_band = "child"
+household_type = "family_with_children"
+education = "basic"
+employment = "dependent"
+annual_income_minor = 0
+liquid_wealth_minor = 150000000000
+debt_minor = 0
+
+[[cohorts]]
+id = 20102
+region_id = 201
+people = 1300000
+households = 590000
+age_band = "youth"
+household_type = "working_age"
+education = "secondary"
+employment = "inactive"
+annual_income_minor = 1040000000000
+liquid_wealth_minor = 260000000000
+debt_minor = 90000000000
+
+[[cohorts]]
+id = 20103
+region_id = 201
+people = 3400000
+households = 1480000
+age_band = "adult"
+household_type = "family_with_children"
+education = "vocational"
+employment = "employed"
+annual_income_minor = 11900000000000
+liquid_wealth_minor = 5100000000000
+debt_minor = 2900000000000
+
+[[cohorts]]
+id = 20104
+region_id = 201
+people = 3100000
+households = 1510000
+age_band = "mature"
+household_type = "working_age"
+education = "vocational"
+employment = "employed"
+annual_income_minor = 10500000000000
+liquid_wealth_minor = 8900000000000
+debt_minor = 2100000000000
+
+[[cohorts]]
+id = 20105
+region_id = 201
+people = 1900000
+households = 1160000
+age_band = "senior"
+household_type = "retired"
+education = "secondary"
+employment = "retired"
+annual_income_minor = 3500000000000
+liquid_wealth_minor = 8200000000000
+debt_minor = 400000000000
+
+[[cohorts]]
+id = 30101
+region_id = 301
+people = 1500000
+households = 540000
+age_band = "child"
+household_type = "family_with_children"
+education = "basic"
+employment = "dependent"
+annual_income_minor = 0
+liquid_wealth_minor = 110000000000
+debt_minor = 0
+
+[[cohorts]]
+id = 30102
+region_id = 301
+people = 1100000
+households = 510000
+age_band = "youth"
+household_type = "working_age"
+education = "secondary"
+employment = "inactive"
+annual_income_minor = 770000000000
+liquid_wealth_minor = 190000000000
+debt_minor = 60000000000
+
+[[cohorts]]
+id = 30103
+region_id = 301
+people = 2800000
+households = 1250000
+age_band = "adult"
+household_type = "family_with_children"
+education = "secondary"
+employment = "employed"
+annual_income_minor = 9100000000000
+liquid_wealth_minor = 3600000000000
+debt_minor = 1900000000000
+
+[[cohorts]]
+id = 30104
+region_id = 301
+people = 2200000
+households = 1080000
+age_band = "mature"
+household_type = "multigenerational"
+education = "vocational"
+employment = "employed"
+annual_income_minor = 6900000000000
+liquid_wealth_minor = 6200000000000
+debt_minor = 1300000000000
+
+[[cohorts]]
+id = 30105
+region_id = 301
+people = 1300000
+households = 800000
+age_band = "senior"
+household_type = "retired"
+education = "basic"
+employment = "retired"
+annual_income_minor = 2300000000000
+liquid_wealth_minor = 4900000000000
+debt_minor = 250000000000
 
 [[actors]]
 id = 1001

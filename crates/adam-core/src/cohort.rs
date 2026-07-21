@@ -1,0 +1,416 @@
+use std::collections::BTreeMap;
+
+use crate::{CohortId, DomainEvent, Money, Population, RegionId, World, WorldError};
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum AgeBand {
+    Child,
+    Youth,
+    Adult,
+    Mature,
+    Senior,
+}
+impl AgeBand {
+    pub(crate) const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::Child => 1,
+            Self::Youth => 2,
+            Self::Adult => 3,
+            Self::Mature => 4,
+            Self::Senior => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum HouseholdType {
+    FamilyWithChildren,
+    WorkingAge,
+    Multigenerational,
+    Retired,
+}
+impl HouseholdType {
+    pub(crate) const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::FamilyWithChildren => 1,
+            Self::WorkingAge => 2,
+            Self::Multigenerational => 3,
+            Self::Retired => 4,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum EducationLevel {
+    None,
+    Basic,
+    Secondary,
+    Vocational,
+    Tertiary,
+}
+impl EducationLevel {
+    pub(crate) const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::None => 1,
+            Self::Basic => 2,
+            Self::Secondary => 3,
+            Self::Vocational => 4,
+            Self::Tertiary => 5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum EmploymentStatus {
+    Dependent,
+    Employed,
+    Unemployed,
+    Inactive,
+    Retired,
+}
+impl EmploymentStatus {
+    pub(crate) const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::Dependent => 1,
+            Self::Employed => 2,
+            Self::Unemployed => 3,
+            Self::Inactive => 4,
+            Self::Retired => 5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HouseholdCohort {
+    id: CohortId,
+    region: RegionId,
+    people: Population,
+    households: u64,
+    age_band: AgeBand,
+    household_type: HouseholdType,
+    education: EducationLevel,
+    employment: EmploymentStatus,
+    annual_income: Money,
+    liquid_wealth: Money,
+    debt: Money,
+}
+
+impl HouseholdCohort {
+    /// Creates one behaviorally homogeneous population/household cohort.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::InvalidCohort`] for impossible household counts or negative stocks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: CohortId,
+        region: RegionId,
+        people: Population,
+        households: u64,
+        age_band: AgeBand,
+        household_type: HouseholdType,
+        education: EducationLevel,
+        employment: EmploymentStatus,
+        annual_income: Money,
+        liquid_wealth: Money,
+        debt: Money,
+    ) -> Result<Self, WorldError> {
+        let people_count = people.people();
+        if (people_count == 0 && households != 0)
+            || (people_count > 0 && (households == 0 || households > people_count))
+        {
+            return Err(WorldError::InvalidCohort(
+                "household count must be 1..=people for non-empty cohorts",
+            ));
+        }
+        if annual_income.minor_units() < 0
+            || liquid_wealth.minor_units() < 0
+            || debt.minor_units() < 0
+        {
+            return Err(WorldError::InvalidCohort(
+                "income, liquid wealth, and debt must be non-negative",
+            ));
+        }
+        Ok(Self {
+            id,
+            region,
+            people,
+            households,
+            age_band,
+            household_type,
+            education,
+            employment,
+            annual_income,
+            liquid_wealth,
+            debt,
+        })
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> CohortId {
+        self.id
+    }
+    #[must_use]
+    pub const fn region(&self) -> RegionId {
+        self.region
+    }
+    #[must_use]
+    pub const fn people(&self) -> Population {
+        self.people
+    }
+    #[must_use]
+    pub const fn households(&self) -> u64 {
+        self.households
+    }
+    #[must_use]
+    pub const fn age_band(&self) -> AgeBand {
+        self.age_band
+    }
+    #[must_use]
+    pub const fn household_type(&self) -> HouseholdType {
+        self.household_type
+    }
+    #[must_use]
+    pub const fn education(&self) -> EducationLevel {
+        self.education
+    }
+    #[must_use]
+    pub const fn employment(&self) -> EmploymentStatus {
+        self.employment
+    }
+    #[must_use]
+    pub const fn annual_income(&self) -> Money {
+        self.annual_income
+    }
+    #[must_use]
+    pub const fn liquid_wealth(&self) -> Money {
+        self.liquid_wealth
+    }
+    #[must_use]
+    pub const fn debt(&self) -> Money {
+        self.debt
+    }
+    pub(crate) const fn set_people(&mut self, value: Population) {
+        self.people = value;
+    }
+}
+
+impl World {
+    /// Registers a cohort after checking identity and region references.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError`] for a duplicate ID or unknown region.
+    pub fn register_household_cohort(&mut self, cohort: HouseholdCohort) -> Result<(), WorldError> {
+        if self.cohorts.contains_key(&cohort.id()) {
+            return Err(WorldError::DuplicateCohort(cohort.id()));
+        }
+        if !self.regions.contains_key(&cohort.region()) {
+            return Err(WorldError::UnknownRegion(cohort.region()));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::HouseholdCohortRegistered {
+                cohort: cohort.id(),
+                region: cohort.region(),
+                people: cohort.people(),
+            },
+        );
+        self.cohorts.insert(cohort.id(), cohort);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn household_cohorts(&self) -> &BTreeMap<CohortId, HouseholdCohort> {
+        &self.cohorts
+    }
+
+    /// Confirms that cohorts are the complete population ledger for every region.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::PopulationAccounting`] when regional and cohort totals differ.
+    pub fn validate_population_accounting(&self) -> Result<(), WorldError> {
+        for region in self.regions.values() {
+            let total = self
+                .cohorts
+                .values()
+                .filter(|c| c.region() == region.id())
+                .try_fold(0_u64, |sum, c| {
+                    sum.checked_add(c.people().people())
+                        .ok_or(WorldError::ArithmeticOverflow("cohort population sum"))
+                })?;
+            if total != region.population().people() {
+                return Err(WorldError::PopulationAccounting {
+                    region: region.id(),
+                    region_population: region.population(),
+                    cohort_population: Population::new(total),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn plan_region_cohort_rescale(
+        &self,
+        region: RegionId,
+        target: Population,
+    ) -> Result<Vec<(CohortId, Population)>, WorldError> {
+        let ids: Vec<_> = self
+            .cohorts
+            .values()
+            .filter(|c| c.region() == region)
+            .map(HouseholdCohort::id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let old_total = ids.iter().try_fold(0_u64, |sum, id| {
+            sum.checked_add(self.cohorts[id].people().people())
+                .ok_or(WorldError::ArithmeticOverflow("cohort rescale sum"))
+        })?;
+        if old_total == 0 {
+            return Err(WorldError::InvalidCohort(
+                "cannot rescale an all-zero regional cohort ledger",
+            ));
+        }
+        let target_total = target.people();
+        let mut rows = Vec::with_capacity(ids.len());
+        let mut assigned = 0_u64;
+        for id in ids {
+            let numerator =
+                u128::from(self.cohorts[&id].people().people()) * u128::from(target_total);
+            let base = u64::try_from(numerator / u128::from(old_total))
+                .map_err(|_| WorldError::ArithmeticOverflow("cohort rescale base"))?;
+            let remainder = numerator % u128::from(old_total);
+            assigned = assigned
+                .checked_add(base)
+                .ok_or(WorldError::ArithmeticOverflow("cohort rescale assignment"))?;
+            rows.push((id, base, remainder));
+        }
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        order.sort_by(|&a, &b| {
+            rows[b]
+                .2
+                .cmp(&rows[a].2)
+                .then_with(|| rows[a].0.cmp(&rows[b].0))
+        });
+        let leftover = usize::try_from(target_total - assigned)
+            .map_err(|_| WorldError::ArithmeticOverflow("cohort rescale remainder"))?;
+        for index in order.into_iter().take(leftover) {
+            rows[index].1 += 1;
+        }
+        let changes = rows
+            .into_iter()
+            .filter_map(|(id, count, _)| {
+                let value = Population::new(count);
+                (self.cohorts[&id].people() != value).then_some((id, value))
+            })
+            .collect();
+        Ok(changes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Country, CountryId, Money, Region, SimDate, WorldSeed};
+
+    use super::*;
+
+    fn cohort(id: u32, people: u64) -> HouseholdCohort {
+        HouseholdCohort::new(
+            CohortId::new(id),
+            RegionId::new(1),
+            Population::new(people),
+            people / 2,
+            AgeBand::Adult,
+            HouseholdType::WorkingAge,
+            EducationLevel::Secondary,
+            EmploymentStatus::Employed,
+            Money::from_minor_units(i64::try_from(people).expect("test population fits") * 100),
+            Money::from_minor_units(0),
+            Money::from_minor_units(0),
+        )
+        .expect("valid cohort")
+    }
+
+    fn world(region_population: u64) -> World {
+        let mut world = World::new(
+            WorldSeed::new(1),
+            SimDate::new(2025, 1).expect("valid date"),
+        );
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country registration");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Capital",
+                    Population::new(region_population),
+                    Money::from_minor_units(1_000_000),
+                )
+                .expect("region"),
+            )
+            .expect("region registration");
+        world
+    }
+
+    #[test]
+    fn accounting_rejects_mismatched_regional_population() {
+        let mut world = world(1_001);
+        world
+            .register_household_cohort(cohort(1, 600))
+            .expect("cohort");
+        world
+            .register_household_cohort(cohort(2, 400))
+            .expect("cohort");
+        assert!(matches!(
+            world.validate_population_accounting(),
+            Err(WorldError::PopulationAccounting { region, .. }) if region == RegionId::new(1)
+        ));
+    }
+
+    #[test]
+    fn largest_remainder_rescale_is_exact_and_deterministic() {
+        let mut world = world(1_000);
+        world
+            .register_household_cohort(cohort(1, 600))
+            .expect("cohort");
+        world
+            .register_household_cohort(cohort(2, 400))
+            .expect("cohort");
+        world
+            .validate_population_accounting()
+            .expect("balanced ledger");
+        let plan = world
+            .plan_region_cohort_rescale(RegionId::new(1), Population::new(1_003))
+            .expect("rescale plan");
+        assert_eq!(
+            plan,
+            vec![
+                (CohortId::new(1), Population::new(602)),
+                (CohortId::new(2), Population::new(401)),
+            ]
+        );
+    }
+
+    #[test]
+    fn impossible_household_counts_are_rejected() {
+        let result = HouseholdCohort::new(
+            CohortId::new(1),
+            RegionId::new(1),
+            Population::new(10),
+            11,
+            AgeBand::Adult,
+            HouseholdType::WorkingAge,
+            EducationLevel::Secondary,
+            EmploymentStatus::Employed,
+            Money::from_minor_units(0),
+            Money::from_minor_units(0),
+            Money::from_minor_units(0),
+        );
+        assert!(matches!(result, Err(WorldError::InvalidCohort(_))));
+    }
+}

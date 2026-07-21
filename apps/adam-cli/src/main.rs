@@ -20,6 +20,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let blueprint = WorldBlueprint::parse_toml(&source)?;
     let mut world = blueprint.build_world(WorldSeed::new(arguments.seed))?;
     world.advance_years(arguments.years)?;
+    world.validate_population_accounting()?;
 
     println!("A.D.A.M Stage 0 foundation");
     println!("world: {}", blueprint.name());
@@ -27,6 +28,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("date: {}", world.date());
     println!("countries: {}", world.countries().len());
     println!("regions: {}", world.regions().len());
+    println!("household cohorts: {}", world.household_cohorts().len());
     println!("actors: {}", world.actors().len());
     println!("power nodes: {}", world.power_nodes().len());
     println!("influence edges: {}", world.influences().len());

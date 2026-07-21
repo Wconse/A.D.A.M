@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, CountryId, DomainEvent, EventLog, Money, Population, PowerNodeId,
-    RegionId, SimDate, TimeError, WorldSeed,
+    ActorId, BasisPoints, CohortId, CountryId, DomainEvent, EventLog, HouseholdCohort, Money,
+    Population, PowerNodeId, RegionId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -339,15 +339,25 @@ impl Influence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorldError {
     DuplicateCountry(CountryId),
+    DuplicateCohort(CohortId),
     DuplicateRegion(RegionId),
     DuplicateActor(ActorId),
     DuplicatePowerNode(PowerNodeId),
-    DuplicateInfluence { actor: ActorId, node: PowerNodeId },
+    DuplicateInfluence {
+        actor: ActorId,
+        node: PowerNodeId,
+    },
     UnknownCountry(CountryId),
     UnknownRegion(RegionId),
     UnknownActor(ActorId),
     UnknownPowerNode(PowerNodeId),
     EmptyName(&'static str),
+    InvalidCohort(&'static str),
+    PopulationAccounting {
+        region: RegionId,
+        region_population: Population,
+        cohort_population: Population,
+    },
     ArithmeticOverflow(&'static str),
     Time(TimeError),
 }
@@ -356,6 +366,7 @@ impl fmt::Display for WorldError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
+            Self::DuplicateCohort(id) => write!(formatter, "cohort {id} already exists"),
             Self::DuplicateRegion(id) => write!(formatter, "region {id} already exists"),
             Self::DuplicateActor(id) => write!(formatter, "actor {id} already exists"),
             Self::DuplicatePowerNode(id) => write!(formatter, "power node {id} already exists"),
@@ -370,6 +381,17 @@ impl fmt::Display for WorldError {
             Self::UnknownActor(id) => write!(formatter, "unknown actor {id}"),
             Self::UnknownPowerNode(id) => write!(formatter, "unknown power node {id}"),
             Self::EmptyName(kind) => write!(formatter, "{kind} name cannot be empty"),
+            Self::InvalidCohort(reason) => write!(formatter, "invalid household cohort: {reason}"),
+            Self::PopulationAccounting {
+                region,
+                region_population,
+                cohort_population,
+            } => write!(
+                formatter,
+                "region {region} population {} differs from cohort total {}",
+                region_population.people(),
+                cohort_population.people()
+            ),
             Self::ArithmeticOverflow(operation) => {
                 write!(formatter, "arithmetic overflow during {operation}")
             }
@@ -392,6 +414,7 @@ pub struct World {
     pub(crate) date: SimDate,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
+    pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
     actors: BTreeMap<ActorId, Actor>,
     power_nodes: BTreeMap<PowerNodeId, PowerNode>,
     influences: BTreeMap<(ActorId, PowerNodeId), Influence>,
@@ -409,6 +432,7 @@ impl World {
             date: start_date,
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
+            cohorts: BTreeMap::new(),
             actors: BTreeMap::new(),
             power_nodes: BTreeMap::new(),
             influences: BTreeMap::new(),
@@ -608,6 +632,20 @@ impl World {
             hash.write_str(region.name());
             hash.write_u64(region.population().people());
             hash.write_i64(region.annual_output().minor_units());
+        }
+        hash.write_u64(self.cohorts.len() as u64);
+        for (id, cohort) in &self.cohorts {
+            hash.write_u32(id.get());
+            hash.write_u32(cohort.region().get());
+            hash.write_u64(cohort.people().people());
+            hash.write_u64(cohort.households());
+            hash.write_u8(cohort.age_band().fingerprint_tag());
+            hash.write_u8(cohort.household_type().fingerprint_tag());
+            hash.write_u8(cohort.education().fingerprint_tag());
+            hash.write_u8(cohort.employment().fingerprint_tag());
+            hash.write_i64(cohort.annual_income().minor_units());
+            hash.write_i64(cohort.liquid_wealth().minor_units());
+            hash.write_i64(cohort.debt().minor_units());
         }
         hash.write_u64(self.actors.len() as u64);
         for (id, actor) in &self.actors {

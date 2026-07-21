@@ -17,6 +17,7 @@ The first playable artifact will simulate several fictional countries for fifty 
 - typed identifiers and discrete simulation time;
 - deterministic, explicitly seeded random streams;
 - ordered world storage and append-only typed event log;
+- household cohort ledger with exact regional population conservation;
 - stable state fingerprint for regression checks;
 - determinism tests and cross-platform quality scripts;
 - architecture and decision records.

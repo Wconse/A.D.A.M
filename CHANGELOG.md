@@ -14,3 +14,4 @@ All notable project changes are documented here. The format follows Keep a Chang
 - Atomic causal yearly loop for demography, output, fiscal closure, legitimacy, and elite cohesion.
 - World content schema v2 and simulation rules version 3.
 - Documented the full simulation plan, hybrid reputation/propaganda model, ideology/regime framework, and live progress roadmap.
+- Added world schema v3 household cohorts and deterministic regional population accounting.

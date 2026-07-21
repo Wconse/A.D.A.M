@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    BasisPoints, CountryId, DomainEvent, Money, Population, RatePpm, RegionId, World, WorldError,
+    BasisPoints, CohortId, CountryId, DomainEvent, Money, Population, RatePpm, RegionId, World,
+    WorldError,
 };
 
 const DEMOGRAPHY_DOMAIN: u64 = 0x4445_4d4f_4752_4150;
@@ -9,13 +10,14 @@ const ECONOMY_DOMAIN: u64 = 0x4543_4f4e_4f4d_5900;
 const POLITICS_DOMAIN: u64 = 0x504f_4c49_5449_4353;
 const RATE_SCALE: i128 = 1_000_000;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct RegionUpdate {
     id: RegionId,
     population: Population,
     population_rate: RatePpm,
     annual_output: Money,
     output_rate: RatePpm,
+    cohort_populations: Vec<(CohortId, Population)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -88,12 +90,15 @@ impl World {
                     indicators.elite_cohesion(),
                 );
                 let annual_output = apply_money_rate(region.annual_output(), output_rate)?;
+                let cohort_populations =
+                    self.plan_region_cohort_rescale(region.id(), population)?;
                 Ok(RegionUpdate {
                     id: region.id(),
                     population,
                     population_rate,
                     annual_output,
                     output_rate,
+                    cohort_populations,
                 })
             })
             .collect()
@@ -163,6 +168,19 @@ impl World {
                     rate: update.output_rate,
                 },
             );
+            for (cohort_id, people) in &update.cohort_populations {
+                self.cohorts
+                    .get_mut(cohort_id)
+                    .expect("planned cohort exists")
+                    .set_people(*people);
+                self.events.append(
+                    close_date,
+                    DomainEvent::HouseholdCohortPopulationChanged {
+                        cohort: *cohort_id,
+                        people: *people,
+                    },
+                );
+            }
         }
         for update in country_updates {
             let country = self
