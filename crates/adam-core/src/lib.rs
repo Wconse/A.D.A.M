@@ -8,6 +8,7 @@ pub mod demand;
 pub mod event;
 pub mod ids;
 pub mod investment;
+pub mod logistics;
 pub mod production;
 pub mod rng;
 mod simulation;
@@ -25,9 +26,12 @@ pub use demand::{
 pub use event::{DomainEvent, EventEnvelope, EventLog};
 pub use ids::{
     ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, ProjectId, RecipeId,
-    RegionId, ResolutionId,
+    RegionId, ResolutionId, RouteId, ShipmentId,
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
+pub use logistics::{
+    LogisticsRoute, ShipmentOrder, ShipmentPlan, TransportMode, plan_direct_shipment,
+};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
 pub use time::{SimDate, TimeError};

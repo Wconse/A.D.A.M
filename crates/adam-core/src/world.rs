@@ -6,7 +6,7 @@ use crate::{
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
     FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, InvestmentProject, Money, NeedProfileId,
     OwnershipStake, Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId,
-    ResolutionId, ResolutionStatus, SimDate, TimeError, WorldSeed,
+    ResolutionId, ResolutionStatus, ShipmentId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -387,6 +387,8 @@ pub enum WorldError {
     UnknownInvestmentProject(ProjectId),
     InsufficientCommittedInvestment(FirmId),
     InvalidInvestmentProject(&'static str),
+    InvalidLogistics(&'static str),
+    NoFeasibleLogisticsRoute(ShipmentId),
     MissingBoardMandate(ResolutionId),
     BoardResolutionNotApproved(ResolutionId),
     BoardResolutionAlreadyExecuted(ResolutionId),
@@ -476,6 +478,10 @@ impl fmt::Display for WorldError {
             }
             Self::InvalidInvestmentProject(reason) => {
                 write!(formatter, "invalid investment project: {reason}")
+            }
+            Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
+            Self::NoFeasibleLogisticsRoute(id) => {
+                write!(formatter, "shipment {id} has no feasible route")
             }
             Self::MissingBoardMandate(id) => {
                 write!(formatter, "board resolution {id} has no executable mandate")
