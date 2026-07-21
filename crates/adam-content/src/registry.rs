@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::de::DeserializeOwned;
 use toml::Value;
 
 use super::modding::{ModId, NamespacedKey};
@@ -43,6 +44,39 @@ impl ContentRegistry {
         &self.entries
     }
     /// Computes a canonical fingerprint independent of file and table insertion order.
+    /// Decodes every merged entry into a typed schema and runs domain validation.
+    /// # Errors
+    /// Returns all schema and domain issues with key and provenance; no partial typed registry is returned.
+    pub fn validate_typed<T, F>(
+        &self,
+        validate: F,
+    ) -> Result<BTreeMap<NamespacedKey, T>, Vec<ValidationIssue>>
+    where
+        T: DeserializeOwned,
+        F: Fn(&T) -> Result<(), String>,
+    {
+        let mut output = BTreeMap::new();
+        let mut issues = Vec::new();
+        for (key, entry) in &self.entries {
+            match entry.value.clone().try_into::<T>() {
+                Ok(value) => match validate(&value) {
+                    Ok(()) => {
+                        output.insert(key.clone(), value);
+                    }
+                    Err(message) => issues.push(ValidationIssue::new(key.clone(), entry, message)),
+                },
+                Err(error) => {
+                    issues.push(ValidationIssue::new(key.clone(), entry, error.to_string()));
+                }
+            }
+        }
+        if issues.is_empty() {
+            Ok(output)
+        } else {
+            Err(issues)
+        }
+    }
+
     #[must_use]
     pub fn content_fingerprint(&self) -> u64 {
         let mut hash = StableHash::new();
@@ -220,6 +254,40 @@ fn remove_path(root: &mut Value, path: &str) -> Result<(), RegistryError> {
 }
 
 #[derive(Clone, Debug)]
+pub struct ValidationIssue {
+    key: NamespacedKey,
+    source: ModId,
+    history: Vec<ModId>,
+    message: String,
+}
+impl ValidationIssue {
+    fn new(key: NamespacedKey, entry: &RegistryEntry, message: String) -> Self {
+        Self {
+            key,
+            source: entry.source.clone(),
+            history: entry.history.clone(),
+            message,
+        }
+    }
+    #[must_use]
+    pub const fn key(&self) -> &NamespacedKey {
+        &self.key
+    }
+    #[must_use]
+    pub const fn source(&self) -> &ModId {
+        &self.source
+    }
+    #[must_use]
+    pub fn history(&self) -> &[ModId] {
+        &self.history
+    }
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum RegistryError {
     DuplicateDefinition(NamespacedKey),
     UnknownTarget(NamespacedKey),
@@ -294,5 +362,29 @@ mod tests {
         assert_eq!(entry.source().as_str(), "mod.test");
         assert_eq!(entry.history().len(), 2);
         assert_ne!(r.content_fingerprint(), 0);
+    }
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct GoodSchema {
+        price: i64,
+        tags: Vec<String>,
+    }
+    #[test]
+    fn typed_validation_reports_provenance() {
+        let mut r = ContentRegistry::default();
+        let value: Value = "price=-1\ntags=['base']".parse().expect("toml");
+        r.add(id("core.base"), key("core.base:item"), value)
+            .expect("add");
+        let issues = r
+            .validate_typed::<GoodSchema, _>(|good| {
+                if good.price > 0 && !good.tags.is_empty() {
+                    Ok(())
+                } else {
+                    Err("price must be positive".into())
+                }
+            })
+            .expect_err("invalid");
+        assert_eq!(issues[0].source().as_str(), "core.base");
+        assert_eq!(issues[0].message(), "price must be positive");
     }
 }
