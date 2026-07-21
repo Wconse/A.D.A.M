@@ -1,6 +1,6 @@
 use crate::{
-    ActorId, BasisPoints, CorporateAction, CorporateRole, DomainEvent, FirmId, ResolutionId, World,
-    WorldError,
+    ActorId, BasisPoints, CorporateAction, CorporateRole, DomainEvent, FirmId, Money, ResolutionId,
+    World, WorldError,
 };
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19,6 +19,8 @@ pub enum ResolutionStatus {
 pub enum BoardMandate {
     AppointExecutive { actor: ActorId, role: CorporateRole },
     RemoveExecutive { actor: ActorId, role: CorporateRole },
+    DeclareDividend { amount: Money },
+    CommitInvestment { amount: Money },
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BoardResolution {
@@ -268,6 +270,10 @@ impl World {
                     ));
                 }
             }
+            BoardMandate::DeclareDividend { amount } => self.execute_dividend(firm, amount)?,
+            BoardMandate::CommitInvestment { amount } => {
+                self.execute_investment_commitment(firm, amount)?;
+            }
         }
         self.board_resolutions
             .get_mut(&id)
@@ -278,6 +284,114 @@ impl World {
             DomainEvent::BoardResolutionExecuted { resolution: id },
         );
         Ok(())
+    }
+    fn execute_dividend(&mut self, firm: FirmId, amount: Money) -> Result<(), WorldError> {
+        let amount_value = amount.minor_units();
+        if amount_value <= 0 {
+            return Err(WorldError::InvalidBoardExecution(
+                "dividend must be positive",
+            ));
+        }
+        let cash = self.firms()[&firm].cash().minor_units();
+        if cash < amount_value {
+            return Err(WorldError::InsufficientFirmCash(firm));
+        }
+        let stakes: Vec<_> = self
+            .ownership_stakes()
+            .values()
+            .filter(|stake| stake.firm() == firm)
+            .copied()
+            .collect();
+        let total: u32 = stakes
+            .iter()
+            .map(|stake| u32::from(stake.economic_rights().get()))
+            .sum();
+        if total != 10_000 {
+            return Err(WorldError::InvalidBoardExecution(
+                "economic ownership must total 100% before dividends",
+            ));
+        }
+        let mut payouts = Vec::new();
+        let mut assigned = 0_i64;
+        for stake in &stakes {
+            let value =
+                i128::from(amount_value) * i128::from(stake.economic_rights().get()) / 10_000;
+            let value = i64::try_from(value)
+                .map_err(|_| WorldError::ArithmeticOverflow("dividend payout"))?;
+            assigned = assigned
+                .checked_add(value)
+                .ok_or(WorldError::ArithmeticOverflow("dividend total"))?;
+            payouts.push((stake.owner(), value));
+        }
+        let remainder = amount_value - assigned;
+        if let Some(first) = payouts.first_mut() {
+            first.1 += remainder;
+        }
+        self.firms
+            .get_mut(&firm)
+            .ok_or(WorldError::UnknownFirm(firm))?
+            .set_cash(Money::from_minor_units(cash - amount_value));
+        for (actor, value) in payouts {
+            let current = self
+                .actor_cash
+                .get(&actor)
+                .copied()
+                .unwrap_or_default()
+                .minor_units();
+            self.actor_cash.insert(
+                actor,
+                Money::from_minor_units(
+                    current
+                        .checked_add(value)
+                        .ok_or(WorldError::ArithmeticOverflow("actor cash"))?,
+                ),
+            );
+        }
+        self.events
+            .append(self.date, DomainEvent::DividendPaid { firm, amount });
+        Ok(())
+    }
+    fn execute_investment_commitment(
+        &mut self,
+        firm: FirmId,
+        amount: Money,
+    ) -> Result<(), WorldError> {
+        let value = amount.minor_units();
+        if value <= 0 {
+            return Err(WorldError::InvalidBoardExecution(
+                "investment must be positive",
+            ));
+        }
+        let cash = self.firms()[&firm].cash().minor_units();
+        if cash < value {
+            return Err(WorldError::InsufficientFirmCash(firm));
+        }
+        let committed = self
+            .committed_investments
+            .get(&firm)
+            .copied()
+            .unwrap_or_default()
+            .minor_units();
+        let updated = committed
+            .checked_add(value)
+            .ok_or(WorldError::ArithmeticOverflow("investment commitment"))?;
+        self.firms
+            .get_mut(&firm)
+            .ok_or(WorldError::UnknownFirm(firm))?
+            .set_cash(Money::from_minor_units(cash - value));
+        self.committed_investments
+            .insert(firm, Money::from_minor_units(updated));
+        self.events
+            .append(self.date, DomainEvent::InvestmentCommitted { firm, amount });
+        Ok(())
+    }
+    #[must_use]
+    pub fn actor_cash(&self) -> &BTreeMap<ActorId, Money> {
+        &self.actor_cash
+    }
+    #[must_use]
+    pub fn committed_investments(&self) -> &BTreeMap<FirmId, Money> {
+        &self.committed_investments
     }
     #[must_use]
     pub fn board_resolutions(&self) -> &BTreeMap<ResolutionId, BoardResolution> {

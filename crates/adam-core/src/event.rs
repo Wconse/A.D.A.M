@@ -18,6 +18,14 @@ pub enum DomainEvent {
         actor: ActorId,
         vote: BoardVote,
     },
+    DividendPaid {
+        firm: FirmId,
+        amount: Money,
+    },
+    InvestmentCommitted {
+        firm: FirmId,
+        amount: Money,
+    },
     BoardResolutionExecuted {
         resolution: ResolutionId,
     },

@@ -387,6 +387,7 @@ pub enum WorldError {
     BoardResolutionNotApproved(ResolutionId),
     BoardResolutionAlreadyExecuted(ResolutionId),
     InvalidBoardExecution(&'static str),
+    InsufficientFirmCash(FirmId),
     UnauthorizedBoardAction(ActorId),
     InvalidBoardVote(&'static str),
     UnauthorizedFirmControl {
@@ -471,6 +472,9 @@ impl fmt::Display for WorldError {
             Self::InvalidBoardExecution(reason) => {
                 write!(formatter, "invalid board execution: {reason}")
             }
+            Self::InsufficientFirmCash(firm) => {
+                write!(formatter, "firm {firm} has insufficient cash")
+            }
             Self::UnauthorizedBoardAction(actor) => {
                 write!(formatter, "actor {actor} cannot act on this board")
             }
@@ -515,6 +519,8 @@ pub struct World {
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
     pub(crate) board_resolutions: BTreeMap<ResolutionId, BoardResolution>,
+    pub(crate) actor_cash: BTreeMap<ActorId, Money>,
+    pub(crate) committed_investments: BTreeMap<FirmId, Money>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -542,6 +548,8 @@ impl World {
             firm_policies: BTreeMap::new(),
             firm_appointments: BTreeMap::new(),
             board_resolutions: BTreeMap::new(),
+            actor_cash: BTreeMap::new(),
+            committed_investments: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -765,6 +773,14 @@ impl World {
                         CorporateRole::MarketingManager => 4,
                     });
                 }
+                Some(crate::BoardMandate::DeclareDividend { amount }) => {
+                    hash.write_u8(3);
+                    hash.write_i64(amount.minor_units());
+                }
+                Some(crate::BoardMandate::CommitInvestment { amount }) => {
+                    hash.write_u8(4);
+                    hash.write_i64(amount.minor_units());
+                }
             }
             hash.write_u64(resolution.votes().len() as u64);
             for (actor, vote) in resolution.votes() {
@@ -854,6 +870,16 @@ impl World {
         self.write_production_fingerprint(&mut hash);
         self.write_business_fingerprint(&mut hash);
         self.write_board_fingerprint(&mut hash);
+        hash.write_u64(self.actor_cash.len() as u64);
+        for (actor, cash) in &self.actor_cash {
+            hash.write_u32(actor.get());
+            hash.write_i64(cash.minor_units());
+        }
+        hash.write_u64(self.committed_investments.len() as u64);
+        for (firm, amount) in &self.committed_investments {
+            hash.write_u32(firm.get());
+            hash.write_i64(amount.minor_units());
+        }
         hash.write_u64(self.consumption_profiles.len() as u64);
         for (id, profile) in &self.consumption_profiles {
             hash.write_u32(id.get());

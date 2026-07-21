@@ -175,6 +175,9 @@ impl Firm {
     pub fn inventories(&self) -> &BTreeMap<GoodId, QuantityMilli> {
         &self.inventories
     }
+    pub(crate) const fn set_cash(&mut self, value: Money) {
+        self.cash = value;
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
