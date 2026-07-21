@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, CohortId, ConsumptionProfile, CountryId, DomainEvent, EventLog, Firm,
-    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money, NeedProfileId, OwnershipStake,
-    Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId, SimDate, TimeError, WorldSeed,
+    ActorId, BasisPoints, CohortId, ConsumptionProfile, CorporateRole, CountryId, DomainEvent,
+    EventLog, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money,
+    NeedProfileId, OwnershipStake, Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId,
+    SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -344,6 +345,7 @@ pub enum WorldError {
     DuplicateCountry(CountryId),
     DuplicateGood(GoodId),
     DuplicateFirm(FirmId),
+    DuplicateFirmAppointment,
     DuplicateOwnershipStake {
         firm: FirmId,
         owner: ActorId,
@@ -396,6 +398,9 @@ impl fmt::Display for WorldError {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
             Self::DuplicateGood(id) => write!(formatter, "good {id} already exists"),
             Self::DuplicateFirm(id) => write!(formatter, "firm {id} already exists"),
+            Self::DuplicateFirmAppointment => {
+                formatter.write_str("duplicate corporate appointment")
+            }
             Self::DuplicateOwnershipStake { firm, owner } => write!(
                 formatter,
                 "actor {owner} already has an ownership stake in firm {firm}"
@@ -477,6 +482,7 @@ pub struct World {
     pub(crate) firms: BTreeMap<FirmId, Firm>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
+    pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -502,6 +508,7 @@ impl World {
             firms: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
+            firm_appointments: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -682,6 +689,36 @@ impl World {
         &self.events
     }
 
+    fn write_business_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.ownership_stakes.len() as u64);
+        for ((firm, owner), stake) in &self.ownership_stakes {
+            hash.write_u32(firm.get());
+            hash.write_u32(owner.get());
+            hash.write_u16(stake.economic_rights().get());
+            hash.write_u16(stake.voting_rights().get());
+        }
+        hash.write_u64(self.firm_policies.len() as u64);
+        for (firm, policy) in &self.firm_policies {
+            hash.write_u32(firm.get());
+            hash.write_u16(policy.inventory_buffer_days());
+            hash.write_u16(policy.price_markup().get());
+            hash.write_u16(policy.marketing_budget().get());
+            hash.write_u16(policy.reinvestment().get());
+            hash.write_u16(policy.dividend().get());
+        }
+        hash.write_u64(self.firm_appointments.len() as u64);
+        for (firm, actor, role) in self.firm_appointments.keys() {
+            hash.write_u32(firm.get());
+            hash.write_u32(actor.get());
+            hash.write_u8(match role {
+                CorporateRole::BoardDirector => 1,
+                CorporateRole::ChiefExecutive => 2,
+                CorporateRole::OperationsManager => 3,
+                CorporateRole::MarketingManager => 4,
+            });
+        }
+    }
+
     fn write_production_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.production_recipes.len() as u64);
         for (id, recipe) in &self.production_recipes {
@@ -726,22 +763,7 @@ impl World {
             hash.write_str(good.name());
         }
         self.write_production_fingerprint(&mut hash);
-        hash.write_u64(self.ownership_stakes.len() as u64);
-        for ((firm, owner), stake) in &self.ownership_stakes {
-            hash.write_u32(firm.get());
-            hash.write_u32(owner.get());
-            hash.write_u16(stake.economic_rights().get());
-            hash.write_u16(stake.voting_rights().get());
-        }
-        hash.write_u64(self.firm_policies.len() as u64);
-        for (firm, policy) in &self.firm_policies {
-            hash.write_u32(firm.get());
-            hash.write_u16(policy.inventory_buffer_days());
-            hash.write_u16(policy.price_markup().get());
-            hash.write_u16(policy.marketing_budget().get());
-            hash.write_u16(policy.reinvestment().get());
-            hash.write_u16(policy.dividend().get());
-        }
+        self.write_business_fingerprint(&mut hash);
         hash.write_u64(self.consumption_profiles.len() as u64);
         for (id, profile) in &self.consumption_profiles {
             hash.write_u32(id.get());

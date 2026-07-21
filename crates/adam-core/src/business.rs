@@ -98,6 +98,40 @@ impl FirmPolicy {
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
+pub enum CorporateRole {
+    BoardDirector,
+    ChiefExecutive,
+    OperationsManager,
+    MarketingManager,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FirmAppointment {
+    firm: FirmId,
+    actor: ActorId,
+    role: CorporateRole,
+}
+impl FirmAppointment {
+    #[must_use]
+    pub const fn new(firm: FirmId, actor: ActorId, role: CorporateRole) -> Self {
+        Self { firm, actor, role }
+    }
+    #[must_use]
+    pub const fn firm(self) -> FirmId {
+        self.firm
+    }
+    #[must_use]
+    pub const fn actor(self) -> ActorId {
+        self.actor
+    }
+    #[must_use]
+    pub const fn role(self) -> CorporateRole {
+        self.role
+    }
+}
+
 impl World {
     /// Registers ownership after checking actor, firm, duplicate, and aggregate rights.
     /// # Errors
@@ -144,11 +178,40 @@ impl World {
     pub fn firm_policies(&self) -> &BTreeMap<FirmId, FirmPolicy> {
         &self.firm_policies
     }
+    /// Registers a corporate appointment.
+    /// # Errors
+    /// Returns [`WorldError`] for unknown references or a duplicate actor/role appointment.
+    pub fn register_firm_appointment(
+        &mut self,
+        appointment: FirmAppointment,
+    ) -> Result<(), WorldError> {
+        if !self.firms.contains_key(&appointment.firm()) {
+            return Err(WorldError::UnknownFirm(appointment.firm()));
+        }
+        if !self.actors().contains_key(&appointment.actor()) {
+            return Err(WorldError::UnknownActor(appointment.actor()));
+        }
+        let key = (appointment.firm(), appointment.actor(), appointment.role());
+        if self.firm_appointments.contains_key(&key) {
+            return Err(WorldError::DuplicateFirmAppointment);
+        }
+        self.firm_appointments.insert(key, appointment);
+        Ok(())
+    }
+    #[must_use]
+    pub fn firm_appointments(
+        &self,
+    ) -> &BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment> {
+        &self.firm_appointments
+    }
     #[must_use]
     pub fn can_control_firm(&self, actor: ActorId, firm: FirmId) -> bool {
         self.ownership_stakes
             .get(&(firm, actor))
             .is_some_and(|stake| stake.voting_rights().get() > 5_000)
+            || self
+                .firm_appointments
+                .contains_key(&(firm, actor, CorporateRole::ChiefExecutive))
     }
     /// Changes policy only for an actor with majority voting control.
     /// # Errors

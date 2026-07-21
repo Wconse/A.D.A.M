@@ -57,7 +57,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 - ✅ Business, brand, governance, and logistics architecture documented.
 - ✅ Ownership stakes are authoritative world state with separate economic/voting rights, aggregate 100% validation, majority-control checks, stored firm policies, and replayable policy commands.
-- ⬜ Legal forms, share classes, voting control, boards, executives, and delegated authority.
+- 🟡 Corporate appointments now represent board, CEO, operations, and marketing roles; CEO delegated policy authority works, while legal forms, share classes, board votes, and narrow role scopes remain.
 - ⬜ Player/AI firm commands: sourcing, pricing, quality, inventory, wages, finance, investment, dividends.
 - ⬜ Product offers and audience-specific brand beliefs: awareness, trust, quality, familiarity, status, service reliability.
 - ⬜ Advertising through claims, channels, targeting, evidence, repetition, and backlash—not direct popularity points.
@@ -158,6 +158,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added schema-v4 goods, need profiles, regional prices, and budget-constrained monthly household demand intentions.
 - Added the core firm/recipe model and physical monthly production constraints for labor, capacity, and intermediate inputs.
 - Added authoritative ownership, majority-vote authorization, firm policies, and shared player/AI replay commands.
+- Added persisted corporate appointments and CEO delegated authority through the same command resolver.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

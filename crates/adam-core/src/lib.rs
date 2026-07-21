@@ -13,7 +13,7 @@ pub mod time;
 pub mod value;
 pub mod world;
 
-pub use business::{FirmPolicy, OwnershipStake};
+pub use business::{CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{AgeBand, EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType};
 pub use command::{WorldCommand, replay_commands};
 pub use demand::{
