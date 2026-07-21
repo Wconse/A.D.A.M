@@ -5,6 +5,7 @@ pub mod mod_schema;
 pub mod mod_validation;
 pub mod modding;
 pub mod registry;
+pub mod replay_save;
 pub mod save_compat;
 pub mod save_envelope;
 pub mod save_file;

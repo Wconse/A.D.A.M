@@ -2,6 +2,7 @@
 
 pub mod business;
 pub mod cohort;
+pub mod command;
 pub mod demand;
 pub mod event;
 pub mod ids;
@@ -14,6 +15,7 @@ pub mod world;
 
 pub use business::{FirmPolicy, OwnershipStake};
 pub use cohort::{AgeBand, EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType};
+pub use command::{WorldCommand, replay_commands};
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };

@@ -173,6 +173,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added complete binary world snapshots and verified save/load continuation against uninterrupted history.
 - Added checksummed atomic save files, `.bak` recovery, corruption tests, and a verification CLI.
 - Added validated automatic fallback to `.bak`, explicit recovery source, dual-failure diagnostics, and CLI reporting.
+- Added a shared replayable command boundary and verified `20-year snapshot + 30-year command tail` against uninterrupted 50-year history.
 - Enforced that every definition belongs to the declaring mod namespace, preventing namespace hijacking.
 
 ## Progress update rule
