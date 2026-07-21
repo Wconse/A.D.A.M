@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+adam-content = { path = "../../crates/adam-content" }
 adam-core = { path = "../../crates/adam-core" }
 
 [lints]

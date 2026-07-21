@@ -15,7 +15,9 @@ pub enum TimeError {
 impl fmt::Display for TimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidDayOfYear(day) => write!(formatter, "day of year must be 1..=365, got {day}"),
+            Self::InvalidDayOfYear(day) => {
+                write!(formatter, "day of year must be 1..=365, got {day}")
+            }
             Self::YearOverflow => formatter.write_str("simulation year overflow"),
         }
     }
@@ -26,6 +28,11 @@ impl std::error::Error for TimeError {}
 impl SimDate {
     pub const DAYS_PER_YEAR: u16 = 365;
 
+    /// Creates a date in the simplified 365-day simulation calendar.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::InvalidDayOfYear`] when `day_of_year` is outside `1..=365`.
     pub fn new(year: i32, day_of_year: u16) -> Result<Self, TimeError> {
         if !(1..=Self::DAYS_PER_YEAR).contains(&day_of_year) {
             return Err(TimeError::InvalidDayOfYear(day_of_year));
@@ -43,6 +50,11 @@ impl SimDate {
         self.day_of_year
     }
 
+    /// Advances the calendar by exactly one simulation day.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::YearOverflow`] if crossing the year boundary would overflow.
     pub fn advance_one_day(&mut self) -> Result<(), TimeError> {
         if self.day_of_year == Self::DAYS_PER_YEAR {
             self.year = self.year.checked_add(1).ok_or(TimeError::YearOverflow)?;
@@ -53,9 +65,17 @@ impl SimDate {
         Ok(())
     }
 
+    /// Advances the calendar by whole years without changing the day of year.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeError::YearOverflow`] if the resulting year cannot be represented.
     pub fn advance_years(&mut self, years: u32) -> Result<(), TimeError> {
         let years = i32::try_from(years).map_err(|_| TimeError::YearOverflow)?;
-        self.year = self.year.checked_add(years).ok_or(TimeError::YearOverflow)?;
+        self.year = self
+            .year
+            .checked_add(years)
+            .ok_or(TimeError::YearOverflow)?;
         Ok(())
     }
 }
@@ -80,6 +100,9 @@ mod tests {
     #[test]
     fn rejects_invalid_days() {
         assert_eq!(SimDate::new(2025, 0), Err(TimeError::InvalidDayOfYear(0)));
-        assert_eq!(SimDate::new(2025, 366), Err(TimeError::InvalidDayOfYear(366)));
+        assert_eq!(
+            SimDate::new(2025, 366),
+            Err(TimeError::InvalidDayOfYear(366))
+        );
     }
 }

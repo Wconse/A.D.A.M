@@ -1,8 +1,11 @@
 use std::env;
 use std::error::Error;
 use std::fmt;
+use std::fs;
+use std::path::PathBuf;
 
-use adam_core::{Country, CountryId, SimDate, World, WorldSeed};
+use adam_content::WorldBlueprint;
+use adam_core::WorldSeed;
 
 fn main() {
     if let Err(error) = run() {
@@ -13,17 +16,13 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse(env::args().skip(1))?;
-    let mut world = World::new(
-        WorldSeed::new(arguments.seed),
-        SimDate::new(2025, 1)?,
-    );
-
-    for (id, name) in [(1, "Aster Republic"), (2, "Boreal Union"), (3, "Cyrene Federation")] {
-        world.register_country(Country::new(CountryId::new(id), name)?)?;
-    }
+    let source = fs::read_to_string(&arguments.config)?;
+    let blueprint = WorldBlueprint::parse_toml(&source)?;
+    let mut world = blueprint.build_world(WorldSeed::new(arguments.seed))?;
     world.advance_years(arguments.years)?;
 
     println!("A.D.A.M Stage 0 foundation");
+    println!("world: {}", blueprint.name());
     println!("seed: {}", world.seed().get());
     println!("date: {}", world.date());
     println!("countries: {}", world.countries().len());
@@ -32,31 +31,44 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct Arguments {
     seed: u64,
     years: u32,
+    config: PathBuf,
 }
 
 impl Arguments {
     fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, ArgumentError> {
         let mut seed = 1;
         let mut years = 50;
+        let mut config = PathBuf::from("config/world.example.toml");
         let mut arguments = arguments.into_iter();
 
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--seed" => seed = parse_value("--seed", arguments.next())?,
                 "--years" => years = parse_value("--years", arguments.next())?,
+                "--config" => {
+                    config = PathBuf::from(
+                        arguments
+                            .next()
+                            .ok_or(ArgumentError::MissingValue("--config"))?,
+                    );
+                }
                 "--help" | "-h" => {
-                    println!("Usage: adam-cli [--seed <u64>] [--years <u32>]");
+                    println!("Usage: adam-cli [--seed <u64>] [--years <u32>] [--config <path>]");
                     std::process::exit(0);
                 }
                 _ => return Err(ArgumentError::UnknownArgument(argument)),
             }
         }
 
-        Ok(Self { seed, years })
+        Ok(Self {
+            seed,
+            years,
+            config,
+        })
     }
 }
 
@@ -65,7 +77,9 @@ where
     T: std::str::FromStr,
 {
     let value = value.ok_or(ArgumentError::MissingValue(name))?;
-    value.parse().map_err(|_| ArgumentError::InvalidValue { name, value })
+    value
+        .parse()
+        .map_err(|_| ArgumentError::InvalidValue { name, value })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,7 +94,9 @@ impl fmt::Display for ArgumentError {
         match self {
             Self::UnknownArgument(value) => write!(formatter, "unknown argument: {value}"),
             Self::MissingValue(name) => write!(formatter, "missing value for {name}"),
-            Self::InvalidValue { name, value } => write!(formatter, "invalid value for {name}: {value}"),
+            Self::InvalidValue { name, value } => {
+                write!(formatter, "invalid value for {name}: {value}")
+            }
         }
     }
 }
@@ -93,12 +109,33 @@ mod tests {
 
     #[test]
     fn defaults_are_stage_zero_run() {
-        assert_eq!(Arguments::parse(Vec::new()).expect("defaults parse"), Arguments { seed: 1, years: 50 });
+        assert_eq!(
+            Arguments::parse(Vec::new()).expect("defaults parse"),
+            Arguments {
+                seed: 1,
+                years: 50,
+                config: PathBuf::from("config/world.example.toml"),
+            }
+        );
     }
 
     #[test]
     fn parses_explicit_values() {
-        let args = vec!["--seed".to_owned(), "47".to_owned(), "--years".to_owned(), "12".to_owned()];
-        assert_eq!(Arguments::parse(args).expect("arguments parse"), Arguments { seed: 47, years: 12 });
+        let args = vec![
+            "--seed".to_owned(),
+            "47".to_owned(),
+            "--years".to_owned(),
+            "12".to_owned(),
+            "--config".to_owned(),
+            "config/custom.toml".to_owned(),
+        ];
+        assert_eq!(
+            Arguments::parse(args).expect("arguments parse"),
+            Arguments {
+                seed: 47,
+                years: 12,
+                config: PathBuf::from("config/custom.toml"),
+            }
+        );
     }
 }

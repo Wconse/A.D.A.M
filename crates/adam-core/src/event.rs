@@ -37,10 +37,14 @@ pub struct EventLog {
 }
 
 impl EventLog {
-    pub fn append(&mut self, date: SimDate, event: DomainEvent) -> &EventEnvelope {
-        let sequence = u64::try_from(self.events.len()).expect("event count fits in u64");
-        self.events.push(EventEnvelope { sequence, date, event });
-        self.events.last().expect("event was just appended")
+    /// Appends one event with the next monotonic sequence number.
+    pub fn append(&mut self, date: SimDate, event: DomainEvent) {
+        let sequence = self.events.len() as u64;
+        self.events.push(EventEnvelope {
+            sequence,
+            date,
+            event,
+        });
     }
 
     #[must_use]

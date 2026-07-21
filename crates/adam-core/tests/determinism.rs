@@ -5,12 +5,18 @@ fn sample_world(seed: u64) -> World {
         WorldSeed::new(seed),
         SimDate::new(2025, 1).expect("valid date"),
     );
-    for (id, name) in [(1, "Aster Republic"), (2, "Boreal Union"), (3, "Cyrene Federation")] {
+    for (id, name) in [
+        (1, "Aster Republic"),
+        (2, "Boreal Union"),
+        (3, "Cyrene Federation"),
+    ] {
         world
             .register_country(Country::new(CountryId::new(id), name).expect("valid country"))
             .expect("unique country");
     }
-    world.advance_years(50).expect("fifty years fit in date range");
+    world
+        .advance_years(50)
+        .expect("fifty years fit in date range");
     world
 }
 
@@ -24,7 +30,10 @@ fn twin_runs_are_identical() {
 
 #[test]
 fn different_seeds_have_different_fingerprints() {
-    assert_ne!(sample_world(47).stable_fingerprint(), sample_world(48).stable_fingerprint());
+    assert_ne!(
+        sample_world(47).stable_fingerprint(),
+        sample_world(48).stable_fingerprint()
+    );
 }
 
 #[test]

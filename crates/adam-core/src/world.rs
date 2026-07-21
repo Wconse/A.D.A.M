@@ -10,6 +10,11 @@ pub struct Country {
 }
 
 impl Country {
+    /// Creates a country with a stable identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::EmptyCountryName`] when the name is empty or whitespace.
     pub fn new(id: CountryId, name: impl Into<String>) -> Result<Self, WorldError> {
         let name = name.into();
         if name.trim().is_empty() {
@@ -63,6 +68,8 @@ pub struct World {
 }
 
 impl World {
+    /// Creates an empty world and records its founding event.
+    #[must_use]
     pub fn new(seed: WorldSeed, start_date: SimDate) -> Self {
         let mut events = EventLog::default();
         events.append(start_date, DomainEvent::WorldFounded { seed: seed.get() });
@@ -74,6 +81,11 @@ impl World {
         }
     }
 
+    /// Adds a country and records the successful registration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::DuplicateCountry`] when the ID is already registered.
     pub fn register_country(&mut self, country: Country) -> Result<(), WorldError> {
         if self.countries.contains_key(&country.id()) {
             return Err(WorldError::DuplicateCountry(country.id()));
@@ -89,11 +101,20 @@ impl World {
         Ok(())
     }
 
+    /// Advances the world clock and records one event for each completed year.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::Time`] if the simulation date overflows.
     pub fn advance_years(&mut self, years: u32) -> Result<(), WorldError> {
         for _ in 0..years {
             self.date.advance_years(1)?;
-            self.events
-                .append(self.date, DomainEvent::YearAdvanced { year: self.date.year() });
+            self.events.append(
+                self.date,
+                DomainEvent::YearAdvanced {
+                    year: self.date.year(),
+                },
+            );
         }
         Ok(())
     }
@@ -125,7 +146,7 @@ impl World {
         hash.write_u64(self.seed.get());
         hash.write_i32(self.date.year());
         hash.write_u16(self.date.day_of_year());
-        hash.write_u64(u64::try_from(self.countries.len()).expect("country count fits in u64"));
+        hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {
             hash.write_u64(id.get());
             hash.write_str(country.name());
@@ -169,7 +190,7 @@ impl StableHasher {
     }
 
     fn write_str(&mut self, value: &str) {
-        self.write_u64(u64::try_from(value.len()).expect("string length fits in u64"));
+        self.write_u64(value.len() as u64);
         self.write(value.as_bytes());
     }
 
@@ -189,16 +210,25 @@ mod tests {
                 WorldSeed::new(1),
                 SimDate::new(2025, 1).expect("valid date"),
             );
-            let countries = if reverse { [(2, "B"), (1, "A")] } else { [(1, "A"), (2, "B")] };
+            let countries = if reverse {
+                [(2, "B"), (1, "A")]
+            } else {
+                [(1, "A"), (2, "B")]
+            };
             for (id, name) in countries {
                 world
-                    .register_country(Country::new(CountryId::new(id), name).expect("valid country"))
+                    .register_country(
+                        Country::new(CountryId::new(id), name).expect("valid country"),
+                    )
                     .expect("unique country");
             }
             world
         };
 
-        assert_eq!(build(false).stable_fingerprint(), build(true).stable_fingerprint());
+        assert_eq!(
+            build(false).stable_fingerprint(),
+            build(true).stable_fingerprint()
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/adam-cli",
+    "crates/adam-content",
     "crates/adam-core",
 ]
 default-members = ["apps/adam-cli"]
