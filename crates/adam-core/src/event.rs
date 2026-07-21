@@ -3,7 +3,7 @@ use crate::{
     PowerNodeId, RatePpm, RegionId, SimDate,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
     WorldFounded {
         seed: u64,
@@ -81,7 +81,7 @@ pub enum DomainEvent {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EventEnvelope {
     sequence: u64,
     date: SimDate,
@@ -102,7 +102,7 @@ impl EventEnvelope {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EventLog {
     events: Vec<EventEnvelope>,
 }

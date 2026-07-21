@@ -170,6 +170,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Dependency-ordered definitions and disk patches are now merged by the CLI with a canonical final fingerprint; the example mod exercises the full path.
 - Added multi-layer conflict reports and explicit save/mod-set compatibility diagnostics.
 - Added strict versioned save envelopes, exact pre-payload compatibility checks, round-trip tests, and migration-chain contracts.
+- Added complete binary world snapshots and verified save/load continuation against uninterrupted history.
 - Enforced that every definition belongs to the declaring mod namespace, preventing namespace hijacking.
 
 ## Progress update rule

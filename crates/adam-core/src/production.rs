@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{FirmId, GoodId, Money, QuantityMilli, RecipeId, RegionId, World, WorldError};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProductionInput {
     good: GoodId,
     quantity_per_batch: QuantityMilli,
@@ -25,7 +25,7 @@ impl ProductionInput {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProductionRecipe {
     id: RecipeId,
     name: String,
@@ -99,7 +99,7 @@ impl ProductionRecipe {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Firm {
     id: FirmId,
     name: String,
@@ -177,7 +177,7 @@ impl Firm {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProductionPlan {
     firm: FirmId,
     batches: u64,

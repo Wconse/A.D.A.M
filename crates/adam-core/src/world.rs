@@ -7,7 +7,7 @@ use crate::{
     ProductionRecipe, RecipeId, RegionId, SimDate, TimeError, WorldSeed,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CountryIndicators {
     treasury: Money,
     public_debt: Money,
@@ -60,7 +60,7 @@ impl CountryIndicators {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Country {
     id: CountryId,
     name: String,
@@ -112,7 +112,7 @@ impl Country {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Region {
     id: RegionId,
     country: CountryId,
@@ -177,7 +177,7 @@ impl Region {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Actor {
     id: ActorId,
     name: String,
@@ -226,7 +226,9 @@ impl Actor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum PowerNodeKind {
     PoliticalOffice,
     Capital,
@@ -247,7 +249,7 @@ impl PowerNodeKind {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PowerNode {
     id: PowerNodeId,
     country: CountryId,
@@ -304,7 +306,7 @@ impl PowerNode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Influence {
     actor: ActorId,
     node: PowerNodeId,
@@ -445,7 +447,7 @@ impl From<TimeError> for WorldError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,

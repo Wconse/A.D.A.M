@@ -7,6 +7,7 @@ pub mod modding;
 pub mod registry;
 pub mod save_compat;
 pub mod save_envelope;
+pub mod world_snapshot;
 
 use std::fmt;
 

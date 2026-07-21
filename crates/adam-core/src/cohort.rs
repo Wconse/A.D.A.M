@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::{CohortId, DomainEvent, Money, NeedProfileId, Population, RegionId, World, WorldError};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum AgeBand {
     Child,
     Youth,
@@ -22,7 +24,9 @@ impl AgeBand {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum HouseholdType {
     FamilyWithChildren,
     WorkingAge,
@@ -40,7 +44,9 @@ impl HouseholdType {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum EducationLevel {
     None,
     Basic,
@@ -60,7 +66,9 @@ impl EducationLevel {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum EmploymentStatus {
     Dependent,
     Employed,
@@ -80,7 +88,7 @@ impl EmploymentStatus {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HouseholdCohort {
     id: CohortId,
     region: RegionId,

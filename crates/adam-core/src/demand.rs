@@ -4,7 +4,9 @@ use crate::{
     CohortId, DomainEvent, GoodId, Money, NeedProfileId, QuantityMilli, RegionId, World, WorldError,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum NeedTier {
     Survival,
     Participation,
@@ -22,7 +24,9 @@ impl NeedTier {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum DemandBasis {
     PerPerson,
     PerHousehold,
@@ -36,7 +40,7 @@ impl DemandBasis {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Good {
     id: GoodId,
     name: String,
@@ -65,7 +69,7 @@ impl Good {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConsumptionTarget {
     good: GoodId,
     tier: NeedTier,
@@ -106,7 +110,7 @@ impl ConsumptionTarget {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConsumptionProfile {
     id: NeedProfileId,
     name: String,
@@ -161,7 +165,7 @@ impl ConsumptionProfile {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DemandIntent {
     cohort: CohortId,
     good: GoodId,

@@ -1,6 +1,6 @@
 use crate::{ActorId, BasisPoints, FirmId, WorldError};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OwnershipStake {
     firm: FirmId,
     owner: ActorId,
@@ -40,7 +40,7 @@ impl OwnershipStake {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FirmPolicy {
     inventory_buffer_days: u16,
     price_markup: BasisPoints,
