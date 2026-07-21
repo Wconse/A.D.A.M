@@ -99,6 +99,21 @@ impl RatePpm {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct QuantityMilli(u64);
+
+impl QuantityMilli {
+    pub const SCALE: u64 = 1_000;
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueError {
     BasisPointsOutOfRange(u16),
@@ -130,6 +145,7 @@ mod tests {
         assert_eq!(size_of::<Money>(), 8);
         assert_eq!(size_of::<BasisPoints>(), 2);
         assert_eq!(size_of::<RatePpm>(), 4);
+        assert_eq!(size_of::<QuantityMilli>(), 8);
     }
 
     #[test]

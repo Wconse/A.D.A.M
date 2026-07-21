@@ -3,20 +3,24 @@
 use std::fmt;
 
 use adam_core::{
-    Actor, ActorId, AgeBand, BasisPoints, CohortId, Country, CountryId, CountryIndicators,
-    EducationLevel, EmploymentStatus, HouseholdCohort, HouseholdType, Influence, Money, Population,
-    PowerNode, PowerNodeId, PowerNodeKind, Region, RegionId, SimDate, TimeError, ValueError, World,
-    WorldError, WorldSeed,
+    Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget, Country,
+    CountryId, CountryIndicators, DemandBasis, EducationLevel, EmploymentStatus, Good, GoodId,
+    HouseholdCohort, HouseholdType, Influence, Money, NeedProfileId, NeedTier, Population,
+    PowerNode, PowerNodeId, PowerNodeKind, QuantityMilli, Region, RegionId, SimDate, TimeError,
+    ValueError, World, WorldError, WorldSeed,
 };
 use serde::Deserialize;
 
-pub const WORLD_SCHEMA_VERSION: u32 = 3;
+pub const WORLD_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorldBlueprint {
     name: String,
     start_year: i32,
     countries: Vec<Country>,
+    goods: Vec<Good>,
+    consumption_profiles: Vec<ConsumptionProfile>,
+    regional_prices: Vec<(RegionId, GoodId, Money)>,
     regions: Vec<Region>,
     cohorts: Vec<HouseholdCohort>,
     actors: Vec<Actor>,
@@ -38,6 +42,9 @@ impl WorldBlueprint {
             name: raw.world_name,
             start_year: raw.start_year,
             countries: parse_countries(raw.countries)?,
+            goods: parse_goods(raw.goods)?,
+            consumption_profiles: parse_profiles(raw.consumption_profiles)?,
+            regional_prices: parse_prices(raw.regional_prices)?,
             regions: parse_regions(raw.regions)?,
             cohorts: parse_cohorts(raw.cohorts)?,
             actors: parse_actors(raw.actors, raw.start_year)?,
@@ -62,9 +69,24 @@ impl WorldBlueprint {
                 .register_country(country.clone())
                 .map_err(ContentError::Domain)?;
         }
+        for good in &self.goods {
+            world
+                .register_good(good.clone())
+                .map_err(ContentError::Domain)?;
+        }
+        for profile in &self.consumption_profiles {
+            world
+                .register_consumption_profile(profile.clone())
+                .map_err(ContentError::Domain)?;
+        }
         for region in &self.regions {
             world
                 .register_region(region.clone())
+                .map_err(ContentError::Domain)?;
+        }
+        for (region, good, price) in &self.regional_prices {
+            world
+                .set_regional_price(*region, *good, *price)
                 .map_err(ContentError::Domain)?;
         }
         for cohort in &self.cohorts {
@@ -180,6 +202,56 @@ fn parse_countries(raw: Vec<RawCountry>) -> Result<Vec<Country>, ContentError> {
         .collect()
 }
 
+fn parse_goods(raw: Vec<RawGood>) -> Result<Vec<Good>, ContentError> {
+    raw.into_iter()
+        .map(|good| {
+            Good::new(GoodId::new(non_zero_id("good", good.id)?), good.name)
+                .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_profiles(
+    raw: Vec<RawConsumptionProfile>,
+) -> Result<Vec<ConsumptionProfile>, ContentError> {
+    raw.into_iter()
+        .map(|profile| {
+            let targets = profile
+                .targets
+                .into_iter()
+                .map(|target| {
+                    Ok(ConsumptionTarget::new(
+                        GoodId::new(non_zero_id("consumption target good", target.good_id)?),
+                        target.tier.into(),
+                        target.basis.into(),
+                        QuantityMilli::new(target.monthly_quantity_milli),
+                    ))
+                })
+                .collect::<Result<Vec<_>, ContentError>>()?;
+            ConsumptionProfile::new(
+                NeedProfileId::new(non_zero_id("need profile", profile.id)?),
+                profile.name,
+                targets,
+            )
+            .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_prices(
+    raw: Vec<RawRegionalPrice>,
+) -> Result<Vec<(RegionId, GoodId, Money)>, ContentError> {
+    raw.into_iter()
+        .map(|price| {
+            Ok((
+                RegionId::new(non_zero_id("price region", price.region_id)?),
+                GoodId::new(non_zero_id("price good", price.good_id)?),
+                Money::from_minor_units(price.price_minor),
+            ))
+        })
+        .collect()
+}
+
 fn parse_regions(raw: Vec<RawRegion>) -> Result<Vec<Region>, ContentError> {
     raw.into_iter()
         .map(|region| {
@@ -207,6 +279,7 @@ fn parse_cohorts(raw: Vec<RawCohort>) -> Result<Vec<HouseholdCohort>, ContentErr
             HouseholdCohort::new(
                 CohortId::new(non_zero_id("cohort", cohort.id)?),
                 RegionId::new(non_zero_id("cohort region", cohort.region_id)?),
+                NeedProfileId::new(non_zero_id("cohort need profile", cohort.need_profile_id)?),
                 Population::new(cohort.people),
                 cohort.households,
                 cohort.age_band.into(),
@@ -395,6 +468,12 @@ struct RawWorld {
     #[serde(default)]
     countries: Vec<RawCountry>,
     #[serde(default)]
+    goods: Vec<RawGood>,
+    #[serde(default)]
+    consumption_profiles: Vec<RawConsumptionProfile>,
+    #[serde(default)]
+    regional_prices: Vec<RawRegionalPrice>,
+    #[serde(default)]
     regions: Vec<RawRegion>,
     #[serde(default)]
     cohorts: Vec<RawCohort>,
@@ -415,6 +494,72 @@ struct RawCountry {
     public_debt_minor: i64,
     legitimacy_bps: u16,
     elite_cohesion_bps: u16,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawGood {
+    id: u32,
+    name: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawNeedTier {
+    Survival,
+    Participation,
+    Development,
+    Discretionary,
+}
+impl From<RawNeedTier> for NeedTier {
+    fn from(value: RawNeedTier) -> Self {
+        match value {
+            RawNeedTier::Survival => Self::Survival,
+            RawNeedTier::Participation => Self::Participation,
+            RawNeedTier::Development => Self::Development,
+            RawNeedTier::Discretionary => Self::Discretionary,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawDemandBasis {
+    PerPerson,
+    PerHousehold,
+}
+impl From<RawDemandBasis> for DemandBasis {
+    fn from(value: RawDemandBasis) -> Self {
+        match value {
+            RawDemandBasis::PerPerson => Self::PerPerson,
+            RawDemandBasis::PerHousehold => Self::PerHousehold,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConsumptionTarget {
+    good_id: u32,
+    tier: RawNeedTier,
+    basis: RawDemandBasis,
+    monthly_quantity_milli: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConsumptionProfile {
+    id: u32,
+    name: String,
+    targets: Vec<RawConsumptionTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRegionalPrice {
+    region_id: u32,
+    good_id: u32,
+    price_minor: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -514,6 +659,7 @@ impl From<RawEmploymentStatus> for EmploymentStatus {
 struct RawCohort {
     id: u32,
     region_id: u32,
+    need_profile_id: u32,
     people: u64,
     households: u64,
     age_band: RawAgeBand,
@@ -579,7 +725,7 @@ mod tests {
     use super::*;
 
     const VALID: &str = r#"
-schema_version = 3
+schema_version = 4
 world_name = "Test World"
 start_year = 2025
 
@@ -591,6 +737,22 @@ public_debt_minor = 500000000
 legitimacy_bps = 6000
 elite_cohesion_bps = 5500
 
+[[goods]]
+id = 1
+name = "Staple food"
+
+[[consumption_profiles]]
+id = 1
+name = "Test profile"
+targets = [
+  { good_id = 1, tier = "survival", basis = "per_person", monthly_quantity_milli = 1000 },
+]
+
+[[regional_prices]]
+region_id = 10
+good_id = 1
+price_minor = 100
+
 [[regions]]
 id = 10
 country_id = 1
@@ -601,6 +763,7 @@ annual_output_minor = 5000000000
 [[cohorts]]
 id = 10000
 region_id = 10
+need_profile_id = 1
 people = 1000000
 households = 400000
 age_band = "adult"
@@ -649,13 +812,13 @@ weight_bps = 8000
 
     #[test]
     fn unsupported_schema_is_explicit() {
-        let source = VALID.replace("schema_version = 3", "schema_version = 4");
+        let source = VALID.replace("schema_version = 4", "schema_version = 5");
         let error = WorldBlueprint::parse_toml(&source).expect_err("schema must fail");
         assert!(matches!(
             error,
             ContentError::UnsupportedSchema {
-                expected: 3,
-                actual: 4
+                expected: 4,
+                actual: 5
             }
         ));
     }

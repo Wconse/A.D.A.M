@@ -21,6 +21,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut world = blueprint.build_world(WorldSeed::new(arguments.seed))?;
     world.advance_years(arguments.years)?;
     world.validate_population_accounting()?;
+    let demand = world.plan_monthly_household_demand()?;
+    let desired_quantity: u128 = demand
+        .iter()
+        .map(|intent| u128::from(intent.desired().get()))
+        .sum();
+    let budgeted_quantity: u128 = demand
+        .iter()
+        .map(|intent| u128::from(intent.budgeted().get()))
+        .sum();
+    let reserved_spend: i128 = demand
+        .iter()
+        .map(|intent| i128::from(intent.reserved_spend().minor_units()))
+        .sum();
 
     println!("A.D.A.M Stage 0 foundation");
     println!("world: {}", blueprint.name());
@@ -32,6 +45,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("actors: {}", world.actors().len());
     println!("power nodes: {}", world.power_nodes().len());
     println!("influence edges: {}", world.influences().len());
+    println!("goods: {}", world.goods().len());
+    println!("monthly demand intents: {}", demand.len());
+    println!("monthly desired quantity milli: {desired_quantity}");
+    println!("monthly budgeted quantity milli: {budgeted_quantity}");
+    println!("monthly reserved spend minor: {reserved_spend}");
     println!("events: {}", world.events().len());
     for country in world.countries().values() {
         let state = country.indicators();

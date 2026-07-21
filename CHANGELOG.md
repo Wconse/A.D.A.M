@@ -15,3 +15,4 @@ All notable project changes are documented here. The format follows Keep a Chang
 - World content schema v2 and simulation rules version 3.
 - Documented the full simulation plan, hybrid reputation/propaganda model, ideology/regime framework, and live progress roadmap.
 - Added world schema v3 household cohorts and deterministic regional population accounting.
+- Added world schema v4 goods, need hierarchies, regional prices, and household demand planning.

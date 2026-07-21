@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{CohortId, DomainEvent, Money, Population, RegionId, World, WorldError};
+use crate::{CohortId, DomainEvent, Money, NeedProfileId, Population, RegionId, World, WorldError};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum AgeBand {
@@ -84,6 +84,7 @@ impl EmploymentStatus {
 pub struct HouseholdCohort {
     id: CohortId,
     region: RegionId,
+    need_profile: NeedProfileId,
     people: Population,
     households: u64,
     age_band: AgeBand,
@@ -105,6 +106,7 @@ impl HouseholdCohort {
     pub fn new(
         id: CohortId,
         region: RegionId,
+        need_profile: NeedProfileId,
         people: Population,
         households: u64,
         age_band: AgeBand,
@@ -134,6 +136,7 @@ impl HouseholdCohort {
         Ok(Self {
             id,
             region,
+            need_profile,
             people,
             households,
             age_band,
@@ -153,6 +156,10 @@ impl HouseholdCohort {
     #[must_use]
     pub const fn region(&self) -> RegionId {
         self.region
+    }
+    #[must_use]
+    pub const fn need_profile(&self) -> NeedProfileId {
+        self.need_profile
     }
     #[must_use]
     pub const fn people(&self) -> Population {
@@ -207,6 +214,12 @@ impl World {
         }
         if !self.regions.contains_key(&cohort.region()) {
             return Err(WorldError::UnknownRegion(cohort.region()));
+        }
+        if !self
+            .consumption_profiles
+            .contains_key(&cohort.need_profile())
+        {
+            return Err(WorldError::UnknownNeedProfile(cohort.need_profile()));
         }
         self.events.append(
             self.date,
@@ -313,7 +326,10 @@ impl World {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Country, CountryId, Money, Region, SimDate, WorldSeed};
+    use crate::{
+        ConsumptionProfile, ConsumptionTarget, Country, CountryId, DemandBasis, Good, GoodId,
+        Money, NeedProfileId, NeedTier, QuantityMilli, Region, SimDate, WorldSeed,
+    };
 
     use super::*;
 
@@ -321,6 +337,7 @@ mod tests {
         HouseholdCohort::new(
             CohortId::new(id),
             RegionId::new(1),
+            NeedProfileId::new(1),
             Population::new(people),
             people / 2,
             AgeBand::Adult,
@@ -342,6 +359,24 @@ mod tests {
         world
             .register_country(Country::new(CountryId::new(1), "A").expect("country"))
             .expect("country registration");
+        world
+            .register_good(Good::new(GoodId::new(1), "Food").expect("good"))
+            .expect("good registration");
+        world
+            .register_consumption_profile(
+                ConsumptionProfile::new(
+                    NeedProfileId::new(1),
+                    "Test",
+                    vec![ConsumptionTarget::new(
+                        GoodId::new(1),
+                        NeedTier::Survival,
+                        DemandBasis::PerPerson,
+                        QuantityMilli::new(1_000),
+                    )],
+                )
+                .expect("profile"),
+            )
+            .expect("profile registration");
         world
             .register_region(
                 Region::new(
@@ -401,6 +436,7 @@ mod tests {
         let result = HouseholdCohort::new(
             CohortId::new(1),
             RegionId::new(1),
+            NeedProfileId::new(1),
             Population::new(10),
             11,
             AgeBand::Adult,

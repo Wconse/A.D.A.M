@@ -39,10 +39,13 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 ### 0.5 Needs and consumption — ⬜
 
-- ⬜ Hierarchical needs and substitutable goods.
-- ⬜ Consumption from actual household budgets.
+- ✅ Hierarchical survival, participation, development, and discretionary need tiers.
+- ⬜ Substitution between goods, quality, habit, culture, and time cost.
+- ✅ Monthly demand intentions from cohort population, household counts, income, debt, and regional prices.
+- 🟡 Taxes, transfers, savings, wealth drawdown, and intra-household allocation remain planned.
 - ⬜ Unmet needs, quality, habits, time cost, and cultural preference.
-- ⬜ Initial goods taxonomy with explicit depth budget.
+- ✅ Initial eight-good test taxonomy and four data-driven consumption profiles.
+- ⬜ Validate the goods taxonomy against production and substitution behavior before expansion.
 
 ### 0.6 Firms and production — ⬜
 
@@ -129,6 +132,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Selected hybrid reputation model B+C.
 - Documented material/institutional/social/information layers, propaganda, ideology, regimes, and depth criteria.
 - Added schema-v3 household cohorts with age, household, education, employment, income, wealth, debt, and exact regional accounting.
+- Added schema-v4 goods, need profiles, regional prices, and budget-constrained monthly household demand intentions.
 
 ## Progress update rule
 

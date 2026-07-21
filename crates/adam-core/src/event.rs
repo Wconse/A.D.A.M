@@ -1,12 +1,25 @@
 use crate::{
-    ActorId, BasisPoints, CohortId, CountryId, Money, Population, PowerNodeId, RatePpm, RegionId,
-    SimDate,
+    ActorId, BasisPoints, CohortId, CountryId, GoodId, Money, NeedProfileId, Population,
+    PowerNodeId, RatePpm, RegionId, SimDate,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainEvent {
     WorldFounded {
         seed: u64,
+    },
+    GoodRegistered {
+        good: GoodId,
+        name: String,
+    },
+    ConsumptionProfileRegistered {
+        profile: NeedProfileId,
+        name: String,
+    },
+    RegionalPriceSet {
+        region: RegionId,
+        good: GoodId,
+        price: Money,
     },
     CountryRegistered {
         country: CountryId,

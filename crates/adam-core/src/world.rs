@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, CohortId, CountryId, DomainEvent, EventLog, HouseholdCohort, Money,
-    Population, PowerNodeId, RegionId, SimDate, TimeError, WorldSeed,
+    ActorId, BasisPoints, CohortId, ConsumptionProfile, CountryId, DomainEvent, EventLog, Good,
+    GoodId, HouseholdCohort, Money, NeedProfileId, Population, PowerNodeId, RegionId, SimDate,
+    TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -339,6 +340,8 @@ impl Influence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorldError {
     DuplicateCountry(CountryId),
+    DuplicateGood(GoodId),
+    DuplicateNeedProfile(NeedProfileId),
     DuplicateCohort(CohortId),
     DuplicateRegion(RegionId),
     DuplicateActor(ActorId),
@@ -348,11 +351,19 @@ pub enum WorldError {
         node: PowerNodeId,
     },
     UnknownCountry(CountryId),
+    UnknownGood(GoodId),
+    UnknownNeedProfile(NeedProfileId),
+    MissingRegionalPrice {
+        region: RegionId,
+        good: GoodId,
+    },
     UnknownRegion(RegionId),
     UnknownActor(ActorId),
     UnknownPowerNode(PowerNodeId),
     EmptyName(&'static str),
     InvalidCohort(&'static str),
+    InvalidConsumptionProfile(&'static str),
+    InvalidPrice,
     PopulationAccounting {
         region: RegionId,
         region_population: Population,
@@ -366,6 +377,8 @@ impl fmt::Display for WorldError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateCountry(id) => write!(formatter, "country {id} already exists"),
+            Self::DuplicateGood(id) => write!(formatter, "good {id} already exists"),
+            Self::DuplicateNeedProfile(id) => write!(formatter, "need profile {id} already exists"),
             Self::DuplicateCohort(id) => write!(formatter, "cohort {id} already exists"),
             Self::DuplicateRegion(id) => write!(formatter, "region {id} already exists"),
             Self::DuplicateActor(id) => write!(formatter, "actor {id} already exists"),
@@ -377,11 +390,21 @@ impl fmt::Display for WorldError {
                 )
             }
             Self::UnknownCountry(id) => write!(formatter, "unknown country {id}"),
+            Self::UnknownGood(id) => write!(formatter, "unknown good {id}"),
+            Self::UnknownNeedProfile(id) => write!(formatter, "unknown need profile {id}"),
+            Self::MissingRegionalPrice { region, good } => write!(
+                formatter,
+                "missing price for good {good} in region {region}"
+            ),
             Self::UnknownRegion(id) => write!(formatter, "unknown region {id}"),
             Self::UnknownActor(id) => write!(formatter, "unknown actor {id}"),
             Self::UnknownPowerNode(id) => write!(formatter, "unknown power node {id}"),
             Self::EmptyName(kind) => write!(formatter, "{kind} name cannot be empty"),
             Self::InvalidCohort(reason) => write!(formatter, "invalid household cohort: {reason}"),
+            Self::InvalidConsumptionProfile(reason) => {
+                write!(formatter, "invalid consumption profile: {reason}")
+            }
+            Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::PopulationAccounting {
                 region,
                 region_population,
@@ -412,6 +435,9 @@ impl From<TimeError> for WorldError {
 pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
+    pub(crate) goods: BTreeMap<GoodId, Good>,
+    pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
+    pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -430,6 +456,9 @@ impl World {
         Self {
             seed,
             date: start_date,
+            goods: BTreeMap::new(),
+            consumption_profiles: BTreeMap::new(),
+            regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -615,6 +644,29 @@ impl World {
         hash.write_u64(self.seed.get());
         hash.write_i32(self.date.year());
         hash.write_u16(self.date.day_of_year());
+        hash.write_u64(self.goods.len() as u64);
+        for (id, good) in &self.goods {
+            hash.write_u32(id.get());
+            hash.write_str(good.name());
+        }
+        hash.write_u64(self.consumption_profiles.len() as u64);
+        for (id, profile) in &self.consumption_profiles {
+            hash.write_u32(id.get());
+            hash.write_str(profile.name());
+            hash.write_u64(profile.targets().len() as u64);
+            for target in profile.targets() {
+                hash.write_u32(target.good().get());
+                hash.write_u8(target.tier().fingerprint_tag());
+                hash.write_u8(target.basis().fingerprint_tag());
+                hash.write_u64(target.monthly_quantity().get());
+            }
+        }
+        hash.write_u64(self.regional_prices.len() as u64);
+        for ((region, good), price) in &self.regional_prices {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_i64(price.minor_units());
+        }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {
             hash.write_u32(id.get());
@@ -637,6 +689,7 @@ impl World {
         for (id, cohort) in &self.cohorts {
             hash.write_u32(id.get());
             hash.write_u32(cohort.region().get());
+            hash.write_u32(cohort.need_profile().get());
             hash.write_u64(cohort.people().people());
             hash.write_u64(cohort.households());
             hash.write_u8(cohort.age_band().fingerprint_tag());

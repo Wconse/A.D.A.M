@@ -1,4 +1,4 @@
-schema_version = 3
+schema_version = 4
 world_name = "Parallel Twenty-First Century"
 start_year = 2025
 
@@ -26,6 +26,208 @@ public_debt_minor = 15100000000000
 legitimacy_bps = 5900
 elite_cohesion_bps = 5100
 
+[[goods]]
+id = 1
+name = "Staple food basket"
+
+[[goods]]
+id = 2
+name = "Housing services"
+
+[[goods]]
+id = 3
+name = "Household energy"
+
+[[goods]]
+id = 4
+name = "Local transport"
+
+[[goods]]
+id = 5
+name = "Healthcare services"
+
+[[goods]]
+id = 6
+name = "Education services"
+
+[[goods]]
+id = 7
+name = "Communications"
+
+[[goods]]
+id = 8
+name = "Discretionary consumption"
+
+[[consumption_profiles]]
+id = 1
+name = "Children in family households"
+targets = [
+  { good_id = 1, tier = "survival", basis = "per_person", monthly_quantity_milli = 800 },
+  { good_id = 2, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 3, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 5, tier = "development", basis = "per_person", monthly_quantity_milli = 600 },
+  { good_id = 6, tier = "development", basis = "per_person", monthly_quantity_milli = 1000 },
+]
+
+[[consumption_profiles]]
+id = 2
+name = "Young people"
+targets = [
+  { good_id = 1, tier = "survival", basis = "per_person", monthly_quantity_milli = 1000 },
+  { good_id = 2, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 3, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 4, tier = "participation", basis = "per_person", monthly_quantity_milli = 1000 },
+  { good_id = 7, tier = "participation", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 6, tier = "development", basis = "per_person", monthly_quantity_milli = 800 },
+  { good_id = 8, tier = "discretionary", basis = "per_person", monthly_quantity_milli = 700 },
+]
+
+[[consumption_profiles]]
+id = 3
+name = "Working-age households"
+targets = [
+  { good_id = 1, tier = "survival", basis = "per_person", monthly_quantity_milli = 1100 },
+  { good_id = 2, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 3, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 4, tier = "participation", basis = "per_person", monthly_quantity_milli = 1000 },
+  { good_id = 7, tier = "participation", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 5, tier = "development", basis = "per_person", monthly_quantity_milli = 500 },
+  { good_id = 8, tier = "discretionary", basis = "per_person", monthly_quantity_milli = 1000 },
+]
+
+[[consumption_profiles]]
+id = 4
+name = "Retired households"
+targets = [
+  { good_id = 1, tier = "survival", basis = "per_person", monthly_quantity_milli = 1000 },
+  { good_id = 2, tier = "survival", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 3, tier = "survival", basis = "per_household", monthly_quantity_milli = 1200 },
+  { good_id = 5, tier = "survival", basis = "per_person", monthly_quantity_milli = 1300 },
+  { good_id = 4, tier = "participation", basis = "per_person", monthly_quantity_milli = 500 },
+  { good_id = 7, tier = "participation", basis = "per_household", monthly_quantity_milli = 1000 },
+  { good_id = 8, tier = "discretionary", basis = "per_person", monthly_quantity_milli = 400 },
+]
+
+[[regional_prices]]
+region_id = 101
+good_id = 1
+price_minor = 2500
+
+[[regional_prices]]
+region_id = 101
+good_id = 2
+price_minor = 92000
+
+[[regional_prices]]
+region_id = 101
+good_id = 3
+price_minor = 18500
+
+[[regional_prices]]
+region_id = 101
+good_id = 4
+price_minor = 12000
+
+[[regional_prices]]
+region_id = 101
+good_id = 5
+price_minor = 8500
+
+[[regional_prices]]
+region_id = 101
+good_id = 6
+price_minor = 15000
+
+[[regional_prices]]
+region_id = 101
+good_id = 7
+price_minor = 6200
+
+[[regional_prices]]
+region_id = 101
+good_id = 8
+price_minor = 11000
+
+[[regional_prices]]
+region_id = 201
+good_id = 1
+price_minor = 2200
+
+[[regional_prices]]
+region_id = 201
+good_id = 2
+price_minor = 65000
+
+[[regional_prices]]
+region_id = 201
+good_id = 3
+price_minor = 14000
+
+[[regional_prices]]
+region_id = 201
+good_id = 4
+price_minor = 9000
+
+[[regional_prices]]
+region_id = 201
+good_id = 5
+price_minor = 7200
+
+[[regional_prices]]
+region_id = 201
+good_id = 6
+price_minor = 11000
+
+[[regional_prices]]
+region_id = 201
+good_id = 7
+price_minor = 5500
+
+[[regional_prices]]
+region_id = 201
+good_id = 8
+price_minor = 9000
+
+[[regional_prices]]
+region_id = 301
+good_id = 1
+price_minor = 2700
+
+[[regional_prices]]
+region_id = 301
+good_id = 2
+price_minor = 78000
+
+[[regional_prices]]
+region_id = 301
+good_id = 3
+price_minor = 21000
+
+[[regional_prices]]
+region_id = 301
+good_id = 4
+price_minor = 10500
+
+[[regional_prices]]
+region_id = 301
+good_id = 5
+price_minor = 9000
+
+[[regional_prices]]
+region_id = 301
+good_id = 6
+price_minor = 12500
+
+[[regional_prices]]
+region_id = 301
+good_id = 7
+price_minor = 5800
+
+[[regional_prices]]
+region_id = 301
+good_id = 8
+price_minor = 10000
+
 [[regions]]
 id = 101
 country_id = 1
@@ -50,6 +252,7 @@ annual_output_minor = 36700000000000
 [[cohorts]]
 id = 10101
 region_id = 101
+need_profile_id = 1
 people = 1200000
 households = 430000
 age_band = "child"
@@ -63,6 +266,7 @@ debt_minor = 0
 [[cohorts]]
 id = 10102
 region_id = 101
+need_profile_id = 2
 people = 900000
 households = 420000
 age_band = "youth"
@@ -76,6 +280,7 @@ debt_minor = 80000000000
 [[cohorts]]
 id = 10103
 region_id = 101
+need_profile_id = 3
 people = 2200000
 households = 980000
 age_band = "adult"
@@ -89,6 +294,7 @@ debt_minor = 2300000000000
 [[cohorts]]
 id = 10104
 region_id = 101
+need_profile_id = 3
 people = 1800000
 households = 900000
 age_band = "mature"
@@ -102,6 +308,7 @@ debt_minor = 1700000000000
 [[cohorts]]
 id = 10105
 region_id = 101
+need_profile_id = 4
 people = 1100000
 households = 690000
 age_band = "senior"
@@ -115,6 +322,7 @@ debt_minor = 300000000000
 [[cohorts]]
 id = 20101
 region_id = 201
+need_profile_id = 1
 people = 1700000
 households = 600000
 age_band = "child"
@@ -128,6 +336,7 @@ debt_minor = 0
 [[cohorts]]
 id = 20102
 region_id = 201
+need_profile_id = 2
 people = 1300000
 households = 590000
 age_band = "youth"
@@ -141,6 +350,7 @@ debt_minor = 90000000000
 [[cohorts]]
 id = 20103
 region_id = 201
+need_profile_id = 3
 people = 3400000
 households = 1480000
 age_band = "adult"
@@ -154,6 +364,7 @@ debt_minor = 2900000000000
 [[cohorts]]
 id = 20104
 region_id = 201
+need_profile_id = 3
 people = 3100000
 households = 1510000
 age_band = "mature"
@@ -167,6 +378,7 @@ debt_minor = 2100000000000
 [[cohorts]]
 id = 20105
 region_id = 201
+need_profile_id = 4
 people = 1900000
 households = 1160000
 age_band = "senior"
@@ -180,6 +392,7 @@ debt_minor = 400000000000
 [[cohorts]]
 id = 30101
 region_id = 301
+need_profile_id = 1
 people = 1500000
 households = 540000
 age_band = "child"
@@ -193,6 +406,7 @@ debt_minor = 0
 [[cohorts]]
 id = 30102
 region_id = 301
+need_profile_id = 2
 people = 1100000
 households = 510000
 age_band = "youth"
@@ -206,6 +420,7 @@ debt_minor = 60000000000
 [[cohorts]]
 id = 30103
 region_id = 301
+need_profile_id = 3
 people = 2800000
 households = 1250000
 age_band = "adult"
@@ -219,6 +434,7 @@ debt_minor = 1900000000000
 [[cohorts]]
 id = 30104
 region_id = 301
+need_profile_id = 3
 people = 2200000
 households = 1080000
 age_band = "mature"
@@ -232,6 +448,7 @@ debt_minor = 1300000000000
 [[cohorts]]
 id = 30105
 region_id = 301
+need_profile_id = 4
 people = 1300000
 households = 800000
 age_band = "senior"
