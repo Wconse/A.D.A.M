@@ -165,6 +165,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added typed goods/recipe mod schemas and accumulated cross-registry reference validation.
 - Added folder-level `adam-validate-mod` for manifests, files, schemas, and cross-references.
 - Extended validation to multiple mod folders with deterministic dependency load order.
+- Enforced that every definition belongs to the declaring mod namespace, preventing namespace hijacking.
 
 ## Progress update rule
 

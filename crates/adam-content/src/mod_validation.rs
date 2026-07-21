@@ -57,7 +57,17 @@ pub fn validate_mod_folder(path: &Path) -> Result<ModValidationReport, Vec<Strin
     let goods = load_files::<GoodFile>(&path.join("goods"), &mut issues)
         .into_iter()
         .filter_map(|(file, item)| match NamespacedKey::parse(&item.id) {
-            Ok(key) => Some((key, item.definition)),
+            Ok(key) if key.namespace() == manifest.id() => Some((key, item.definition)),
+            Ok(key) => {
+                issues.push(format!(
+                    "{}: definition {}:{} is outside mod namespace {}",
+                    file.display(),
+                    key.namespace().as_str(),
+                    key.local(),
+                    manifest.id().as_str()
+                ));
+                None
+            }
             Err(e) => {
                 issues.push(format!("{}: {e}", file.display()));
                 None
@@ -67,7 +77,17 @@ pub fn validate_mod_folder(path: &Path) -> Result<ModValidationReport, Vec<Strin
     let recipes = load_files::<RecipeFile>(&path.join("recipes"), &mut issues)
         .into_iter()
         .filter_map(|(file, item)| match NamespacedKey::parse(&item.id) {
-            Ok(key) => Some((key, item.definition)),
+            Ok(key) if key.namespace() == manifest.id() => Some((key, item.definition)),
+            Ok(key) => {
+                issues.push(format!(
+                    "{}: definition {}:{} is outside mod namespace {}",
+                    file.display(),
+                    key.namespace().as_str(),
+                    key.local(),
+                    manifest.id().as_str()
+                ));
+                None
+            }
             Err(e) => {
                 issues.push(format!("{}: {e}", file.display()));
                 None
