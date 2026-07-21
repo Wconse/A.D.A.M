@@ -6,6 +6,7 @@ pub mod mod_validation;
 pub mod modding;
 pub mod registry;
 pub mod save_compat;
+pub mod save_envelope;
 
 use std::fmt;
 
