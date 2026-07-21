@@ -1,4 +1,6 @@
-use crate::{ActorId, BasisPoints, CountryId, PowerNodeId, RegionId, SimDate};
+use crate::{
+    ActorId, BasisPoints, CountryId, Money, Population, PowerNodeId, RatePpm, RegionId, SimDate,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainEvent {
@@ -29,6 +31,28 @@ pub enum DomainEvent {
         node: PowerNodeId,
         weight: BasisPoints,
     },
+    RegionPopulationChanged {
+        region: RegionId,
+        population: Population,
+        rate: RatePpm,
+    },
+    RegionOutputChanged {
+        region: RegionId,
+        annual_output: Money,
+        rate: RatePpm,
+    },
+    CountryFiscalYearClosed {
+        country: CountryId,
+        revenue: Money,
+        spending: Money,
+        treasury: Money,
+        debt: Money,
+    },
+    CountryPoliticsChanged {
+        country: CountryId,
+        legitimacy: BasisPoints,
+        elite_cohesion: BasisPoints,
+    },
     YearAdvanced {
         year: i32,
     },
@@ -40,18 +64,15 @@ pub struct EventEnvelope {
     date: SimDate,
     event: DomainEvent,
 }
-
 impl EventEnvelope {
     #[must_use]
     pub const fn sequence(&self) -> u64 {
         self.sequence
     }
-
     #[must_use]
     pub const fn date(&self) -> SimDate {
         self.date
     }
-
     #[must_use]
     pub const fn event(&self) -> &DomainEvent {
         &self.event
@@ -62,9 +83,7 @@ impl EventEnvelope {
 pub struct EventLog {
     events: Vec<EventEnvelope>,
 }
-
 impl EventLog {
-    /// Appends one event with the next monotonic sequence number.
     pub fn append(&mut self, date: SimDate, event: DomainEvent) {
         let sequence = self.events.len() as u64;
         self.events.push(EventEnvelope {
@@ -73,17 +92,14 @@ impl EventLog {
             event,
         });
     }
-
     #[must_use]
     pub fn events(&self) -> &[EventEnvelope] {
         &self.events
     }
-
     #[must_use]
     pub fn len(&self) -> usize {
         self.events.len()
     }
-
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
@@ -93,7 +109,6 @@ impl EventLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn sequence_numbers_are_monotonic() {
         let date = SimDate::new(2025, 1).expect("valid date");

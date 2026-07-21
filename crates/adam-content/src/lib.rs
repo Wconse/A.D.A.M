@@ -3,13 +3,13 @@
 use std::fmt;
 
 use adam_core::{
-    Actor, ActorId, BasisPoints, Country, CountryId, Influence, Money, Population, PowerNode,
-    PowerNodeId, PowerNodeKind, Region, RegionId, SimDate, TimeError, ValueError, World,
-    WorldError, WorldSeed,
+    Actor, ActorId, BasisPoints, Country, CountryId, CountryIndicators, Influence, Money,
+    Population, PowerNode, PowerNodeId, PowerNodeKind, Region, RegionId, SimDate, TimeError,
+    ValueError, World, WorldError, WorldSeed,
 };
 use serde::Deserialize;
 
-pub const WORLD_SCHEMA_VERSION: u32 = 1;
+pub const WORLD_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorldBlueprint {
@@ -138,7 +138,29 @@ fn parse_countries(raw: Vec<RawCountry>) -> Result<Vec<Country>, ContentError> {
     raw.into_iter()
         .map(|country| {
             let id = CountryId::new(non_zero_id("country", country.id)?);
-            Country::new(id, country.name).map_err(ContentError::Domain)
+            if country.treasury_minor < 0 {
+                return Err(ContentError::NegativeCountryStock {
+                    country: country.id,
+                    field: "treasury",
+                    value: country.treasury_minor,
+                });
+            }
+            if country.public_debt_minor < 0 {
+                return Err(ContentError::NegativeCountryStock {
+                    country: country.id,
+                    field: "public debt",
+                    value: country.public_debt_minor,
+                });
+            }
+            let indicators = CountryIndicators::new(
+                Money::from_minor_units(country.treasury_minor),
+                Money::from_minor_units(country.public_debt_minor),
+                BasisPoints::new(country.legitimacy_bps).map_err(ContentError::Value)?,
+                BasisPoints::new(country.elite_cohesion_bps).map_err(ContentError::Value)?,
+            );
+            Country::new(id, country.name)
+                .map(|value| value.with_indicators(indicators))
+                .map_err(ContentError::Domain)
         })
         .collect()
 }
@@ -239,6 +261,11 @@ pub enum ContentError {
     EmptyWorldName,
     NoCountries,
     ZeroId(&'static str),
+    NegativeCountryStock {
+        country: u32,
+        field: &'static str,
+        value: i64,
+    },
     NegativeAnnualOutput {
         region: u32,
         value: i64,
@@ -270,6 +297,13 @@ impl fmt::Display for ContentError {
             Self::EmptyWorldName => formatter.write_str("world name cannot be empty"),
             Self::NoCountries => formatter.write_str("world must contain at least one country"),
             Self::ZeroId(kind) => write!(formatter, "{kind} ID zero is reserved"),
+            Self::NegativeCountryStock {
+                country,
+                field,
+                value,
+            } => {
+                write!(formatter, "country {country} has negative {field}: {value}")
+            }
             Self::NegativeAnnualOutput { region, value } => {
                 write!(
                     formatter,
@@ -308,6 +342,7 @@ impl std::error::Error for ContentError {
             | Self::EmptyWorldName
             | Self::NoCountries
             | Self::ZeroId(_)
+            | Self::NegativeCountryStock { .. }
             | Self::NegativeAnnualOutput { .. }
             | Self::FutureActorBirth { .. }
             | Self::ZeroInfluence { .. } => None,
@@ -338,6 +373,10 @@ struct RawWorld {
 struct RawCountry {
     id: u32,
     name: String,
+    treasury_minor: i64,
+    public_debt_minor: i64,
+    legitimacy_bps: u16,
+    elite_cohesion_bps: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,13 +443,17 @@ mod tests {
     use super::*;
 
     const VALID: &str = r#"
-schema_version = 1
+schema_version = 2
 world_name = "Test World"
 start_year = 2025
 
 [[countries]]
 id = 1
 name = "Aster"
+treasury_minor = 1000000000
+public_debt_minor = 500000000
+legitimacy_bps = 6000
+elite_cohesion_bps = 5500
 
 [[regions]]
 id = 10
@@ -456,13 +499,13 @@ weight_bps = 8000
 
     #[test]
     fn unsupported_schema_is_explicit() {
-        let source = VALID.replace("schema_version = 1", "schema_version = 2");
+        let source = VALID.replace("schema_version = 2", "schema_version = 3");
         let error = WorldBlueprint::parse_toml(&source).expect_err("schema must fail");
         assert!(matches!(
             error,
             ContentError::UnsupportedSchema {
-                expected: 1,
-                actual: 2
+                expected: 2,
+                actual: 3
             }
         ));
     }

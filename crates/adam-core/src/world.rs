@@ -6,10 +6,64 @@ use crate::{
     RegionId, SimDate, TimeError, WorldSeed,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CountryIndicators {
+    treasury: Money,
+    public_debt: Money,
+    legitimacy: BasisPoints,
+    elite_cohesion: BasisPoints,
+}
+
+impl CountryIndicators {
+    #[must_use]
+    pub const fn new(
+        treasury: Money,
+        public_debt: Money,
+        legitimacy: BasisPoints,
+        elite_cohesion: BasisPoints,
+    ) -> Self {
+        Self {
+            treasury,
+            public_debt,
+            legitimacy,
+            elite_cohesion,
+        }
+    }
+    #[must_use]
+    pub const fn treasury(self) -> Money {
+        self.treasury
+    }
+    #[must_use]
+    pub const fn public_debt(self) -> Money {
+        self.public_debt
+    }
+    #[must_use]
+    pub const fn legitimacy(self) -> BasisPoints {
+        self.legitimacy
+    }
+    #[must_use]
+    pub const fn elite_cohesion(self) -> BasisPoints {
+        self.elite_cohesion
+    }
+    pub(crate) const fn set_treasury(&mut self, value: Money) {
+        self.treasury = value;
+    }
+    pub(crate) const fn set_public_debt(&mut self, value: Money) {
+        self.public_debt = value;
+    }
+    pub(crate) const fn set_legitimacy(&mut self, value: BasisPoints) {
+        self.legitimacy = value;
+    }
+    pub(crate) const fn set_elite_cohesion(&mut self, value: BasisPoints) {
+        self.elite_cohesion = value;
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Country {
     id: CountryId,
     name: String,
+    indicators: CountryIndicators,
 }
 
 impl Country {
@@ -22,6 +76,12 @@ impl Country {
         Ok(Self {
             id,
             name: validated_name("country", name.into())?,
+            indicators: CountryIndicators::new(
+                Money::from_minor_units(0),
+                Money::from_minor_units(0),
+                BasisPoints::HALF,
+                BasisPoints::HALF,
+            ),
         })
     }
 
@@ -33,6 +93,21 @@ impl Country {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    #[must_use]
+    pub const fn with_indicators(mut self, indicators: CountryIndicators) -> Self {
+        self.indicators = indicators;
+        self
+    }
+
+    #[must_use]
+    pub const fn indicators(&self) -> CountryIndicators {
+        self.indicators
+    }
+
+    pub(crate) const fn indicators_mut(&mut self) -> &mut CountryIndicators {
+        &mut self.indicators
     }
 }
 
@@ -90,6 +165,14 @@ impl Region {
     #[must_use]
     pub const fn annual_output(&self) -> Money {
         self.annual_output
+    }
+
+    pub(crate) const fn set_population(&mut self, value: Population) {
+        self.population = value;
+    }
+
+    pub(crate) const fn set_annual_output(&mut self, value: Money) {
+        self.annual_output = value;
     }
 }
 
@@ -265,6 +348,7 @@ pub enum WorldError {
     UnknownActor(ActorId),
     UnknownPowerNode(PowerNodeId),
     EmptyName(&'static str),
+    ArithmeticOverflow(&'static str),
     Time(TimeError),
 }
 
@@ -286,6 +370,9 @@ impl fmt::Display for WorldError {
             Self::UnknownActor(id) => write!(formatter, "unknown actor {id}"),
             Self::UnknownPowerNode(id) => write!(formatter, "unknown power node {id}"),
             Self::EmptyName(kind) => write!(formatter, "{kind} name cannot be empty"),
+            Self::ArithmeticOverflow(operation) => {
+                write!(formatter, "arithmetic overflow during {operation}")
+            }
             Self::Time(error) => error.fmt(formatter),
         }
     }
@@ -301,14 +388,14 @@ impl From<TimeError> for WorldError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct World {
-    seed: WorldSeed,
-    date: SimDate,
-    countries: BTreeMap<CountryId, Country>,
-    regions: BTreeMap<RegionId, Region>,
+    pub(crate) seed: WorldSeed,
+    pub(crate) date: SimDate,
+    pub(crate) countries: BTreeMap<CountryId, Country>,
+    pub(crate) regions: BTreeMap<RegionId, Region>,
     actors: BTreeMap<ActorId, Actor>,
     power_nodes: BTreeMap<PowerNodeId, PowerNode>,
     influences: BTreeMap<(ActorId, PowerNodeId), Influence>,
-    events: EventLog,
+    pub(crate) events: EventLog,
 }
 
 impl World {
@@ -457,24 +544,6 @@ impl World {
         Ok(())
     }
 
-    /// Advances the world clock and records one event for each completed year.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WorldError::Time`] if the simulation date overflows.
-    pub fn advance_years(&mut self, years: u32) -> Result<(), WorldError> {
-        for _ in 0..years {
-            self.date.advance_years(1)?;
-            self.events.append(
-                self.date,
-                DomainEvent::YearAdvanced {
-                    year: self.date.year(),
-                },
-            );
-        }
-        Ok(())
-    }
-
     #[must_use]
     pub const fn seed(&self) -> WorldSeed {
         self.seed
@@ -526,6 +595,11 @@ impl World {
         for (id, country) in &self.countries {
             hash.write_u32(id.get());
             hash.write_str(country.name());
+            let indicators = country.indicators();
+            hash.write_i64(indicators.treasury().minor_units());
+            hash.write_i64(indicators.public_debt().minor_units());
+            hash.write_u16(indicators.legitimacy().get());
+            hash.write_u16(indicators.elite_cohesion().get());
         }
         hash.write_u64(self.regions.len() as u64);
         for (id, region) in &self.regions {

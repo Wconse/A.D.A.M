@@ -79,7 +79,13 @@ cargo run --release -p adam-core --example foundation_scale -- 100000
 5. Snapshot changes require an explicit design decision; they are not auto-accepted.
 6. Wall-clock time, hash-map iteration order, and ambient randomness must not affect the world.
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/determinism.md`](docs/determinism.md).
+See the project documentation:
+
+- [`docs/roadmap.md`](docs/roadmap.md) — live progress and gates;
+- [`docs/design/simulation-plan.md`](docs/design/simulation-plan.md) — full simulation architecture;
+- [`docs/design/information-reputation-propaganda.md`](docs/design/information-reputation-propaganda.md) — reputation, media, and propaganda;
+- [`docs/design/ideologies-and-regimes.md`](docs/design/ideologies-and-regimes.md) — ideologies, institutions, and forms of rule;
+- [`docs/architecture.md`](docs/architecture.md) and [`docs/determinism.md`](docs/determinism.md) — technical contracts.
 
 ## Status
 

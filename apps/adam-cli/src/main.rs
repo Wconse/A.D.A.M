@@ -31,6 +31,25 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("power nodes: {}", world.power_nodes().len());
     println!("influence edges: {}", world.influences().len());
     println!("events: {}", world.events().len());
+    for country in world.countries().values() {
+        let state = country.indicators();
+        println!(
+            "country_state: {} treasury={} debt={} legitimacy_bps={} cohesion_bps={}",
+            country.name(),
+            state.treasury().minor_units(),
+            state.public_debt().minor_units(),
+            state.legitimacy().get(),
+            state.elite_cohesion().get(),
+        );
+    }
+    for region in world.regions().values() {
+        println!(
+            "region_state: {} population={} output_minor={}",
+            region.name(),
+            region.population().people(),
+            region.annual_output().minor_units(),
+        );
+    }
     println!("fingerprint: {:016x}", world.stable_fingerprint());
     Ok(())
 }

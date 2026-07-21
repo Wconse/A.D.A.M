@@ -1,18 +1,30 @@
-schema_version = 1
+schema_version = 2
 world_name = "Parallel Twenty-First Century"
 start_year = 2025
 
 [[countries]]
 id = 1
 name = "Aster Republic"
+treasury_minor = 2800000000000
+public_debt_minor = 12600000000000
+legitimacy_bps = 6200
+elite_cohesion_bps = 5700
 
 [[countries]]
 id = 2
 name = "Boreal Union"
+treasury_minor = 1900000000000
+public_debt_minor = 18400000000000
+legitimacy_bps = 5400
+elite_cohesion_bps = 6800
 
 [[countries]]
 id = 3
 name = "Cyrene Federation"
+treasury_minor = 2400000000000
+public_debt_minor = 15100000000000
+legitimacy_bps = 5900
+elite_cohesion_bps = 5100
 
 [[regions]]
 id = 101

@@ -1,34 +1,132 @@
-# Stage 0 Roadmap
+# A.D.A.M Development Roadmap
 
-## Slice 0 — Foundation
+Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned · 🔬 research/measurement gate
 
-- [x] Workspace, repository policy, CI, docs.
-- [x] Typed IDs, simulation date, deterministic RNG streams.
-- [x] Ordered world state, typed event log, stable fingerprint.
-- [ ] Verify on the pinned Rust toolchain.
+## Stage 0 — Console Chronicle
 
-## Slice 1 — Minimal world
+### 0.1 Repository and deterministic foundation — ✅
 
-- [x] Load three fictional countries from versioned data.
-- [x] Add regions, named elite actors, typed power nodes, and influence links.
-- [x] Validate schema, canonical values, and all cross-references at load time.
-- [x] Record an initial 100k-actor/100k-edge construction baseline.
+- ✅ Rust workspace, pinned toolchain, CI, quality scripts, documentation policy.
+- ✅ Headless `adam-core` and console `adam-cli`.
+- ✅ Typed IDs, fixed-point values, simulation date, isolated RNG streams.
+- ✅ Ordered world state, typed append-only event log, stable fingerprint.
+- ✅ Versioned TOML content adapter and strict cross-reference validation.
+- ✅ Reproducible 100k-actor/100k-node/100k-edge construction probe.
 
-## Slice 2 — Causal yearly loop
+### 0.2 Minimal social world — ✅
 
-- [ ] Population and productive-capacity aggregates.
-- [ ] Fiscal pressure, legitimacy, elite cohesion, and interstate tension.
-- [ ] Explicit yearly system order with causal events.
+- ✅ Countries, regions, named actors, power nodes, holders, influence edges.
+- ✅ Data-driven initial fiscal and political indicators.
+- 🟡 Scalar influence edge remains only a deterministic scaffold; it is not the accepted power model.
 
-## Slice 3 — Political turnover and conflict
+### 0.3 Causal annual harness — 🟡
 
-- [ ] Leadership succession through shared actor rules.
-- [ ] Crisis escalation and war initiation without scripts.
-- [ ] Minimal conflict resolution and territorial consequences.
+- ✅ Atomic year planning and commit.
+- ✅ Isolated demographic, economic, and political random streams.
+- ✅ Initial links among population, output, fiscal balance, debt, legitimacy, and elite cohesion.
+- ✅ Same-seed replay and direct causal tests.
+- 🟡 Current aggregate growth equations are a test harness and will be replaced by cohort and market systems.
 
-## Slice 4 — Chronicle experiment
+### 0.4 Demographic cohorts and households — ⬜ NEXT
 
-- [ ] Importance scoring and causal-chain extraction.
-- [ ] Chapters, biographies, and turning points.
-- [ ] Fifty-year golden runs across a seed panel.
-- [ ] Human evaluation rubric: coherence, surprise, causality, memorability.
+- ⬜ Adaptive cohort identity and split/merge rules.
+- ⬜ Age progression, births, deaths, household formation, health.
+- ⬜ Education and qualification pipelines.
+- ⬜ Income, wealth, debt, housing, and household budgets.
+- 🔬 Cohort compression accuracy and scale benchmark.
+
+### 0.5 Needs and consumption — ⬜
+
+- ⬜ Hierarchical needs and substitutable goods.
+- ⬜ Consumption from actual household budgets.
+- ⬜ Unmet needs, quality, habits, time cost, and cultural preference.
+- ⬜ Initial goods taxonomy with explicit depth budget.
+
+### 0.6 Firms and production — ⬜
+
+- ⬜ Production units, ownership, capital, labor, inputs, technology.
+- ⬜ Inventories, expectations, production planning, investment, failure.
+- ⬜ Qualification constraints and management capacity.
+
+### 0.7 Spatial markets and logistics — ⬜
+
+- ⬜ Regional order matching and inventories.
+- ⬜ Price formation from fill rate, cost, stocks, expectations, and market power.
+- ⬜ Transport capacity, delay, cost, borders, tariffs, sanctions, spoilage.
+- 🔬 Market convergence, shortage behavior, and performance tests.
+
+### 0.8 Labor, migration, and human capital — ⬜
+
+- ⬜ Job matching, wages, unemployment, bargaining, working conditions.
+- ⬜ Internal and international migration based on expected life outcomes.
+- ⬜ Skill formation, mismatch, automation, and brain drain.
+
+### 0.9 Government, banking, and finance — ⬜
+
+- ⬜ Taxes, budgets, procurement, debt, assets, and implementation capacity.
+- ⬜ Banks, credit, collateral, liquidity, insolvency, and guarantees.
+- ⬜ Inflation emerging from goods, money, production, and expectations.
+
+### 0.10 Institutions, ideologies, and political process — ⬜
+
+- ✅ Design framework documented.
+- ⬜ Multidimensional private beliefs, public platforms, salience, compromise.
+- ⬜ Data-driven ideology traditions and classifications.
+- ⬜ De jure/de facto institutions, offices, veto points, succession.
+- ⬜ Coalition bargaining and policy implementation.
+- ⬜ Elections, protest, repression, coups, reform, and state decay.
+
+### 0.11 Information, reputation, media, and propaganda — ⬜
+
+- ✅ Hybrid audience-traits plus event-memory design selected.
+- ✅ Absurd propaganda, conformity, private/public belief split documented.
+- ⬜ Claims, evidence, frames, narratives, channels, source credibility.
+- ⬜ Awareness, attention, confidence, trait beliefs, issue beliefs.
+- ⬜ Rumor mutation, censorship, counter-messaging, polling uncertainty.
+- ⬜ Material events feeding information and political behavior.
+
+### 0.12 Contextual power network — ⬜
+
+- ⬜ Replace universal influence weights with typed relationships.
+- ⬜ Formal authority, organizational control, assets, access, trust, obligation, fear.
+- ⬜ Actor knowledge and uncertainty about the network.
+- ⬜ Action-specific coalition and veto resolution.
+
+### 0.13 Diplomacy, trade, crisis, and war — ⬜
+
+- ⬜ Bilateral beliefs, interests, trade exposure, commitments, and tension.
+- ⬜ Mobilization, sanctions, negotiation, escalation, and conflict.
+- ⬜ Minimal unified combat model for auto-resolution; no tactical UI yet.
+
+### 0.14 Chronicle experiment — ⬜
+
+- ⬜ Importance scoring and causal-chain extraction.
+- ⬜ Competing contemporary narratives versus retrospective history.
+- ⬜ Chapters, biographies, turning points, economic and demographic series.
+- ⬜ Fifty-year seed panel and human evaluation rubric.
+- 🔬 Stage 0 acceptance gate: the chronicle is coherent, surprising, causal, and memorable.
+
+## Later stages
+
+- Stage 1: Bevy 2D strategic map and observation UI.
+- Stage 2: playable mortal lives and power ladders.
+- Stage 3: expanded economy and money-based life path.
+- Stage 4: unified 2D tactical battle participation.
+- Stage 5: chronicle maps, timelines, biographies, charts, HTML/PDF textbook.
+- Stage 6: UX, performance, content, and public demo.
+
+## Progress log
+
+### 2026-07-21
+
+- Created deterministic Rust workspace and repository policy.
+- Added versioned world content, actors, regions, power nodes, and event archive.
+- Fixed canonical numeric representations and 32-bit typed identity contract.
+- Measured 100k actors + 100k nodes + 100k edges construction at 82 ms on the initial machine.
+- Added and verified the atomic annual causal harness.
+- Selected hybrid reputation model B+C.
+- Documented material/institutional/social/information layers, propaganda, ideology, regimes, and depth criteria.
+
+## Progress update rule
+
+Every accepted slice updates this file with status, tests, measurements, known approximations, and the next gate. New ideas are added only after passing the depth rule in `docs/design/simulation-plan.md`.

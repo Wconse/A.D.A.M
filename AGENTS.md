@@ -12,6 +12,8 @@ Build Stage 0 first: a deterministic headless world whose fifty-year chronicle i
 4. Add tests for determinism and causal effects.
 5. Run formatting, Clippy, tests, and docs before claiming completion.
 6. Never update regression fingerprints merely to make tests green.
+7. Update `docs/roadmap.md` after every accepted slice with progress, tests, measurements, approximations, and next gate.
+8. Record depth ideas only when they add a decision, feedback loop, historical pattern, failure mode, or conflict; test them before acceptance.
 
 ## Architecture boundaries
 

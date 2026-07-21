@@ -1,4 +1,4 @@
-use adam_core::{Country, CountryId, SimDate, World, WorldSeed};
+use adam_core::{Country, CountryId, DomainEvent, SimDate, World, WorldSeed};
 
 fn sample_world(seed: u64) -> World {
     let mut world = World::new(
@@ -40,5 +40,11 @@ fn different_seeds_have_different_fingerprints() {
 fn fifty_year_run_records_every_year() {
     let world = sample_world(47);
     assert_eq!(world.date().year(), 2075);
-    assert_eq!(world.events().len(), 54);
+    let completed_years = world
+        .events()
+        .events()
+        .iter()
+        .filter(|event| matches!(event.event(), DomainEvent::YearAdvanced { .. }))
+        .count();
+    assert_eq!(completed_years, 50);
 }
