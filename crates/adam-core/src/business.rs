@@ -108,6 +108,17 @@ pub enum CorporateRole {
     MarketingManager,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CorporateAction {
+    SetOverallPolicy,
+    SetOperationsPolicy,
+    SetMarketingPolicy,
+    ProposeMajorInvestment,
+    ApproveMajorInvestment,
+    DeclareDividend,
+    AppointExecutive,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FirmAppointment {
     firm: FirmId,
     actor: ActorId,
@@ -205,13 +216,36 @@ impl World {
         &self.firm_appointments
     }
     #[must_use]
-    pub fn can_control_firm(&self, actor: ActorId, firm: FirmId) -> bool {
-        self.ownership_stakes
+    pub fn can_perform_corporate_action(
+        &self,
+        actor: ActorId,
+        firm: FirmId,
+        action: CorporateAction,
+    ) -> bool {
+        let majority = self
+            .ownership_stakes
             .get(&(firm, actor))
-            .is_some_and(|stake| stake.voting_rights().get() > 5_000)
-            || self
-                .firm_appointments
-                .contains_key(&(firm, actor, CorporateRole::ChiefExecutive))
+            .is_some_and(|stake| stake.voting_rights().get() > 5_000);
+        let has = |role| self.firm_appointments.contains_key(&(firm, actor, role));
+        majority
+            || match action {
+                CorporateAction::SetOverallPolicy | CorporateAction::ProposeMajorInvestment => {
+                    has(CorporateRole::ChiefExecutive)
+                }
+                CorporateAction::SetOperationsPolicy => {
+                    has(CorporateRole::ChiefExecutive) || has(CorporateRole::OperationsManager)
+                }
+                CorporateAction::SetMarketingPolicy => {
+                    has(CorporateRole::ChiefExecutive) || has(CorporateRole::MarketingManager)
+                }
+                CorporateAction::ApproveMajorInvestment
+                | CorporateAction::DeclareDividend
+                | CorporateAction::AppointExecutive => has(CorporateRole::BoardDirector),
+            }
+    }
+    #[must_use]
+    pub fn can_control_firm(&self, actor: ActorId, firm: FirmId) -> bool {
+        self.can_perform_corporate_action(actor, firm, CorporateAction::SetOverallPolicy)
     }
     /// Changes policy only for an actor with majority voting control.
     /// # Errors
