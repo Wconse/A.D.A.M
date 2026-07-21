@@ -1,5 +1,5 @@
 use super::mod_schema::{GoodDefinition, RecipeDefinition, validate_goods_and_recipes};
-use super::modding::{ModManifest, NamespacedKey};
+use super::modding::{ModId, ModManifest, NamespacedKey, resolve_load_order};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +11,40 @@ pub struct ModValidationReport {
     pub goods: usize,
     pub recipes: usize,
 }
+#[derive(Clone, Debug)]
+pub struct ModSetValidationReport {
+    pub load_order: Vec<ModId>,
+    pub goods: usize,
+    pub recipes: usize,
+}
+/// Validates multiple mod folders and resolves their dependency order.
+/// # Errors
+/// Returns manifest, dependency, file, schema, and reference diagnostics.
+pub fn validate_mod_set(paths: &[PathBuf]) -> Result<ModSetValidationReport, Vec<String>> {
+    let mut reports = Vec::new();
+    let mut issues = Vec::new();
+    for path in paths {
+        match validate_mod_folder(path) {
+            Ok(report) => reports.push(report),
+            Err(found) => issues.extend(
+                found
+                    .into_iter()
+                    .map(|issue| format!("{}: {issue}", path.display())),
+            ),
+        }
+    }
+    if !issues.is_empty() {
+        return Err(issues);
+    }
+    let load_order = resolve_load_order(reports.iter().map(|r| r.manifest.clone()).collect())
+        .map_err(|e| vec![e.to_string()])?;
+    Ok(ModSetValidationReport {
+        load_order,
+        goods: reports.iter().map(|r| r.goods).sum(),
+        recipes: reports.iter().map(|r| r.recipes).sum(),
+    })
+}
+
 /// Validates a mod folder containing `mod.toml`, `goods/*.toml`, and `recipes/*.toml`.
 /// # Errors
 /// Returns all readable diagnostics before any content is accepted.

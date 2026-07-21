@@ -1,17 +1,20 @@
-use adam_content::mod_validation::validate_mod_folder;
-use std::path::Path;
+use adam_content::mod_validation::validate_mod_set;
+use std::path::PathBuf;
 fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "mods/example".into());
-    match validate_mod_folder(Path::new(&path)) {
-        Ok(report) => println!(
-            "valid mod: {} {} goods={} recipes={}",
-            report.manifest.id().as_str(),
-            report.manifest.version(),
-            report.goods,
-            report.recipes
-        ),
+    let mut paths: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).collect();
+    if paths.is_empty() {
+        paths.push("mods/example".into());
+    }
+    match validate_mod_set(&paths) {
+        Ok(report) => {
+            println!(
+                "valid mod set: goods={} recipes={}",
+                report.goods, report.recipes
+            );
+            for id in report.load_order {
+                println!("load: {}", id.as_str());
+            }
+        }
         Err(issues) => {
             for issue in issues {
                 eprintln!("{issue}");

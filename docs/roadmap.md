@@ -130,7 +130,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - ✅ Generic layered namespaced registry with provenance and explicit set/remove/append patch operations.
 - 🟡 Generic post-merge typed decoding and provenance diagnostics are implemented; strict goods/recipe schemas and cross-registry namespaced reference validation are now working, with more content types remaining.
 - 🟡 Per-entry change provenance and canonical merged-content fingerprint are implemented; save/replay embedding, conflict reports, compatibility ranges, and migrations remain.
-- 🟡 Standalone `adam-validate-mod` command validates manifests, goods, recipes, TOML files, and cross-references; richer schemas and source spans remain.
+- 🟡 `adam-validate-mod` now validates multiple folders and deterministic dependency order plus manifests, goods, recipes, files, and cross-references; merged patches and source spans remain.
 - ⬜ Declarative conditions, formulas, effects, and AI weights.
 - ⬜ Sandboxed deterministic WebAssembly extension API after the core stabilizes.
 
@@ -164,6 +164,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added strict post-merge typed decoding and provenance-rich validation reports.
 - Added typed goods/recipe mod schemas and accumulated cross-registry reference validation.
 - Added folder-level `adam-validate-mod` for manifests, files, schemas, and cross-references.
+- Extended validation to multiple mod folders with deterministic dependency load order.
 
 ## Progress update rule
 
