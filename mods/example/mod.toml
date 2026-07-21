@@ -1,0 +1,6 @@
+id = "example.foundation"
+name = "Example Foundation Mod"
+version = "0.1.0"
+game_version = ">=0.1"
+dependencies = []
+load_after = []

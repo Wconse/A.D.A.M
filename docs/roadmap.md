@@ -124,6 +124,15 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - ⬜ Fifty-year seed panel and human evaluation rubric.
 - 🔬 Stage 0 acceptance gate: the chronicle is coherent, surprising, causal, and memorable.
 
+## Cross-cutting modding platform — 🟡
+
+- ✅ Strict mod manifests, namespaced identities, dependencies, load hints, deterministic ordering, and diagnostics foundation.
+- ⬜ Layered content registries and explicit patch operations.
+- ⬜ Conflict reports, content hashes in saves/replays, compatibility ranges, and migrations.
+- ⬜ Standalone `validate-mod` command and authoring schemas.
+- ⬜ Declarative conditions, formulas, effects, and AI weights.
+- ⬜ Sandboxed deterministic WebAssembly extension API after the core stabilizes.
+
 ## Later stages
 
 - Stage 1: Bevy 2D strategic map and observation UI.
@@ -148,6 +157,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added schema-v4 goods, need profiles, regional prices, and budget-constrained monthly household demand intentions.
 - Added the core firm/recipe model and physical monthly production constraints for labor, capacity, and intermediate inputs.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
+- Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 
 ## Progress update rule
 

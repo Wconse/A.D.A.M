@@ -1,5 +1,7 @@
 #![doc = "Versioned TOML content loading for A.D.A.M."]
 
+pub mod modding;
+
 use std::fmt;
 
 use adam_core::{
