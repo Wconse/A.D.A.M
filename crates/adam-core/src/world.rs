@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, BoardResolution, CohortId, ConsumptionProfile, CorporateRole, CountryId,
-    DomainEvent, EventLog, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId,
-    HouseholdCohort, Money, NeedProfileId, OwnershipStake, Population, PowerNodeId,
-    ProductionRecipe, RecipeId, RegionId, ResolutionId, SimDate, TimeError, WorldSeed,
+    ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile,
+    CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
+    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, Money, NeedProfileId, OwnershipStake,
+    Population, PowerNodeId, ProductionRecipe, RecipeId, RegionId, ResolutionId, ResolutionStatus,
+    SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -705,6 +706,38 @@ impl World {
         &self.events
     }
 
+    fn write_board_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.board_resolutions.len() as u64);
+        for (id, resolution) in &self.board_resolutions {
+            hash.write_u32(id.get());
+            hash.write_u32(resolution.firm().get());
+            hash.write_u32(resolution.proposer().get());
+            hash.write_u8(match resolution.action() {
+                CorporateAction::SetOverallPolicy => 1,
+                CorporateAction::SetOperationsPolicy => 2,
+                CorporateAction::SetMarketingPolicy => 3,
+                CorporateAction::ProposeMajorInvestment => 4,
+                CorporateAction::ApproveMajorInvestment => 5,
+                CorporateAction::DeclareDividend => 6,
+                CorporateAction::AppointExecutive => 7,
+            });
+            hash.write_u8(match resolution.status() {
+                ResolutionStatus::Open => 1,
+                ResolutionStatus::Approved => 2,
+                ResolutionStatus::Rejected => 3,
+            });
+            hash.write_u64(resolution.votes().len() as u64);
+            for (actor, vote) in resolution.votes() {
+                hash.write_u32(actor.get());
+                hash.write_u8(match vote {
+                    BoardVote::For => 1,
+                    BoardVote::Against => 2,
+                    BoardVote::Abstain => 3,
+                });
+            }
+        }
+    }
+
     fn write_business_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.ownership_stakes.len() as u64);
         for ((firm, owner), stake) in &self.ownership_stakes {
@@ -780,6 +813,7 @@ impl World {
         }
         self.write_production_fingerprint(&mut hash);
         self.write_business_fingerprint(&mut hash);
+        self.write_board_fingerprint(&mut hash);
         hash.write_u64(self.consumption_profiles.len() as u64);
         for (id, profile) in &self.consumption_profiles {
             hash.write_u32(id.get());
