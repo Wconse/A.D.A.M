@@ -128,7 +128,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 - ✅ Strict mod manifests, namespaced identities, dependencies, load hints, deterministic ordering, and diagnostics foundation.
 - ✅ Generic layered namespaced registry with provenance and explicit set/remove/append patch operations.
-- 🟡 Generic post-merge typed decoding, domain validation, and provenance-rich diagnostics are implemented; per-content schemas and cross-registry reference checks remain.
+- 🟡 Generic post-merge typed decoding and provenance diagnostics are implemented; strict goods/recipe schemas and cross-registry namespaced reference validation are now working, with more content types remaining.
 - 🟡 Per-entry change provenance and canonical merged-content fingerprint are implemented; save/replay embedding, conflict reports, compatibility ranges, and migrations remain.
 - ⬜ Standalone `validate-mod` command and authoring schemas.
 - ⬜ Declarative conditions, formulas, effects, and AI weights.
@@ -162,6 +162,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added the layered content registry with explicit non-silent patch operations and provenance.
 - Added per-entry patch history and an insertion-order-independent canonical fingerprint for merged mod content.
 - Added strict post-merge typed decoding and provenance-rich validation reports.
+- Added typed goods/recipe mod schemas and accumulated cross-registry reference validation.
 
 ## Progress update rule
 
