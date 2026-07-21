@@ -165,7 +165,9 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added typed goods/recipe mod schemas and accumulated cross-registry reference validation.
 - Added folder-level `adam-validate-mod` for manifests, files, schemas, and cross-references.
 - Extended validation to multiple mod folders with deterministic dependency load order.
+- Added physical multi-mod merge of goods/recipes plus disk patch files and canonical post-merge fingerprint.
 - Added deterministic exact package fingerprints across every TOML file in the selected mod set.
+- Dependency-ordered definitions and disk patches are now merged by the CLI with a canonical final fingerprint; the example mod exercises the full path.
 - Enforced that every definition belongs to the declaring mod namespace, preventing namespace hijacking.
 
 ## Progress update rule

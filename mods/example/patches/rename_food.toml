@@ -1,0 +1,6 @@
+target = "example.foundation:test_food"
+
+[[operations]]
+op = "set"
+path = "name"
+value = "Patched test food"

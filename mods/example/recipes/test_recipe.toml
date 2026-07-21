@@ -1,0 +1,6 @@
+id = "example.foundation:test_recipe"
+name = "Test recipe"
+output_good = "example.foundation:test_food"
+output_quantity_milli = 1000
+labor_milli_worker_months = 1000
+inputs = []
