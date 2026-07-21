@@ -43,6 +43,18 @@ impl ContentRegistry {
     pub fn entries(&self) -> &BTreeMap<NamespacedKey, RegistryEntry> {
         &self.entries
     }
+    /// Returns definitions touched by more than one mod layer.
+    #[must_use]
+    pub fn conflict_report(&self) -> Vec<RegistryConflict> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.history.len() > 1)
+            .map(|(key, entry)| RegistryConflict {
+                key: key.clone(),
+                history: entry.history.clone(),
+            })
+            .collect()
+    }
     /// Computes a canonical fingerprint independent of file and table insertion order.
     /// Decodes every merged entry into a typed schema and runs domain validation.
     /// # Errors
@@ -287,6 +299,22 @@ impl ValidationIssue {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegistryConflict {
+    key: NamespacedKey,
+    history: Vec<ModId>,
+}
+impl RegistryConflict {
+    #[must_use]
+    pub const fn key(&self) -> &NamespacedKey {
+        &self.key
+    }
+    #[must_use]
+    pub fn history(&self) -> &[ModId] {
+        &self.history
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum RegistryError {
     DuplicateDefinition(NamespacedKey),
@@ -361,6 +389,7 @@ mod tests {
         assert_eq!(entry.value()["tags"].as_array().expect("array").len(), 2);
         assert_eq!(entry.source().as_str(), "mod.test");
         assert_eq!(entry.history().len(), 2);
+        assert_eq!(r.conflict_report().len(), 1);
         assert_ne!(r.content_fingerprint(), 0);
     }
     #[derive(Debug, serde::Deserialize)]
