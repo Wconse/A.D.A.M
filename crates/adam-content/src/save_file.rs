@@ -14,6 +14,17 @@ pub enum SaveFileError {
     LengthMismatch,
     ChecksumMismatch { expected: u64, actual: u64 },
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SaveSource {
+    Primary,
+    Backup,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoveredSave {
+    pub payload: Vec<u8>,
+    pub source: SaveSource,
+    pub primary_error: Option<SaveFileError>,
+}
 impl fmt::Display for SaveFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -117,6 +128,30 @@ pub fn read_save_file(path: &Path) -> Result<Vec<u8>, SaveFileError> {
         .map_err(|error| io(&error))?;
     Ok(parse_save_container(&bytes)?.to_vec())
 }
+/// Reads the primary save and falls back to the validated `.bak` file when necessary.
+/// # Errors
+/// Returns both primary and backup diagnostics when neither file is valid.
+pub fn read_save_with_backup(path: &Path) -> Result<RecoveredSave, Vec<SaveFileError>> {
+    match read_save_file(path) {
+        Ok(payload) => Ok(RecoveredSave {
+            payload,
+            source: SaveSource::Primary,
+            primary_error: None,
+        }),
+        Err(primary) => {
+            let backup = with_suffix(path, "bak");
+            match read_save_file(&backup) {
+                Ok(payload) => Ok(RecoveredSave {
+                    payload,
+                    source: SaveSource::Backup,
+                    primary_error: Some(primary),
+                }),
+                Err(backup_error) => Err(vec![primary, backup_error]),
+            }
+        }
+    }
+}
+
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut value = path.as_os_str().to_owned();
     value.push(format!(".{suffix}"));
@@ -158,6 +193,21 @@ mod tests {
             read_save_file(&with_suffix(&path, "bak")).expect("backup"),
             b"first"
         );
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+    #[test]
+    fn corrupt_primary_recovers_from_valid_backup() {
+        let dir = std::env::temp_dir().join(format!("adam-recovery-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("world.adam");
+        write_save_atomic(&path, b"first").expect("first");
+        write_save_atomic(&path, b"second").expect("second");
+        fs::write(&path, b"corrupt").expect("corrupt");
+        let recovered = read_save_with_backup(&path).expect("recover");
+        assert_eq!(recovered.source, SaveSource::Backup);
+        assert_eq!(recovered.payload, b"first");
+        assert!(recovered.primary_error.is_some());
         fs::remove_dir_all(dir).expect("cleanup");
     }
 }
