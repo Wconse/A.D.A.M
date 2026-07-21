@@ -148,6 +148,110 @@ pub fn plan_direct_shipment(
         arrival_days: days,
     })
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiLegShipmentPlan {
+    pub shipment: ShipmentId,
+    pub routes: Vec<RouteId>,
+    pub total_cost: Money,
+    pub arrival_days: u32,
+}
+/// Finds the cheapest feasible simple path of at most `max_legs`, with lexicographic route-ID tie-breaking.
+/// # Errors
+/// Returns [`WorldError::NoFeasibleLogisticsRoute`] when no capacity- and budget-feasible path exists.
+pub fn plan_multileg_shipment(
+    order: &ShipmentOrder,
+    routes: &[LogisticsRoute],
+    max_legs: usize,
+) -> Result<MultiLegShipmentPlan, WorldError> {
+    if max_legs == 0 {
+        return Err(WorldError::NoFeasibleLogisticsRoute(order.id));
+    }
+    let mut candidates = Vec::new();
+    let mut visited = std::collections::BTreeSet::from([order.origin]);
+    let mut path = Vec::new();
+    search_paths(
+        order,
+        routes,
+        max_legs,
+        order.origin,
+        &mut visited,
+        &mut path,
+        0,
+        0,
+        &mut candidates,
+    )?;
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let (cost, ids, days) = candidates
+        .into_iter()
+        .next()
+        .ok_or(WorldError::NoFeasibleLogisticsRoute(order.id))?;
+    Ok(MultiLegShipmentPlan {
+        shipment: order.id,
+        routes: ids,
+        total_cost: Money::from_minor_units(cost),
+        arrival_days: days,
+    })
+}
+#[allow(clippy::too_many_arguments)]
+fn search_paths(
+    order: &ShipmentOrder,
+    routes: &[LogisticsRoute],
+    max_legs: usize,
+    current: RegionId,
+    visited: &mut std::collections::BTreeSet<RegionId>,
+    path: &mut Vec<RouteId>,
+    cost: i64,
+    days: u32,
+    output: &mut Vec<(i64, Vec<RouteId>, u32)>,
+) -> Result<(), WorldError> {
+    if current == order.destination {
+        if cost <= order.max_total_cost.minor_units() {
+            output.push((cost, path.clone(), days));
+        }
+        return Ok(());
+    }
+    if path.len() >= max_legs {
+        return Ok(());
+    }
+    let mut outgoing: Vec<_> = routes
+        .iter()
+        .filter(|r| r.origin() == current && r.capacity().get() >= order.quantity.get())
+        .collect();
+    outgoing.sort_by_key(|r| r.id());
+    for route in outgoing {
+        if visited.contains(&route.destination()) {
+            continue;
+        }
+        let leg = i128::from(route.cost_per_unit().minor_units())
+            * i128::from(order.quantity.get())
+            / i128::from(QuantityMilli::SCALE);
+        let leg = i64::try_from(leg)
+            .map_err(|_| WorldError::ArithmeticOverflow("multi-leg shipment cost"))?;
+        let next = cost
+            .checked_add(leg)
+            .ok_or(WorldError::ArithmeticOverflow("multi-leg shipment total"))?;
+        if next > order.max_total_cost.minor_units() {
+            continue;
+        }
+        visited.insert(route.destination());
+        path.push(route.id());
+        search_paths(
+            order,
+            routes,
+            max_legs,
+            route.destination(),
+            visited,
+            path,
+            next,
+            days + u32::from(route.transit_days()),
+            output,
+        )?;
+        path.pop();
+        visited.remove(&route.destination());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +293,43 @@ mod tests {
             plan_direct_shipment(&order, &routes).expect("plan").route,
             RouteId::new(1)
         );
+    }
+    #[test]
+    fn multi_leg_route_connects_regions_without_direct_service() {
+        let order = ShipmentOrder::new(
+            ShipmentId::new(2),
+            GoodId::new(1),
+            RegionId::new(1),
+            RegionId::new(3),
+            QuantityMilli::new(1000),
+            Money::from_minor_units(100),
+        );
+        let routes = vec![
+            LogisticsRoute::new(
+                RouteId::new(1),
+                RegionId::new(1),
+                RegionId::new(2),
+                TransportMode::Rail,
+                QuantityMilli::new(5000),
+                Money::from_minor_units(10),
+                2,
+                9500,
+            )
+            .expect("route"),
+            LogisticsRoute::new(
+                RouteId::new(2),
+                RegionId::new(2),
+                RegionId::new(3),
+                TransportMode::Road,
+                QuantityMilli::new(5000),
+                Money::from_minor_units(20),
+                3,
+                9000,
+            )
+            .expect("route"),
+        ];
+        let plan = plan_multileg_shipment(&order, &routes, 3).expect("plan");
+        assert_eq!(plan.routes, vec![RouteId::new(1), RouteId::new(2)]);
+        assert_eq!(plan.arrival_days, 5);
     }
 }
