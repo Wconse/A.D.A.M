@@ -14,6 +14,7 @@ pub mod market;
 pub mod production;
 pub mod rng;
 mod simulation;
+pub mod social;
 pub mod terminal;
 pub mod time;
 pub mod value;
@@ -48,6 +49,7 @@ pub use logistics::{
 pub use market::{MarketClearing, MarketFill, MarketOffer, MarketOrder, clear_local_market};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
+pub use social::SocialStress;
 pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
 pub use time::{SimDate, TimeError};
 pub use value::{BasisPoints, Money, Population, QuantityMilli, RatePpm, ValueError};
