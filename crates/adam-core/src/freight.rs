@@ -101,7 +101,7 @@ impl FreightContract {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RouteOperatingCost {
     fuel_per_unit: Money,
     labor_per_unit: Money,

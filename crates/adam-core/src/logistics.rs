@@ -94,6 +94,11 @@ impl LogisticsRoute {
         self.carrier = Some(carrier);
         self
     }
+    #[must_use]
+    pub const fn with_cost_per_unit(mut self, cost: Money) -> Self {
+        self.cost_per_unit = cost;
+        self
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShipmentOrder {

@@ -1,7 +1,7 @@
 use crate::{
-    FirmId, GoodId, LogisticsRoute, MultiLegShipmentPlan, QuantityMilli, RouteCapacityLedger,
-    RouteId, ShipmentId, ShipmentLifecycle, ShipmentOrder, ShipmentStatus, World, WorldError,
-    plan_multileg_shipment,
+    FirmId, GoodId, LogisticsRoute, Money, MultiLegShipmentPlan, QuantityMilli,
+    RouteCapacityLedger, RouteId, ShipmentId, ShipmentLifecycle, ShipmentOrder, ShipmentStatus,
+    World, WorldError, plan_multileg_shipment,
 };
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -78,6 +78,7 @@ impl World {
     /// Plans, reserves, and starts a firm-to-firm inventory shipment atomically.
     /// # Errors
     /// Returns an error for invalid references, inventory, routing, capacity, or duplicate IDs.
+    #[allow(clippy::too_many_lines)]
     pub fn start_inventory_shipment(
         &mut self,
         source: FirmId,
@@ -117,33 +118,86 @@ impl World {
                 good: order.good(),
             });
         }
-        let routes: Vec<_> = self.logistics_routes.values().cloned().collect();
-        let plan: MultiLegShipmentPlan = plan_multileg_shipment(order, &routes, max_legs)?;
-        let route_map: BTreeMap<_, _> = routes.iter().map(|route| (route.id(), route)).collect();
-        let mut carrier_payments: BTreeMap<FirmId, i64> = BTreeMap::new();
+        let base_routes: Vec<_> = self.logistics_routes.values().cloned().collect();
+        let effective_routes: Vec<_> = base_routes
+            .iter()
+            .cloned()
+            .map(|route| {
+                let contract = self.freight_contracts().values().find(|contract| {
+                    contract.status() == crate::ContractStatus::Active
+                        && contract.shipper() == source
+                        && contract.carrier() == route.carrier().unwrap_or(source)
+                        && contract.route() == route.id()
+                });
+                let discount = contract.map_or(0, |value| value.discount().get());
+                let tariff = i128::from(route.cost_per_unit().minor_units())
+                    * i128::from(10_000 - discount)
+                    / 10_000;
+                route.with_cost_per_unit(Money::from_minor_units(
+                    i64::try_from(tariff).unwrap_or(i64::MAX),
+                ))
+            })
+            .collect();
+        let plan: MultiLegShipmentPlan =
+            plan_multileg_shipment(order, &effective_routes, max_legs)?;
+        let route_map: BTreeMap<_, _> = base_routes
+            .iter()
+            .map(|route| (route.id(), route))
+            .collect();
+        let mut carrier_deltas: BTreeMap<FirmId, i64> = BTreeMap::new();
+        let mut charged_total = 0_i64;
         for route_id in &plan.routes {
             let route = route_map[route_id];
             let carrier = route.carrier().ok_or(WorldError::InvalidLogistics(
                 "route requires a carrier firm",
             ))?;
-            let cost = i128::from(route.cost_per_unit().minor_units())
-                * i128::from(order.quantity().get())
-                / i128::from(QuantityMilli::SCALE);
-            let cost = i64::try_from(cost)
-                .map_err(|_| WorldError::ArithmeticOverflow("carrier payment"))?;
-            let current = carrier_payments.get(&carrier).copied().unwrap_or_default();
-            carrier_payments.insert(
+            let contract = self.freight_contracts().values().find(|contract| {
+                contract.status() == crate::ContractStatus::Active
+                    && contract.shipper() == source
+                    && contract.carrier() == carrier
+                    && contract.route() == *route_id
+            });
+            let cost = self
+                .route_operating_costs()
+                .get(route_id)
+                .copied()
+                .unwrap_or_default();
+            let economics = crate::evaluate_freight_economics(
+                route.cost_per_unit(),
+                order.quantity(),
+                cost,
+                contract,
+            )?;
+            charged_total = charged_total
+                .checked_add(economics.revenue.minor_units())
+                .ok_or(WorldError::ArithmeticOverflow("freight charge total"))?;
+            let current = carrier_deltas.get(&carrier).copied().unwrap_or_default();
+            carrier_deltas.insert(
                 carrier,
                 current
-                    .checked_add(cost)
-                    .ok_or(WorldError::ArithmeticOverflow("carrier payment total"))?,
+                    .checked_add(economics.margin.minor_units())
+                    .ok_or(WorldError::ArithmeticOverflow("carrier margin total"))?,
             );
         }
-        if self.firms()[&source].cash().minor_units() < plan.total_cost.minor_units() {
+        if charged_total > order.max_total_cost().minor_units() {
+            return Err(WorldError::NoFeasibleLogisticsRoute(order.id()));
+        }
+        if self.firms()[&source].cash().minor_units() < charged_total {
             return Err(WorldError::InsufficientFirmCash(source));
         }
+        for (carrier, delta) in &carrier_deltas {
+            if self.firms()[carrier]
+                .cash()
+                .minor_units()
+                .checked_add(*delta)
+                .is_none_or(|value| value < 0)
+            {
+                return Err(WorldError::InsufficientFirmCash(*carrier));
+            }
+        }
+        let charged_total = Money::from_minor_units(charged_total);
         let mut lifecycle = ShipmentLifecycle::from_plan(&plan, order.quantity());
-        lifecycle.start(&mut self.route_capacity, &routes)?;
+        lifecycle.start(&mut self.route_capacity, &base_routes)?;
         self.firms
             .get_mut(&source)
             .ok_or(WorldError::UnknownFirm(source))?
@@ -151,12 +205,12 @@ impl World {
         self.firms
             .get_mut(&source)
             .ok_or(WorldError::UnknownFirm(source))?
-            .debit_cash(plan.total_cost)?;
-        for (carrier, value) in carrier_payments {
+            .debit_cash(charged_total)?;
+        for (carrier, value) in carrier_deltas {
             self.firms
                 .get_mut(&carrier)
                 .ok_or(WorldError::UnknownFirm(carrier))?
-                .credit_cash(crate::Money::from_minor_units(value))?;
+                .apply_cash_delta(crate::Money::from_minor_units(value))?;
         }
         self.events.append(
             self.date,
@@ -166,7 +220,7 @@ impl World {
                 source,
                 destination,
                 quantity: order.quantity(),
-                total_cost: plan.total_cost,
+                total_cost: charged_total,
             },
         );
         self.inventory_shipments.insert(
@@ -177,7 +231,7 @@ impl World {
                 source,
                 destination,
                 quantity: order.quantity(),
-                total_cost: plan.total_cost,
+                total_cost: charged_total,
                 lifecycle,
             },
         );

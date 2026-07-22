@@ -186,12 +186,15 @@ impl Firm {
         self.cash = Money::from_minor_units(self.cash.minor_units() - value);
         Ok(())
     }
-    pub(crate) fn credit_cash(&mut self, amount: Money) -> Result<(), WorldError> {
+    pub(crate) fn apply_cash_delta(&mut self, delta: Money) -> Result<(), WorldError> {
         let value = self
             .cash
             .minor_units()
-            .checked_add(amount.minor_units())
-            .ok_or(WorldError::ArithmeticOverflow("firm cash credit"))?;
+            .checked_add(delta.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("firm cash delta"))?;
+        if value < 0 {
+            return Err(WorldError::InsufficientFirmCash(self.id));
+        }
         self.cash = Money::from_minor_units(value);
         Ok(())
     }
