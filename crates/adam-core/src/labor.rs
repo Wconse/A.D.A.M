@@ -53,6 +53,10 @@ impl EmploymentAgreement {
     pub const fn arrears(&self) -> Money {
         self.arrears
     }
+    #[must_use]
+    pub const fn active(&self) -> bool {
+        self.active
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PayrollRecord {

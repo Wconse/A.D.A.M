@@ -227,8 +227,11 @@ impl HouseholdCohort {
         self.liquid_wealth = Money::from_minor_units(value);
         Ok(())
     }
-    pub(crate) fn apply_monthly_cashflow(&mut self) -> Result<HouseholdCashflow, WorldError> {
-        let income = self.annual_income.minor_units() / 12;
+    pub(crate) fn apply_monthly_cashflow(
+        &mut self,
+        income: Money,
+    ) -> Result<HouseholdCashflow, WorldError> {
+        let income = income.minor_units();
         let available = self
             .liquid_wealth
             .minor_units()
@@ -392,7 +395,16 @@ impl World {
         let mut updated = self.cohorts.clone();
         let mut rows = Vec::new();
         for cohort in updated.values_mut() {
-            rows.push(cohort.apply_monthly_cashflow()?);
+            let contracted = self
+                .employment_agreements
+                .values()
+                .any(|agreement| agreement.active() && agreement.cohort() == cohort.id());
+            let fallback = if contracted {
+                Money::default()
+            } else {
+                Money::from_minor_units(cohort.annual_income().minor_units() / 12)
+            };
+            rows.push(cohort.apply_monthly_cashflow(fallback)?);
         }
         self.cohorts = updated;
         for row in &rows {
