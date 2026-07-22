@@ -1,7 +1,7 @@
 use crate::{
-    FirmId, GoodId, LogisticsRoute, Money, MultiLegShipmentPlan, QuantityMilli,
-    RouteCapacityLedger, RouteId, ShipmentId, ShipmentLifecycle, ShipmentOrder, ShipmentStatus,
-    World, WorldError, plan_multileg_shipment,
+    ContractId, FirmId, FreightCapacityLedger, GoodId, LogisticsRoute, Money, MultiLegShipmentPlan,
+    QuantityMilli, RouteCapacityLedger, RouteId, ShipmentId, ShipmentLifecycle, ShipmentOrder,
+    ShipmentStatus, World, WorldError, plan_multileg_shipment,
 };
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -12,6 +12,7 @@ pub struct InventoryShipment {
     destination: FirmId,
     quantity: QuantityMilli,
     total_cost: crate::Money,
+    capacity_contracts: Vec<Option<ContractId>>,
     lifecycle: ShipmentLifecycle,
 }
 impl InventoryShipment {
@@ -38,6 +39,10 @@ impl InventoryShipment {
     #[must_use]
     pub const fn total_cost(&self) -> crate::Money {
         self.total_cost
+    }
+    #[must_use]
+    pub fn capacity_contracts(&self) -> &[Option<ContractId>] {
+        &self.capacity_contracts
     }
     #[must_use]
     pub const fn status(&self) -> ShipmentStatus {
@@ -146,6 +151,7 @@ impl World {
             .collect();
         let mut carrier_deltas: BTreeMap<FirmId, i64> = BTreeMap::new();
         let mut charged_total = 0_i64;
+        let mut capacity_contracts = Vec::with_capacity(plan.routes.len());
         for route_id in &plan.routes {
             let route = route_map[route_id];
             let carrier = route.carrier().ok_or(WorldError::InvalidLogistics(
@@ -157,6 +163,7 @@ impl World {
                     && contract.carrier() == carrier
                     && contract.route() == *route_id
             });
+            capacity_contracts.push(contract.map(crate::FreightContract::id));
             let cost = self
                 .route_operating_costs()
                 .get(route_id)
@@ -196,8 +203,20 @@ impl World {
             }
         }
         let charged_total = Money::from_minor_units(charged_total);
+        let mut proposed_freight_capacity = self.freight_capacity.clone();
+        for (route_id, contract_id) in plan.routes.iter().zip(&capacity_contracts) {
+            let route = route_map[route_id];
+            let contract = contract_id.and_then(|id| self.freight_contracts().get(&id));
+            proposed_freight_capacity.reserve(
+                route,
+                order.quantity(),
+                contract,
+                self.freight_contracts(),
+            )?;
+        }
         let mut lifecycle = ShipmentLifecycle::from_plan(&plan, order.quantity());
         lifecycle.start(&mut self.route_capacity, &base_routes)?;
+        self.freight_capacity = proposed_freight_capacity;
         self.firms
             .get_mut(&source)
             .ok_or(WorldError::UnknownFirm(source))?
@@ -232,6 +251,7 @@ impl World {
                 destination,
                 quantity: order.quantity(),
                 total_cost: charged_total,
+                capacity_contracts,
                 lifecycle,
             },
         );
@@ -253,6 +273,15 @@ impl World {
             .lifecycle
             .advance_days(days, &mut self.route_capacity)?;
         if shipment.lifecycle.status() == ShipmentStatus::Delivered {
+            for (route, contract) in shipment
+                .lifecycle
+                .routes()
+                .iter()
+                .zip(&shipment.capacity_contracts)
+            {
+                self.freight_capacity
+                    .release(*route, shipment.quantity, *contract)?;
+            }
             self.firms
                 .get_mut(&shipment.destination)
                 .ok_or(WorldError::UnknownFirm(shipment.destination))?
@@ -276,6 +305,10 @@ impl World {
     #[must_use]
     pub const fn route_capacity(&self) -> &RouteCapacityLedger {
         &self.route_capacity
+    }
+    #[must_use]
+    pub const fn freight_capacity(&self) -> &FreightCapacityLedger {
+        &self.freight_capacity
     }
     #[must_use]
     pub fn inventory_shipments(&self) -> &BTreeMap<ShipmentId, InventoryShipment> {
@@ -403,6 +436,7 @@ mod tests {
             400
         );
         assert!(world.route_capacity().reserved().is_empty());
+        assert!(world.freight_capacity().spot_used().is_empty());
         assert_eq!(
             world.inventory_shipments()[&ShipmentId::new(1)].status(),
             ShipmentStatus::Delivered

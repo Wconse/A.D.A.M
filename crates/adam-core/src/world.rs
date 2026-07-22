@@ -4,10 +4,11 @@ use std::fmt;
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile, ContractId,
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
-    FirmId, FirmPolicy, FreightContract, Good, GoodId, HouseholdCohort, InventoryShipment,
-    InvestmentProject, LogisticsRoute, Money, NeedProfileId, OwnershipStake, Population,
-    PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId, ResolutionStatus,
-    RouteCapacityLedger, RouteId, RouteOperatingCost, ShipmentId, SimDate, TimeError, WorldSeed,
+    FirmId, FirmPolicy, FreightCapacityLedger, FreightContract, Good, GoodId, HouseholdCohort,
+    InventoryShipment, InvestmentProject, LogisticsRoute, Money, NeedProfileId, OwnershipStake,
+    Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId,
+    ResolutionStatus, RouteCapacityLedger, RouteId, RouteOperatingCost, ShipmentId, SimDate,
+    TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -589,6 +590,7 @@ pub struct World {
     pub(crate) investment_projects: BTreeMap<ProjectId, InvestmentProject>,
     pub(crate) logistics_routes: BTreeMap<RouteId, LogisticsRoute>,
     pub(crate) route_capacity: RouteCapacityLedger,
+    pub(crate) freight_capacity: FreightCapacityLedger,
     pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
     pub(crate) freight_contracts: BTreeMap<ContractId, FreightContract>,
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
@@ -624,6 +626,7 @@ impl World {
             investment_projects: BTreeMap::new(),
             logistics_routes: BTreeMap::new(),
             route_capacity: RouteCapacityLedger::default(),
+            freight_capacity: FreightCapacityLedger::default(),
             inventory_shipments: BTreeMap::new(),
             freight_contracts: BTreeMap::new(),
             route_operating_costs: BTreeMap::new(),
@@ -830,6 +833,16 @@ impl World {
             hash.write_u32(route.get());
             hash.write_i64(cost.total_per_unit().minor_units());
         }
+        hash.write_u64(self.freight_capacity.contract_used().len() as u64);
+        for (id, q) in self.freight_capacity.contract_used() {
+            hash.write_u32(id.get());
+            hash.write_u64(q.get());
+        }
+        hash.write_u64(self.freight_capacity.spot_used().len() as u64);
+        for (id, q) in self.freight_capacity.spot_used() {
+            hash.write_u32(id.get());
+            hash.write_u64(q.get());
+        }
     }
 
     fn write_logistics_fingerprint(&self, hash: &mut StableHasher) {
@@ -872,8 +885,9 @@ impl World {
                 crate::ShipmentStatus::Cancelled => 5,
             });
             hash.write_u64(shipment.routes().len() as u64);
-            for route in shipment.routes() {
+            for (route, contract) in shipment.routes().iter().zip(shipment.capacity_contracts()) {
                 hash.write_u32(route.get());
+                hash.write_u32(contract.map_or(0, ContractId::get));
             }
         }
     }
