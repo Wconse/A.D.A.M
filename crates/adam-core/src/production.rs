@@ -381,6 +381,44 @@ impl World {
     }
 }
 
+impl World {
+    /// Executes one physical production month by consuming recipe inputs and crediting outputs.
+    /// # Errors
+    /// Returns an error on arithmetic overflow; plans are computed before mutation.
+    pub fn execute_monthly_production(&mut self) -> Result<Vec<ProductionPlan>, WorldError> {
+        let plans = self.plan_monthly_production()?;
+        for plan in &plans {
+            if plan.batches() == 0 {
+                continue;
+            }
+            let recipe = self.production_recipes[&self.firms[&plan.firm()].recipe()].clone();
+            let firm = self
+                .firms
+                .get_mut(&plan.firm())
+                .ok_or(WorldError::UnknownFirm(plan.firm()))?;
+            for input in recipe.inputs() {
+                let amount = input
+                    .quantity_per_batch()
+                    .get()
+                    .checked_mul(plan.batches())
+                    .ok_or(WorldError::ArithmeticOverflow("production input execution"))?;
+                firm.debit_inventory(input.good(), QuantityMilli::new(amount))?;
+            }
+            firm.credit_inventory(plan.output_good(), plan.output())?;
+            self.events.append(
+                self.date,
+                crate::DomainEvent::ProductionCompleted {
+                    firm: plan.firm(),
+                    good: plan.output_good(),
+                    quantity: plan.output(),
+                    batches: plan.batches(),
+                },
+            );
+        }
+        Ok(plans)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +485,23 @@ mod tests {
         let plan = world(1_000_000, 2).plan_monthly_production().expect("plan");
         assert_eq!(plan[0].batches(), 2);
         assert_eq!(plan[0].limiting_factor(), "labor");
+    }
+    #[test]
+    fn execution_consumes_inputs_and_credits_output() {
+        let mut w = world(6_000, 100);
+        let before = w.firms()[&FirmId::new(1)].inventories().clone();
+        let plans = w.execute_monthly_production().expect("execute");
+        let plan = &plans[0];
+        assert!(plan.batches() > 0);
+        let after = w.firms()[&FirmId::new(1)].inventories();
+        assert!(
+            after
+                .get(&GoodId::new(2))
+                .copied()
+                .unwrap_or_default()
+                .get()
+                < before[&GoodId::new(2)].get()
+        );
+        assert_eq!(after[&GoodId::new(1)].get(), plan.output().get());
     }
 }

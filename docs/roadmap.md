@@ -206,3 +206,5 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 ## Progress update rule
 
 Every accepted slice updates this file with status, tests, measurements, known approximations, and the next gate. New ideas are added only after passing the depth rule in `docs/design/simulation-plan.md`.
+
+- Added authoritative monthly production execution with input consumption, output inventory, replayable command, and typed events.
