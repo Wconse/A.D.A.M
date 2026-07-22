@@ -27,7 +27,7 @@ pub use demand::{
 };
 pub use event::{DomainEvent, EventEnvelope, EventLog};
 pub use freight::{
-    ContractStatus, FreightContract, FreightEconomics, RouteOperatingCost,
+    ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics, RouteOperatingCost,
     evaluate_freight_economics,
 };
 pub use ids::{

@@ -392,6 +392,8 @@ pub enum WorldError {
     InvalidFreightContract(&'static str),
     DuplicateFreightContract(ContractId),
     UnknownFreightContract(ContractId),
+    InsufficientContractCapacity(ContractId),
+    InsufficientSpotCapacity(RouteId),
     DuplicateLogisticsRoute(RouteId),
     DuplicateShipment(ShipmentId),
     UnknownShipment(ShipmentId),
@@ -500,6 +502,13 @@ impl fmt::Display for WorldError {
                 write!(formatter, "freight contract {id} already exists")
             }
             Self::UnknownFreightContract(id) => write!(formatter, "unknown freight contract {id}"),
+            Self::InsufficientContractCapacity(id) => write!(
+                formatter,
+                "freight contract {id} has insufficient reserved capacity"
+            ),
+            Self::InsufficientSpotCapacity(id) => {
+                write!(formatter, "route {id} has insufficient spot capacity")
+            }
             Self::DuplicateLogisticsRoute(id) => {
                 write!(formatter, "logistics route {id} already exists")
             }

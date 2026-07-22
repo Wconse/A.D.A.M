@@ -266,6 +266,123 @@ impl World {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FreightCapacityLedger {
+    contract_used: BTreeMap<ContractId, QuantityMilli>,
+    spot_used: BTreeMap<RouteId, QuantityMilli>,
+}
+impl FreightCapacityLedger {
+    #[must_use]
+    pub fn contract_used(&self) -> &BTreeMap<ContractId, QuantityMilli> {
+        &self.contract_used
+    }
+    #[must_use]
+    pub fn spot_used(&self) -> &BTreeMap<RouteId, QuantityMilli> {
+        &self.spot_used
+    }
+    /// Reserves active contract capacity or the route's uncontracted spot pool.
+    /// # Errors
+    /// Returns an error without mutation when the selected pool lacks capacity.
+    pub fn reserve(
+        &mut self,
+        route: &crate::LogisticsRoute,
+        quantity: QuantityMilli,
+        contract: Option<&FreightContract>,
+        contracts: &BTreeMap<ContractId, FreightContract>,
+    ) -> Result<(), WorldError> {
+        if let Some(contract) = contract {
+            if contract.status() != ContractStatus::Active || contract.route() != route.id() {
+                return Err(WorldError::InvalidFreightContract(
+                    "contract is not active for route",
+                ));
+            }
+            let used = self
+                .contract_used
+                .get(&contract.id())
+                .copied()
+                .unwrap_or_default()
+                .get();
+            let next = used
+                .checked_add(quantity.get())
+                .ok_or(WorldError::ArithmeticOverflow("contract capacity"))?;
+            if next > contract.reserved_capacity().get() {
+                return Err(WorldError::InsufficientContractCapacity(contract.id()));
+            }
+            self.contract_used
+                .insert(contract.id(), QuantityMilli::new(next));
+            return Ok(());
+        }
+        let reserved: u64 = contracts
+            .values()
+            .filter(|c| c.status() == ContractStatus::Active && c.route() == route.id())
+            .map(|c| c.reserved_capacity().get())
+            .sum();
+        let spot_capacity = route.capacity().get().saturating_sub(reserved);
+        let used = self
+            .spot_used
+            .get(&route.id())
+            .copied()
+            .unwrap_or_default()
+            .get();
+        let next = used
+            .checked_add(quantity.get())
+            .ok_or(WorldError::ArithmeticOverflow("spot capacity"))?;
+        if next > spot_capacity {
+            return Err(WorldError::InsufficientSpotCapacity(route.id()));
+        }
+        self.spot_used.insert(route.id(), QuantityMilli::new(next));
+        Ok(())
+    }
+    /// Releases previously reserved capacity.
+    /// # Errors
+    /// Returns an error when release exceeds recorded usage.
+    pub fn release(
+        &mut self,
+        route: RouteId,
+        quantity: QuantityMilli,
+        contract: Option<ContractId>,
+    ) -> Result<(), WorldError> {
+        let (map, key) = if let Some(id) = contract {
+            (&mut self.contract_used, id)
+        } else {
+            return self.release_spot(route, quantity);
+        };
+        let used = map.get(&key).copied().unwrap_or_default().get();
+        if used < quantity.get() {
+            return Err(WorldError::InvalidFreightContract(
+                "release exceeds contract usage",
+            ));
+        }
+        let next = used - quantity.get();
+        if next == 0 {
+            map.remove(&key);
+        } else {
+            map.insert(key, QuantityMilli::new(next));
+        }
+        Ok(())
+    }
+    fn release_spot(&mut self, route: RouteId, quantity: QuantityMilli) -> Result<(), WorldError> {
+        let used = self
+            .spot_used
+            .get(&route)
+            .copied()
+            .unwrap_or_default()
+            .get();
+        if used < quantity.get() {
+            return Err(WorldError::InvalidFreightContract(
+                "release exceeds spot usage",
+            ));
+        }
+        let next = used - quantity.get();
+        if next == 0 {
+            self.spot_used.remove(&route);
+        } else {
+            self.spot_used.insert(route, QuantityMilli::new(next));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +416,45 @@ mod tests {
         assert_eq!(result.revenue, Money::from_minor_units(5));
         assert_eq!(result.operating_cost, Money::from_minor_units(8));
         assert_eq!(result.margin, Money::from_minor_units(-3));
+    }
+    #[test]
+    fn contract_capacity_is_protected_from_spot_shipments() {
+        let route = crate::LogisticsRoute::new(
+            RouteId::new(1),
+            crate::RegionId::new(1),
+            crate::RegionId::new(2),
+            crate::TransportMode::Rail,
+            QuantityMilli::new(1000),
+            Money::from_minor_units(10),
+            2,
+            9500,
+        )
+        .expect("route");
+        let mut contract = FreightContract::new(
+            ContractId::new(1),
+            FirmId::new(1),
+            FirmId::new(2),
+            RouteId::new(1),
+            QuantityMilli::new(600),
+            BasisPoints::new(0).expect("discount"),
+            1,
+            12,
+        )
+        .expect("contract");
+        contract.activate();
+        let contracts = BTreeMap::from([(contract.id(), contract.clone())]);
+        let mut ledger = FreightCapacityLedger::default();
+        ledger
+            .reserve(&route, QuantityMilli::new(400), None, &contracts)
+            .expect("spot");
+        assert!(
+            ledger
+                .reserve(&route, QuantityMilli::new(1), None, &contracts)
+                .is_err()
+        );
+        ledger
+            .reserve(&route, QuantityMilli::new(600), Some(&contract), &contracts)
+            .expect("contract");
+        assert_eq!(ledger.contract_used()[&ContractId::new(1)].get(), 600);
     }
 }

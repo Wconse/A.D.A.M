@@ -173,6 +173,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added long-term freight contract values, reserved capacity, term/status, discounts, route fuel/labor/maintenance costs, and deterministic carrier margin evaluation.
 - Integrated freight contracts and route operating-cost profiles into World with validation, commands, lifecycle events, save/replay, expiry, and fingerprinting.
 - Applied active contract discounts and route operating costs to shipment routing and atomic shipper/carrier cash settlement.
+- Added separate guaranteed contract and residual spot capacity ledgers with protected reservations and releases.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.
