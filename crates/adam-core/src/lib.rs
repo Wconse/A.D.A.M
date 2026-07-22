@@ -10,6 +10,7 @@ pub mod freight;
 pub mod ids;
 pub mod investment;
 pub mod logistics;
+pub mod market;
 pub mod production;
 pub mod rng;
 mod simulation;
@@ -42,6 +43,7 @@ pub use logistics::{
     ShipmentStatus, ShipmentTransition, TransportMode, plan_direct_shipment,
     plan_multileg_shipment,
 };
+pub use market::{MarketClearing, MarketFill, MarketOffer, MarketOrder, clear_local_market};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
 pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
