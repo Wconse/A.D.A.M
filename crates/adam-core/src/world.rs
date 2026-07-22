@@ -1,3 +1,4 @@
+use crate::{TerminalCapacityLedger, TerminalId};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -5,10 +6,10 @@ use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile, ContractId,
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
     FirmId, FirmPolicy, FreightCapacityLedger, FreightContract, Good, GoodId, HouseholdCohort,
-    InventoryShipment, InvestmentProject, LogisticsRoute, Money, NeedProfileId, OwnershipStake,
-    Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId,
-    ResolutionStatus, RouteCapacityLedger, RouteId, RouteOperatingCost, ShipmentId, SimDate,
-    TimeError, WorldSeed,
+    InventoryShipment, InvestmentProject, LogisticsRoute, LogisticsTerminal, Money, NeedProfileId,
+    OwnershipStake, Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId,
+    ResolutionId, ResolutionStatus, RouteCapacityLedger, RouteId, RouteOperatingCost, ShipmentId,
+    SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -391,6 +392,9 @@ pub enum WorldError {
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
     InvalidFreightContract(&'static str),
+    InvalidTerminal(&'static str),
+    DuplicateTerminal(TerminalId),
+    InsufficientTerminalCapacity(TerminalId),
     DuplicateFreightContract(ContractId),
     UnknownFreightContract(ContractId),
     InsufficientContractCapacity(ContractId),
@@ -496,6 +500,11 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid investment project: {reason}")
             }
             Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
+            Self::InvalidTerminal(reason) => write!(formatter, "invalid terminal: {reason}"),
+            Self::DuplicateTerminal(id) => write!(formatter, "terminal {id} already exists"),
+            Self::InsufficientTerminalCapacity(id) => {
+                write!(formatter, "terminal {id} has insufficient capacity")
+            }
             Self::InvalidFreightContract(reason) => {
                 write!(formatter, "invalid freight contract: {reason}")
             }
@@ -592,6 +601,8 @@ pub struct World {
     pub(crate) route_capacity: RouteCapacityLedger,
     pub(crate) freight_capacity: FreightCapacityLedger,
     pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
+    pub(crate) terminals: BTreeMap<TerminalId, LogisticsTerminal>,
+    pub(crate) terminal_capacity: TerminalCapacityLedger,
     pub(crate) freight_contracts: BTreeMap<ContractId, FreightContract>,
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
@@ -628,6 +639,8 @@ impl World {
             route_capacity: RouteCapacityLedger::default(),
             freight_capacity: FreightCapacityLedger::default(),
             inventory_shipments: BTreeMap::new(),
+            terminals: BTreeMap::new(),
+            terminal_capacity: TerminalCapacityLedger::default(),
             freight_contracts: BTreeMap::new(),
             route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
@@ -808,6 +821,23 @@ impl World {
     #[must_use]
     pub const fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    fn write_terminal_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.terminals.len() as u64);
+        for (id, terminal) in &self.terminals {
+            hash.write_u32(id.get());
+            hash.write_u32(terminal.region().get());
+            hash.write_u32(terminal.operator().get());
+            hash.write_u64(terminal.capacity().get());
+            hash.write_i64(terminal.storage_cost().minor_units());
+            hash.write_u16(terminal.handling_days());
+        }
+        hash.write_u64(self.terminal_capacity.used().len() as u64);
+        for (id, q) in self.terminal_capacity.used() {
+            hash.write_u32(id.get());
+            hash.write_u64(q.get());
+        }
     }
 
     fn write_freight_contract_fingerprint(&self, hash: &mut StableHasher) {
@@ -1055,6 +1085,7 @@ impl World {
         self.write_investment_fingerprint(&mut hash);
         self.write_logistics_fingerprint(&mut hash);
         self.write_freight_contract_fingerprint(&mut hash);
+        self.write_terminal_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
             hash.write_u32(actor.get());

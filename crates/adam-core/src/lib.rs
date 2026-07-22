@@ -13,6 +13,7 @@ pub mod logistics;
 pub mod production;
 pub mod rng;
 mod simulation;
+pub mod terminal;
 pub mod time;
 pub mod value;
 pub mod world;
@@ -32,7 +33,7 @@ pub use freight::{
 };
 pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
-    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId,
+    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use logistics::{
@@ -43,6 +44,7 @@ pub use logistics::{
 };
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
+pub use terminal::{LogisticsTerminal, TerminalCapacityLedger};
 pub use time::{SimDate, TimeError};
 pub use value::{BasisPoints, Money, Population, QuantityMilli, RatePpm, ValueError};
 pub use world::{
