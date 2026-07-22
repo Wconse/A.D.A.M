@@ -561,6 +561,7 @@ impl LegShipmentLifecycle {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum IntermodalPhase {
     Transit,
+    WaitingForTerminal,
     TerminalHandling,
     Delivered,
 }
@@ -633,6 +634,19 @@ impl IntermodalShipmentLifecycle {
     pub fn current_route(&self) -> Option<RouteId> {
         (self.phase == IntermodalPhase::Transit).then(|| self.routes[self.current_leg])
     }
+    /// Starts handling after external terminal admission.
+    /// # Errors
+    /// Returns an error unless waiting for a terminal.
+    pub fn begin_terminal_handling(&mut self) -> Result<(), WorldError> {
+        if self.phase != IntermodalPhase::WaitingForTerminal {
+            return Err(WorldError::InvalidLogistics(
+                "shipment is not waiting for terminal",
+            ));
+        }
+        self.remaining_days = self.transfer_days[self.current_leg];
+        self.phase = IntermodalPhase::TerminalHandling;
+        Ok(())
+    }
     /// Advances through transit and terminal handling, reporting causal transitions.
     /// # Errors
     /// Returns an error after delivery.
@@ -660,10 +674,11 @@ impl IntermodalShipmentLifecycle {
                         self.remaining_days = 0;
                         self.phase = IntermodalPhase::Delivered;
                     } else {
-                        self.remaining_days = self.transfer_days[self.current_leg];
-                        self.phase = IntermodalPhase::TerminalHandling;
+                        self.remaining_days = 0;
+                        self.phase = IntermodalPhase::WaitingForTerminal;
                     }
                 }
+                IntermodalPhase::WaitingForTerminal | IntermodalPhase::Delivered => break,
                 IntermodalPhase::TerminalHandling => {
                     transitions.push(ShipmentTransition::TransferCompleted {
                         after_leg: self.current_leg,
@@ -672,7 +687,6 @@ impl IntermodalShipmentLifecycle {
                     self.remaining_days = self.leg_days[self.current_leg];
                     self.phase = IntermodalPhase::Transit;
                 }
-                IntermodalPhase::Delivered => break,
             }
         }
         Ok(transitions)
@@ -876,6 +890,9 @@ mod tests {
             lifecycle.advance_days(2).expect("advance"),
             vec![ShipmentTransition::RouteCompleted(RouteId::new(1))]
         );
+        assert_eq!(lifecycle.phase(), IntermodalPhase::WaitingForTerminal);
+        assert!(lifecycle.advance_days(5).expect("wait").is_empty());
+        lifecycle.begin_terminal_handling().expect("admit");
         assert_eq!(lifecycle.phase(), IntermodalPhase::TerminalHandling);
         assert_eq!(
             lifecycle.advance_days(1).expect("handling"),
