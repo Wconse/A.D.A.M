@@ -625,6 +625,7 @@ pub struct World {
     pub(crate) deprivation_pressure: BTreeMap<CohortId, BasisPoints>,
     pub(crate) social_stress: BTreeMap<CohortId, crate::SocialStress>,
     pub(crate) social_stress_memory: BTreeMap<CohortId, crate::SocialStressMemory>,
+    pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -669,6 +670,7 @@ impl World {
             deprivation_pressure: BTreeMap::new(),
             social_stress: BTreeMap::new(),
             social_stress_memory: BTreeMap::new(),
+            cohort_experience: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -888,6 +890,13 @@ impl World {
             hash.write_u32(cohort.get());
             hash.write_u16(row.health_burden().get());
             hash.write_u16(row.unrest_memory().get());
+        }
+        hash.write_u64(self.cohort_experience.len() as u64);
+        for (cohort, row) in &self.cohort_experience {
+            hash.write_u32(cohort.get());
+            hash.write_u32(row.survival_shortage_months());
+            hash.write_u32(row.unemployment_months());
+            hash.write_u32(row.debt_distress_months());
         }
     }
 

@@ -1,5 +1,25 @@
 use crate::{BasisPoints, CohortId, NeedTier, World, WorldError};
 use std::collections::BTreeMap;
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CohortExperience {
+    survival_shortage_months: u32,
+    unemployment_months: u32,
+    debt_distress_months: u32,
+}
+impl CohortExperience {
+    #[must_use]
+    pub const fn survival_shortage_months(self) -> u32 {
+        self.survival_shortage_months
+    }
+    #[must_use]
+    pub const fn unemployment_months(self) -> u32 {
+        self.unemployment_months
+    }
+    #[must_use]
+    pub const fn debt_distress_months(self) -> u32 {
+        self.debt_distress_months
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SocialStress {
     health_risk: BasisPoints,
@@ -115,6 +135,50 @@ impl World {
     #[must_use]
     pub fn social_stress_memory(&self) -> &BTreeMap<CohortId, SocialStressMemory> {
         &self.social_stress_memory
+    }
+    /// Updates concrete monthly experience durations without applying generic debuffs.
+    /// # Errors
+    /// Returns an error if a duration counter overflows.
+    pub fn update_monthly_cohort_experience(&mut self) -> Result<(), WorldError> {
+        let mut next = self.cohort_experience.clone();
+        for (id, cohort) in &self.cohorts {
+            let row = next.entry(*id).or_default();
+            let survival_shortage =
+                self.unmet_demand
+                    .iter()
+                    .any(|((cohort_id, _good, tier), q)| {
+                        cohort_id == id && *tier == NeedTier::Survival && q.get() > 0
+                    });
+            row.survival_shortage_months = if survival_shortage {
+                row.survival_shortage_months
+                    .checked_add(1)
+                    .ok_or(WorldError::ArithmeticOverflow("survival shortage duration"))?
+            } else {
+                0
+            };
+            row.unemployment_months = if cohort.employment() == crate::EmploymentStatus::Unemployed
+            {
+                row.unemployment_months
+                    .checked_add(1)
+                    .ok_or(WorldError::ArithmeticOverflow("unemployment duration"))?
+            } else {
+                0
+            };
+            let distressed = cohort.debt().minor_units() > cohort.liquid_wealth().minor_units();
+            row.debt_distress_months = if distressed {
+                row.debt_distress_months
+                    .checked_add(1)
+                    .ok_or(WorldError::ArithmeticOverflow("debt distress duration"))?
+            } else {
+                0
+            };
+        }
+        self.cohort_experience = next;
+        Ok(())
+    }
+    #[must_use]
+    pub fn cohort_experience(&self) -> &BTreeMap<CohortId, CohortExperience> {
+        &self.cohort_experience
     }
     #[must_use]
     pub fn social_stress(&self) -> &BTreeMap<CohortId, SocialStress> {
