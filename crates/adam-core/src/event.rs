@@ -6,6 +6,12 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    CohortExperienceUpdated {
+        cohort: CohortId,
+        survival_shortage_months: u32,
+        unemployment_months: u32,
+        debt_distress_months: u32,
+    },
     SocialStressUpdated {
         cohort: CohortId,
         health_risk: BasisPoints,

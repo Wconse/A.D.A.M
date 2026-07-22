@@ -210,3 +210,5 @@ Every accepted slice updates this file with status, tests, measurements, known a
 - Added authoritative monthly production execution with input consumption, output inventory, replayable command, and typed events.
 
 - Added deterministic local market clearing with physical supply, budgets, price-ranked sellers, canonical buyers, fills, and explicit unmet demand.
+
+- Reoriented social causality toward concrete cohort experience durations and typed historical events rather than generic crisis debuffs.

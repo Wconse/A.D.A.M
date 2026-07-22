@@ -174,6 +174,17 @@ impl World {
             };
         }
         self.cohort_experience = next;
+        for (cohort, row) in &self.cohort_experience {
+            self.events.append(
+                self.date,
+                crate::DomainEvent::CohortExperienceUpdated {
+                    cohort: *cohort,
+                    survival_shortage_months: row.survival_shortage_months(),
+                    unemployment_months: row.unemployment_months(),
+                    debt_distress_months: row.debt_distress_months(),
+                },
+            );
+        }
         Ok(())
     }
     #[must_use]
