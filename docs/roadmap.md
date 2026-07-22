@@ -183,6 +183,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added deterministic FIFO terminal queues with unique shipments, head-of-line blocking, and shared-capacity admission.
 - Integrated terminal queues into World with shipment validation, FIFO admission commands, events, save/replay, and fingerprinting.
 - Added an explicit waiting-for-terminal phase so queue delay cannot consume handling time before terminal admission.
+- Migrated authoritative shipments to intermodal phases with deterministic terminal selection, automatic queueing, FIFO admission, handling, and throughput release.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

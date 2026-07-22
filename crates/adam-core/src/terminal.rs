@@ -178,6 +178,10 @@ impl World {
             .map(|entry| entry.shipment())
             .collect::<Vec<_>>();
         for shipment in &ids {
+            self.inventory_shipments
+                .get_mut(shipment)
+                .ok_or(WorldError::UnknownShipment(*shipment))?
+                .begin_terminal_handling()?;
             self.events.append(
                 self.date,
                 crate::DomainEvent::ShipmentAdmittedToTerminal {

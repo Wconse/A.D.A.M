@@ -634,6 +634,10 @@ impl IntermodalShipmentLifecycle {
     pub fn current_route(&self) -> Option<RouteId> {
         (self.phase == IntermodalPhase::Transit).then(|| self.routes[self.current_leg])
     }
+    #[must_use]
+    pub fn routes(&self) -> &[RouteId] {
+        &self.routes
+    }
     /// Starts handling after external terminal admission.
     /// # Errors
     /// Returns an error unless waiting for a terminal.

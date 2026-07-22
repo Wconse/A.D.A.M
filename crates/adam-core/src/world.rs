@@ -396,6 +396,7 @@ pub enum WorldError {
     DuplicateTerminal(TerminalId),
     InsufficientTerminalCapacity(TerminalId),
     UnknownTerminal(TerminalId),
+    NoTerminalInRegion(RegionId),
     DuplicateFreightContract(ContractId),
     UnknownFreightContract(ContractId),
     InsufficientContractCapacity(ContractId),
@@ -504,6 +505,9 @@ impl fmt::Display for WorldError {
             Self::InvalidTerminal(reason) => write!(formatter, "invalid terminal: {reason}"),
             Self::DuplicateTerminal(id) => write!(formatter, "terminal {id} already exists"),
             Self::UnknownTerminal(id) => write!(formatter, "unknown terminal {id}"),
+            Self::NoTerminalInRegion(id) => {
+                write!(formatter, "region {id} has no logistics terminal")
+            }
             Self::InsufficientTerminalCapacity(id) => {
                 write!(formatter, "terminal {id} has insufficient capacity")
             }
@@ -931,6 +935,16 @@ impl World {
             for (route, contract) in shipment.routes().iter().zip(shipment.capacity_contracts()) {
                 hash.write_u32(route.get());
                 hash.write_u32(contract.map_or(0, ContractId::get));
+            }
+            hash.write_u8(match shipment.phase() {
+                crate::IntermodalPhase::Transit => 1,
+                crate::IntermodalPhase::WaitingForTerminal => 2,
+                crate::IntermodalPhase::TerminalHandling => 3,
+                crate::IntermodalPhase::Delivered => 4,
+            });
+            hash.write_u64(shipment.terminal_ids().len() as u64);
+            for terminal in shipment.terminal_ids() {
+                hash.write_u32(terminal.get());
             }
         }
     }

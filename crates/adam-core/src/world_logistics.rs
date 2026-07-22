@@ -1,7 +1,8 @@
 use crate::{
-    ContractId, FirmId, FreightCapacityLedger, GoodId, LegShipmentLifecycle, LogisticsRoute, Money,
-    MultiLegShipmentPlan, QuantityMilli, RouteCapacityLedger, RouteId, ShipmentId, ShipmentOrder,
-    ShipmentStatus, World, WorldError, plan_multileg_shipment,
+    ContractId, FirmId, FreightCapacityLedger, GoodId, IntermodalPhase,
+    IntermodalShipmentLifecycle, LogisticsRoute, Money, MultiLegShipmentPlan, QuantityMilli,
+    RouteCapacityLedger, RouteId, ShipmentId, ShipmentOrder, ShipmentStatus, ShipmentTransition,
+    TerminalId, World, WorldError, plan_multileg_shipment,
 };
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -13,7 +14,8 @@ pub struct InventoryShipment {
     quantity: QuantityMilli,
     total_cost: crate::Money,
     capacity_contracts: Vec<Option<ContractId>>,
-    lifecycle: LegShipmentLifecycle,
+    terminal_ids: Vec<TerminalId>,
+    lifecycle: IntermodalShipmentLifecycle,
 }
 impl InventoryShipment {
     #[must_use]
@@ -45,12 +47,27 @@ impl InventoryShipment {
         &self.capacity_contracts
     }
     #[must_use]
-    pub const fn status(&self) -> ShipmentStatus {
-        self.lifecycle.status()
+    pub fn status(&self) -> ShipmentStatus {
+        if self.lifecycle.phase() == IntermodalPhase::Delivered {
+            ShipmentStatus::Delivered
+        } else {
+            ShipmentStatus::InTransit
+        }
     }
     #[must_use]
     pub fn remaining_days(&self) -> u32 {
-        self.lifecycle.remaining_days()
+        u32::from(self.lifecycle.remaining_days())
+    }
+    #[must_use]
+    pub const fn phase(&self) -> IntermodalPhase {
+        self.lifecycle.phase()
+    }
+    #[must_use]
+    pub fn terminal_ids(&self) -> &[TerminalId] {
+        &self.terminal_ids
+    }
+    pub(crate) fn begin_terminal_handling(&mut self) -> Result<(), WorldError> {
+        self.lifecycle.begin_terminal_handling()
     }
     #[must_use]
     pub fn routes(&self) -> &[RouteId] {
@@ -214,7 +231,20 @@ impl World {
                 self.freight_contracts(),
             )?;
         }
-        let lifecycle = LegShipmentLifecycle::from_plan(&plan, &base_routes)?;
+        let mut terminal_ids = Vec::new();
+        let mut transfer_days = Vec::new();
+        for pair in plan.routes.windows(2) {
+            let region = route_map[&pair[0]].destination();
+            let terminal = self
+                .terminals()
+                .values()
+                .filter(|terminal| terminal.region() == region)
+                .min_by_key(|terminal| terminal.id())
+                .ok_or(WorldError::NoTerminalInRegion(region))?;
+            terminal_ids.push(terminal.id());
+            transfer_days.push(terminal.handling_days());
+        }
+        let lifecycle = IntermodalShipmentLifecycle::from_plan(&plan, &base_routes, transfer_days)?;
         self.route_capacity
             .reserve(&plan, order.quantity(), &base_routes)?;
         self.freight_capacity = proposed_freight_capacity;
@@ -253,6 +283,7 @@ impl World {
                 quantity: order.quantity(),
                 total_cost: charged_total,
                 capacity_contracts,
+                terminal_ids,
                 lifecycle,
             },
         );
@@ -270,23 +301,45 @@ impl World {
             .inventory_shipments
             .get_mut(&id)
             .ok_or(WorldError::UnknownShipment(id))?;
-        let completed = shipment.lifecycle.advance_days(days)?;
-        for route in completed {
-            let index = shipment
-                .lifecycle
-                .routes()
-                .iter()
-                .position(|candidate| *candidate == route)
-                .ok_or(WorldError::UnknownLogisticsRoute(route))?;
-            self.route_capacity
-                .release(std::slice::from_ref(&route), shipment.quantity)?;
-            self.freight_capacity.release(
-                route,
-                shipment.quantity,
-                shipment.capacity_contracts[index],
-            )?;
+        let transitions = shipment.lifecycle.advance_days(days)?;
+        for transition in transitions {
+            match transition {
+                ShipmentTransition::RouteCompleted(route) => {
+                    let index = shipment
+                        .lifecycle
+                        .routes()
+                        .iter()
+                        .position(|candidate| *candidate == route)
+                        .ok_or(WorldError::UnknownLogisticsRoute(route))?;
+                    self.route_capacity.release(&[route], shipment.quantity)?;
+                    self.freight_capacity.release(
+                        route,
+                        shipment.quantity,
+                        shipment.capacity_contracts[index],
+                    )?;
+                    if shipment.lifecycle.phase() == IntermodalPhase::WaitingForTerminal {
+                        let terminal = shipment.terminal_ids[index];
+                        self.terminal_queue.enqueue(
+                            terminal,
+                            crate::TerminalQueueEntry::new(id, shipment.quantity),
+                        )?;
+                        self.events.append(
+                            self.date,
+                            crate::DomainEvent::ShipmentQueuedAtTerminal {
+                                shipment: id,
+                                terminal,
+                            },
+                        );
+                    }
+                }
+                ShipmentTransition::TransferCompleted { after_leg } => {
+                    let terminal = shipment.terminal_ids[after_leg];
+                    self.terminal_capacity
+                        .release(terminal, shipment.quantity)?;
+                }
+            }
         }
-        if shipment.lifecycle.status() == ShipmentStatus::Delivered {
+        if shipment.lifecycle.phase() == IntermodalPhase::Delivered {
             self.firms
                 .get_mut(&shipment.destination)
                 .ok_or(WorldError::UnknownFirm(shipment.destination))?
