@@ -1,4 +1,4 @@
-use crate::{CohortId, FirmId, GoodId, Money, QuantityMilli, RegionId, WorldError};
+use crate::{CohortId, FirmId, GoodId, Money, NeedTier, QuantityMilli, RegionId, WorldError};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MarketOffer {
     pub seller: FirmId,
@@ -10,6 +10,7 @@ pub struct MarketOffer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MarketOrder {
     pub buyer: CohortId,
+    pub tier: NeedTier,
     pub region: RegionId,
     pub good: GoodId,
     pub quantity: QuantityMilli,
@@ -18,6 +19,7 @@ pub struct MarketOrder {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketFill {
     pub buyer: CohortId,
+    pub tier: NeedTier,
     pub seller: FirmId,
     pub good: GoodId,
     pub quantity: QuantityMilli,
@@ -28,7 +30,7 @@ pub struct MarketClearing {
     pub fills: Vec<MarketFill>,
     pub unmet: BTreeUnmet,
 }
-pub type BTreeUnmet = std::collections::BTreeMap<(CohortId, GoodId), QuantityMilli>;
+pub type BTreeUnmet = std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>;
 /// Clears local goods markets deterministically by region/good, then order ID, price, and seller ID.
 /// # Errors
 /// Returns an error for non-positive prices or arithmetic overflow.
@@ -37,7 +39,7 @@ pub fn clear_local_market(
     offers: &[MarketOffer],
 ) -> Result<MarketClearing, WorldError> {
     let mut orders = orders.to_vec();
-    orders.sort_by_key(|o| (o.region, o.good, o.buyer));
+    orders.sort_by_key(|o| (o.region, o.good, o.tier, o.buyer));
     let mut supply = offers.to_vec();
     supply.sort_by_key(|o| (o.region, o.good, o.unit_price.minor_units(), o.seller));
     let mut remaining: Vec<u64> = supply.iter().map(|o| o.quantity.get()).collect();
@@ -74,6 +76,7 @@ pub fn clear_local_market(
             budget -= spend;
             fills.push(MarketFill {
                 buyer: order.buyer,
+                tier: order.tier,
                 seller: offer.seller,
                 good: order.good,
                 quantity: QuantityMilli::new(quantity),
@@ -81,7 +84,10 @@ pub fn clear_local_market(
             });
         }
         if need > 0 {
-            unmet.insert((order.buyer, order.good), QuantityMilli::new(need));
+            unmet.insert(
+                (order.buyer, order.good, order.tier),
+                QuantityMilli::new(need),
+            );
         }
     }
     Ok(MarketClearing { fills, unmet })
@@ -104,10 +110,12 @@ impl crate::World {
             firm.debit_inventory(fill.good, fill.quantity)?;
             firm.apply_cash_delta(fill.spend)?;
         }
-        let mut consumption: std::collections::BTreeMap<(CohortId, GoodId), QuantityMilli> =
-            std::collections::BTreeMap::new();
+        let mut consumption: std::collections::BTreeMap<
+            (CohortId, GoodId, NeedTier),
+            QuantityMilli,
+        > = std::collections::BTreeMap::new();
         for fill in &clearing.fills {
-            let key = (fill.buyer, fill.good);
+            let key = (fill.buyer, fill.good, fill.tier);
             let current = consumption.get(&key).copied().unwrap_or_default();
             let next = QuantityMilli::new(
                 current
@@ -141,7 +149,7 @@ impl crate::World {
     #[must_use]
     pub fn monthly_consumption(
         &self,
-    ) -> &std::collections::BTreeMap<(CohortId, GoodId), QuantityMilli> {
+    ) -> &std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli> {
         &self.monthly_consumption
     }
     #[must_use]
@@ -158,6 +166,7 @@ mod tests {
         let orders = [
             MarketOrder {
                 buyer: CohortId::new(2),
+                tier: NeedTier::Survival,
                 region: RegionId::new(1),
                 good: GoodId::new(1),
                 quantity: QuantityMilli::new(700),
@@ -165,6 +174,7 @@ mod tests {
             },
             MarketOrder {
                 buyer: CohortId::new(1),
+                tier: NeedTier::Survival,
                 region: RegionId::new(1),
                 good: GoodId::new(1),
                 quantity: QuantityMilli::new(700),
@@ -180,6 +190,9 @@ mod tests {
         }];
         let result = clear_local_market(&orders, &offers).expect("clear");
         assert_eq!(result.fills[0].buyer, CohortId::new(1));
-        assert_eq!(result.unmet[&(CohortId::new(2), GoodId::new(1))].get(), 400);
+        assert_eq!(
+            result.unmet[&(CohortId::new(2), GoodId::new(1), NeedTier::Survival)].get(),
+            400
+        );
     }
 }

@@ -620,8 +620,8 @@ pub struct World {
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
-    pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId), QuantityMilli>,
-    pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId), QuantityMilli>,
+    pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
+    pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -843,15 +843,27 @@ impl World {
 
     fn write_market_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.monthly_consumption.len() as u64);
-        for ((cohort, good), q) in &self.monthly_consumption {
+        for ((cohort, good, tier), q) in &self.monthly_consumption {
             hash.write_u32(cohort.get());
             hash.write_u32(good.get());
+            hash.write_u8(match tier {
+                crate::NeedTier::Survival => 1,
+                crate::NeedTier::Participation => 2,
+                crate::NeedTier::Development => 3,
+                crate::NeedTier::Discretionary => 4,
+            });
             hash.write_u64(q.get());
         }
         hash.write_u64(self.unmet_demand.len() as u64);
-        for ((cohort, good), q) in &self.unmet_demand {
+        for ((cohort, good, tier), q) in &self.unmet_demand {
             hash.write_u32(cohort.get());
             hash.write_u32(good.get());
+            hash.write_u8(match tier {
+                crate::NeedTier::Survival => 1,
+                crate::NeedTier::Participation => 2,
+                crate::NeedTier::Development => 3,
+                crate::NeedTier::Discretionary => 4,
+            });
             hash.write_u64(q.get());
         }
     }
