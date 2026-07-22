@@ -387,6 +387,7 @@ pub enum WorldError {
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
     InvalidEmployment(&'static str),
+    InvalidFirmExpectations(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
     UnknownBoardResolution(ResolutionId),
@@ -492,6 +493,9 @@ impl fmt::Display for WorldError {
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
+            Self::InvalidFirmExpectations(reason) => {
+                write!(formatter, "invalid firm expectations: {reason}")
+            }
             Self::InvalidProduction(reason) => {
                 write!(formatter, "invalid production model: {reason}")
             }
@@ -605,6 +609,7 @@ pub struct World {
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
+    pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
@@ -652,6 +657,7 @@ impl World {
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
             firm_monthly_accounts: BTreeMap::new(),
+            firm_expectations: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -907,6 +913,15 @@ impl World {
     }
 
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.firm_expectations.len() as u64);
+        for (firm, row) in &self.firm_expectations {
+            hash.write_u32(firm.get());
+            hash.write_i64(row.expected_sales_revenue().minor_units());
+            hash.write_i64(row.expected_input_costs().minor_units());
+            hash.write_i64(row.expected_financing().minor_units());
+            hash.write_u16(row.horizon_months());
+            hash.write_u8(row.source().fingerprint_tag());
+        }
         hash.write_u64(self.firm_monthly_accounts.len() as u64);
         for (firm, row) in &self.firm_monthly_accounts {
             hash.write_u32(firm.get());

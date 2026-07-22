@@ -39,7 +39,12 @@ pub fn decode_world_save(
 mod tests {
     use super::*;
     use crate::save_compat::SavedModReference;
-    use adam_core::{Country, CountryId, SimDate, WorldSeed};
+    use adam_core::{
+        Country, CountryId, Firm, FirmExpectationSource, FirmExpectations, FirmId, Good, GoodId,
+        Money, Population, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate,
+        WorldSeed,
+    };
+    use std::collections::BTreeMap;
     fn metadata() -> SaveCompatibilityMetadata {
         SaveCompatibilityMetadata {
             simulation_version: adam_core::SIMULATION_VERSION,
@@ -60,6 +65,69 @@ mod tests {
         world.advance_years(20).expect("years");
         world
     }
+    fn world_with_firm_expectations() -> World {
+        let mut world = World::new(WorldSeed::new(47), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country");
+        world
+            .register_good(Good::new(GoodId::new(1), "Output").expect("good"))
+            .expect("good");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(1),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Output recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(1),
+                    "Firm",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::from_minor_units(5_000),
+                    BTreeMap::new(),
+                )
+                .expect("firm"),
+            )
+            .expect("firm");
+        world
+            .update_firm_expectations(
+                FirmId::new(1),
+                FirmExpectations::new(
+                    Money::from_minor_units(8_000),
+                    Money::from_minor_units(2_000),
+                    Money::from_minor_units(1_000),
+                    2,
+                    FirmExpectationSource::Management,
+                )
+                .expect("expectations"),
+            )
+            .expect("expectation update");
+        world
+    }
     #[test]
     fn full_world_round_trip_and_continuation_are_identical() {
         let original = world();
@@ -72,6 +140,18 @@ mod tests {
         assert_eq!(
             loaded.stable_fingerprint(),
             uninterrupted.stable_fingerprint()
+        );
+    }
+    #[test]
+    fn firm_expectations_survive_world_save_round_trip() {
+        let original = world_with_firm_expectations();
+        let bytes = encode_world_save(&original, metadata()).expect("save");
+        let loaded = decode_world_save(&bytes, &metadata()).expect("load");
+        assert_eq!(loaded, original);
+        assert_eq!(loaded.stable_fingerprint(), original.stable_fingerprint());
+        assert_eq!(
+            loaded.firm_expectations()[&FirmId::new(1)].horizon_months(),
+            2
         );
     }
     #[test]

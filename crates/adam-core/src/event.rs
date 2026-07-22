@@ -1,11 +1,19 @@
 use crate::{
-    ActorId, BasisPoints, BoardVote, CohortId, ContractId, CountryId, FirmId, GoodId, Money,
-    NeedProfileId, Population, PowerNodeId, ProjectId, QuantityMilli, RatePpm, RegionId,
-    ResolutionId, ResolutionStatus, RouteId, ShipmentId, SimDate, TerminalId,
+    ActorId, BasisPoints, BoardVote, CohortId, ContractId, CountryId, FirmExpectationSource,
+    FirmId, GoodId, Money, NeedProfileId, Population, PowerNodeId, ProjectId, QuantityMilli,
+    RatePpm, RegionId, ResolutionId, ResolutionStatus, RouteId, ShipmentId, SimDate, TerminalId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    FirmExpectationsUpdated {
+        firm: FirmId,
+        expected_sales_revenue: Money,
+        expected_input_costs: Money,
+        expected_financing: Money,
+        horizon_months: u16,
+        source: FirmExpectationSource,
+    },
     CohortExperienceUpdated {
         cohort: CohortId,
         survival_shortage_months: u32,

@@ -23,7 +23,9 @@ pub mod value;
 pub mod world;
 pub mod world_logistics;
 
-pub use accounting::{EmploymentAdjustmentProposal, FirmMonthlyAccounts};
+pub use accounting::{
+    EmploymentAdjustmentProposal, FirmExpectationSource, FirmExpectations, FirmMonthlyAccounts,
+};
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{
@@ -64,4 +66,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 6;
+pub const SIMULATION_VERSION: u32 = 7;

@@ -50,7 +50,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 ### 0.6 Firms and production — ⬜
 
 - 🟡 Production units now have typed recipes, labor, capital capacity, cash, inventories, outputs, and intermediate inputs; ownership and technology remain planned.
-- 🟡 Deterministic physical production planning and inventories are implemented; execution, expectations, investment, sales, and failure remain planned.
+- 🟡 Deterministic production execution, realized sales/payroll accounting, and explicit management cash-flow expectations are implemented; technology, broader investment behavior, and failure remain planned.
 - ⬜ Qualification constraints and management capacity.
 
 ### 0.7 Playable business, ownership, and brands — ⬜
@@ -75,7 +75,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 
 ### 0.9 Labor, migration, and human capital — ⬜
 
-- ⬜ Job matching, wages, unemployment, bargaining, working conditions.
+- 🟡 Concrete employment agreements, firm-funded payroll, wage arrears, layoffs, production labor constraints, and advisory expectation-aware staffing are implemented; job matching, bargaining, and working conditions remain planned.
 - ⬜ Internal and international migration based on expected life outcomes.
 - ⬜ Skill formation, mismatch, automation, and brain drain.
 
@@ -212,3 +212,5 @@ Every accepted slice updates this file with status, tests, measurements, known a
 - Added deterministic local market clearing with physical supply, budgets, price-ranked sellers, canonical buyers, fills, and explicit unmet demand.
 
 - Reoriented social causality toward concrete cohort experience durations and typed historical events rather than generic crisis debuffs.
+
+- Added replayable firm cash-flow expectations and expectation-aware advisory staffing, with recovery and deterioration tests; forecasts remain knowledge state and cannot move resources directly. Next gate: derive forecasts from observed sales, input prices, and financing offers rather than externally supplied values.

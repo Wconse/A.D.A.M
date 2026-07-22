@@ -1,5 +1,6 @@
 use crate::{FirmId, Money, World, WorldError};
 use std::collections::BTreeMap;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FirmMonthlyAccounts {
     sales_revenue: Money,
@@ -34,13 +35,107 @@ impl FirmMonthlyAccounts {
         Ok(())
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum FirmExpectationSource {
+    Management,
+}
+impl FirmExpectationSource {
+    pub(crate) const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::Management => 1,
+        }
+    }
+}
+
+/// A manager's explicit forecast of firm cash flows over a fixed horizon.
+/// Forecasts inform decisions but never mutate cash, inventories, or employment directly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FirmExpectations {
+    expected_sales_revenue: Money,
+    expected_input_costs: Money,
+    expected_financing: Money,
+    horizon_months: u16,
+    source: FirmExpectationSource,
+}
+impl FirmExpectations {
+    /// Creates a non-negative cash-flow forecast for one or more future months.
+    /// # Errors
+    /// Returns [`WorldError::InvalidFirmExpectations`] for negative flows or a zero horizon.
+    pub fn new(
+        expected_sales_revenue: Money,
+        expected_input_costs: Money,
+        expected_financing: Money,
+        horizon_months: u16,
+        source: FirmExpectationSource,
+    ) -> Result<Self, WorldError> {
+        let value = Self {
+            expected_sales_revenue,
+            expected_input_costs,
+            expected_financing,
+            horizon_months,
+            source,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+    pub(crate) fn validate(self) -> Result<(), WorldError> {
+        if self.horizon_months == 0 {
+            return Err(WorldError::InvalidFirmExpectations(
+                "forecast horizon must be positive",
+            ));
+        }
+        if self.expected_sales_revenue.minor_units() < 0
+            || self.expected_input_costs.minor_units() < 0
+            || self.expected_financing.minor_units() < 0
+        {
+            return Err(WorldError::InvalidFirmExpectations(
+                "forecast cash flows must be non-negative",
+            ));
+        }
+        Ok(())
+    }
+    #[must_use]
+    pub const fn expected_sales_revenue(self) -> Money {
+        self.expected_sales_revenue
+    }
+    #[must_use]
+    pub const fn expected_input_costs(self) -> Money {
+        self.expected_input_costs
+    }
+    #[must_use]
+    pub const fn expected_financing(self) -> Money {
+        self.expected_financing
+    }
+    #[must_use]
+    pub const fn horizon_months(self) -> u16 {
+        self.horizon_months
+    }
+    #[must_use]
+    pub const fn source(self) -> FirmExpectationSource {
+        self.source
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EmploymentAdjustmentProposal {
     pub firm: FirmId,
     pub cohort: crate::CohortId,
     pub current_workers: u64,
     pub affordable_workers: u64,
+    /// Coverage used for this proposal: forecast coverage when expectations exist,
+    /// otherwise realized payroll coverage.
     pub wage_coverage_bps: u16,
+    pub realized_wage_coverage_bps: Option<u16>,
+    pub forecast_wage_coverage_bps: Option<u16>,
+}
+
+fn coverage_bps(available: i128, obligation: i128) -> u16 {
+    if obligation <= 0 {
+        return 10_000;
+    }
+    u16::try_from((available.max(0).saturating_mul(10_000) / obligation).clamp(0, 10_000))
+        .unwrap_or(10_000)
 }
 
 impl World {
@@ -75,7 +170,34 @@ impl World {
     pub fn reset_monthly_firm_accounts(&mut self) {
         self.firm_monthly_accounts.clear();
     }
-    /// Produces advisory staffing proposals from realized payroll coverage; it does not fire workers automatically.
+    /// Replaces the firm's explicit management forecast without changing physical or monetary state.
+    /// # Errors
+    /// Returns an error for an unknown firm or invalid forecast values.
+    pub fn update_firm_expectations(
+        &mut self,
+        firm: FirmId,
+        expectations: FirmExpectations,
+    ) -> Result<(), WorldError> {
+        if !self.firms.contains_key(&firm) {
+            return Err(WorldError::UnknownFirm(firm));
+        }
+        expectations.validate()?;
+        self.firm_expectations.insert(firm, expectations);
+        self.events.append(
+            self.date,
+            crate::DomainEvent::FirmExpectationsUpdated {
+                firm,
+                expected_sales_revenue: expectations.expected_sales_revenue(),
+                expected_input_costs: expectations.expected_input_costs(),
+                expected_financing: expectations.expected_financing(),
+                horizon_months: expectations.horizon_months(),
+                source: expectations.source(),
+            },
+        );
+        Ok(())
+    }
+    /// Produces advisory staffing proposals from realized payroll and, when present,
+    /// management forecasts. It never fires workers or moves money automatically.
     #[must_use]
     pub fn plan_cash_constrained_staffing(&self) -> Vec<EmploymentAdjustmentProposal> {
         let mut proposals = Vec::new();
@@ -83,17 +205,49 @@ impl World {
             if !agreement.active() {
                 continue;
             }
-            let Some(accounts) = self.firm_monthly_accounts.get(firm) else {
+            let realized = self.firm_monthly_accounts.get(firm).and_then(|accounts| {
+                let owed = i128::from(accounts.wages_owed().minor_units());
+                (owed > 0)
+                    .then(|| coverage_bps(i128::from(accounts.wages_paid().minor_units()), owed))
+            });
+            let forecast = self.firm_expectations.get(firm).map(|expectations| {
+                let monthly_wages = self
+                    .employment_agreements
+                    .values()
+                    .filter(|row| row.active() && row.firm() == *firm)
+                    .fold(0_i128, |total, row| {
+                        total.saturating_add(
+                            i128::from(row.wage().minor_units())
+                                .saturating_mul(i128::from(row.workers())),
+                        )
+                    });
+                let arrears = self
+                    .employment_agreements
+                    .values()
+                    .filter(|row| row.firm() == *firm)
+                    .fold(0_i128, |total, row| {
+                        total.saturating_add(i128::from(row.arrears().minor_units()))
+                    });
+                let obligation = monthly_wages
+                    .saturating_mul(i128::from(expectations.horizon_months()))
+                    .saturating_add(arrears);
+                let firm_cash = self
+                    .firms
+                    .get(firm)
+                    .map_or(0, |row| i128::from(row.cash().minor_units()));
+                let available = firm_cash
+                    .saturating_add(i128::from(
+                        expectations.expected_sales_revenue().minor_units(),
+                    ))
+                    .saturating_add(i128::from(expectations.expected_financing().minor_units()))
+                    .saturating_sub(i128::from(
+                        expectations.expected_input_costs().minor_units(),
+                    ));
+                coverage_bps(available, obligation)
+            });
+            let Some(coverage) = forecast.or(realized) else {
                 continue;
             };
-            let owed = accounts.wages_owed().minor_units();
-            if owed <= 0 {
-                continue;
-            }
-            let paid = accounts.wages_paid().minor_units().max(0);
-            let coverage =
-                u16::try_from((i128::from(paid) * 10_000 / i128::from(owed)).clamp(0, 10_000))
-                    .unwrap_or(10_000);
             if coverage < 10_000 {
                 let affordable =
                     u64::try_from(i128::from(agreement.workers()) * i128::from(coverage) / 10_000)
@@ -104,6 +258,8 @@ impl World {
                     current_workers: agreement.workers(),
                     affordable_workers: affordable,
                     wage_coverage_bps: coverage,
+                    realized_wage_coverage_bps: realized,
+                    forecast_wage_coverage_bps: forecast,
                 });
             }
         }
@@ -112,5 +268,214 @@ impl World {
     #[must_use]
     pub fn firm_monthly_accounts(&self) -> &BTreeMap<FirmId, FirmMonthlyAccounts> {
         &self.firm_monthly_accounts
+    }
+    #[must_use]
+    pub fn firm_expectations(&self) -> &BTreeMap<FirmId, FirmExpectations> {
+        &self.firm_expectations
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        AgeBand, ConsumptionProfile, ConsumptionTarget, Country, CountryId, DemandBasis,
+        EducationLevel, EmploymentAgreement, EmploymentStatus, Firm, Good, GoodId, HouseholdCohort,
+        HouseholdType, NeedProfileId, NeedTier, Population, ProductionRecipe, QuantityMilli,
+        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+    };
+
+    fn staffed_world(firm_cash: i64) -> World {
+        let mut world = World::new(WorldSeed::new(7), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country registration");
+        world
+            .register_good(Good::new(GoodId::new(1), "Food").expect("good"))
+            .expect("good registration");
+        world
+            .register_consumption_profile(
+                ConsumptionProfile::new(
+                    NeedProfileId::new(1),
+                    "Workers",
+                    vec![ConsumptionTarget::new(
+                        GoodId::new(1),
+                        NeedTier::Survival,
+                        DemandBasis::PerPerson,
+                        QuantityMilli::new(1_000),
+                    )],
+                )
+                .expect("profile"),
+            )
+            .expect("profile registration");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(100),
+                    Money::from_minor_units(1_000_000),
+                )
+                .expect("region"),
+            )
+            .expect("region registration");
+        world
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Food",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe registration");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(1),
+                    "Factory",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    100,
+                    100,
+                    Money::from_minor_units(firm_cash),
+                    BTreeMap::new(),
+                )
+                .expect("firm"),
+            )
+            .expect("firm registration");
+        world
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    crate::CohortId::new(1),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(100),
+                    50,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::default(),
+                    Money::default(),
+                    Money::default(),
+                )
+                .expect("cohort"),
+            )
+            .expect("cohort registration");
+        world
+            .register_employment_agreement(
+                EmploymentAgreement::new(
+                    FirmId::new(1),
+                    crate::CohortId::new(1),
+                    100,
+                    Money::from_minor_units(100),
+                )
+                .expect("agreement"),
+            )
+            .expect("agreement registration");
+        world
+    }
+
+    fn expectations(sales: i64, inputs: i64, financing: i64) -> FirmExpectations {
+        FirmExpectations::new(
+            Money::from_minor_units(sales),
+            Money::from_minor_units(inputs),
+            Money::from_minor_units(financing),
+            1,
+            FirmExpectationSource::Management,
+        )
+        .expect("expectations")
+    }
+
+    #[test]
+    fn recovery_forecast_can_prevent_a_mechanical_layoff_proposal() {
+        let mut world = staffed_world(6_000);
+        world.execute_monthly_payroll().expect("payroll");
+        let realized = world.plan_cash_constrained_staffing();
+        assert_eq!(realized[0].wage_coverage_bps, 6_000);
+        assert_eq!(realized[0].affordable_workers, 60);
+
+        world
+            .update_firm_expectations(FirmId::new(1), expectations(14_000, 0, 0))
+            .expect("forecast");
+        assert!(world.plan_cash_constrained_staffing().is_empty());
+    }
+
+    #[test]
+    fn deterioration_forecast_can_warn_before_payroll_fails() {
+        let mut world = staffed_world(10_000);
+        world.execute_monthly_payroll().expect("payroll");
+        assert!(world.plan_cash_constrained_staffing().is_empty());
+
+        world
+            .update_firm_expectations(FirmId::new(1), expectations(5_000, 0, 0))
+            .expect("forecast");
+        let proposals = world.plan_cash_constrained_staffing();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].realized_wage_coverage_bps, Some(10_000));
+        assert_eq!(proposals[0].forecast_wage_coverage_bps, Some(5_000));
+        assert_eq!(proposals[0].affordable_workers, 50);
+    }
+
+    #[test]
+    fn expectation_update_is_replayable_and_does_not_move_resources() {
+        let direct = staffed_world(20_000);
+        let mut replayed = direct.clone();
+        let cash_before = direct.firms()[&FirmId::new(1)].cash();
+        let fingerprint_before = direct.stable_fingerprint();
+        let workers_before =
+            direct.employment_agreements()[&(FirmId::new(1), crate::CohortId::new(1))].workers();
+        let command = WorldCommand::UpdateFirmExpectations {
+            firm: FirmId::new(1),
+            expectations: expectations(12_000, 3_000, 2_000),
+        };
+        let mut direct = direct;
+        direct
+            .update_firm_expectations(FirmId::new(1), expectations(12_000, 3_000, 2_000))
+            .expect("direct update");
+        command.apply(&mut replayed).expect("replay update");
+
+        assert_eq!(direct, replayed);
+        assert_ne!(direct.stable_fingerprint(), fingerprint_before);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(matches!(
+            direct.events().events().last().map(crate::EventEnvelope::event),
+            Some(crate::DomainEvent::FirmExpectationsUpdated { firm, .. })
+                if *firm == FirmId::new(1)
+        ));
+        assert_eq!(direct.firms()[&FirmId::new(1)].cash(), cash_before);
+        assert_eq!(
+            direct.employment_agreements()[&(FirmId::new(1), crate::CohortId::new(1))].workers(),
+            workers_before
+        );
+    }
+
+    #[test]
+    fn invalid_expectation_values_are_rejected() {
+        assert!(matches!(
+            FirmExpectations::new(
+                Money::from_minor_units(-1),
+                Money::default(),
+                Money::default(),
+                1,
+                FirmExpectationSource::Management,
+            ),
+            Err(WorldError::InvalidFirmExpectations(_))
+        ));
+        assert!(matches!(
+            FirmExpectations::new(
+                Money::default(),
+                Money::default(),
+                Money::default(),
+                0,
+                FirmExpectationSource::Management,
+            ),
+            Err(WorldError::InvalidFirmExpectations(_))
+        ));
     }
 }

@@ -1,10 +1,14 @@
 use crate::{
-    ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmId, FirmPolicy,
-    FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId, ShipmentId,
-    ShipmentOrder, TerminalId, World, WorldError,
+    ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmExpectations, FirmId,
+    FirmPolicy, FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId,
+    ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    UpdateFirmExpectations {
+        firm: FirmId,
+        expectations: FirmExpectations,
+    },
     ResetMonthlyFirmAccounts,
     ChangeEmploymentWorkers {
         firm: FirmId,
@@ -74,6 +78,9 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::UpdateFirmExpectations { firm, expectations } => {
+                world.update_firm_expectations(*firm, *expectations)
+            }
             Self::ResetMonthlyFirmAccounts => {
                 world.reset_monthly_firm_accounts();
                 Ok(())
