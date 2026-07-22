@@ -389,6 +389,7 @@ pub enum WorldError {
     InsufficientCommittedInvestment(FirmId),
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
+    InvalidFreightContract(&'static str),
     DuplicateLogisticsRoute(RouteId),
     DuplicateShipment(ShipmentId),
     UnknownShipment(ShipmentId),
@@ -490,6 +491,9 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid investment project: {reason}")
             }
             Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
+            Self::InvalidFreightContract(reason) => {
+                write!(formatter, "invalid freight contract: {reason}")
+            }
             Self::DuplicateLogisticsRoute(id) => {
                 write!(formatter, "logistics route {id} already exists")
             }

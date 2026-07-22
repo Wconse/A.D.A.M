@@ -6,6 +6,7 @@ pub mod cohort;
 pub mod command;
 pub mod demand;
 pub mod event;
+pub mod freight;
 pub mod ids;
 pub mod investment;
 pub mod logistics;
@@ -25,9 +26,13 @@ pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
 pub use event::{DomainEvent, EventEnvelope, EventLog};
+pub use freight::{
+    ContractStatus, FreightContract, FreightEconomics, RouteOperatingCost,
+    evaluate_freight_economics,
+};
 pub use ids::{
-    ActorId, CohortId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId, ProjectId, RecipeId,
-    RegionId, ResolutionId, RouteId, ShipmentId,
+    ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
+    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId,
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use logistics::{
