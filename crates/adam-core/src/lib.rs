@@ -44,7 +44,7 @@ pub use logistics::{
 };
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
-pub use terminal::{LogisticsTerminal, TerminalCapacityLedger};
+pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
 pub use time::{SimDate, TimeError};
 pub use value::{BasisPoints, Money, Population, QuantityMilli, RatePpm, ValueError};
 pub use world::{

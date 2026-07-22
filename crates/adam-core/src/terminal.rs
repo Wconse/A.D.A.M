@@ -135,6 +135,88 @@ impl World {
         &self.terminal_capacity
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TerminalQueueEntry {
+    shipment: crate::ShipmentId,
+    quantity: QuantityMilli,
+}
+impl TerminalQueueEntry {
+    #[must_use]
+    pub const fn new(shipment: crate::ShipmentId, quantity: QuantityMilli) -> Self {
+        Self { shipment, quantity }
+    }
+    #[must_use]
+    pub const fn shipment(self) -> crate::ShipmentId {
+        self.shipment
+    }
+    #[must_use]
+    pub const fn quantity(self) -> QuantityMilli {
+        self.quantity
+    }
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TerminalQueue {
+    waiting: BTreeMap<TerminalId, Vec<TerminalQueueEntry>>,
+}
+impl TerminalQueue {
+    #[must_use]
+    pub fn waiting(&self) -> &BTreeMap<TerminalId, Vec<TerminalQueueEntry>> {
+        &self.waiting
+    }
+    /// Appends a shipment to a terminal's deterministic FIFO queue.
+    /// # Errors
+    /// Returns an error for zero quantity or a shipment already queued anywhere.
+    pub fn enqueue(
+        &mut self,
+        terminal: TerminalId,
+        entry: TerminalQueueEntry,
+    ) -> Result<(), WorldError> {
+        if entry.quantity().get() == 0
+            || self
+                .waiting
+                .values()
+                .flatten()
+                .any(|queued| queued.shipment() == entry.shipment())
+        {
+            return Err(WorldError::InvalidTerminal(
+                "invalid or duplicate queued shipment",
+            ));
+        }
+        self.waiting.entry(terminal).or_default().push(entry);
+        Ok(())
+    }
+    /// Admits as many FIFO entries as fit, stopping when the head cannot fit.
+    pub fn admit(
+        &mut self,
+        terminal: &LogisticsTerminal,
+        capacity: &mut TerminalCapacityLedger,
+    ) -> Vec<TerminalQueueEntry> {
+        let mut admitted = Vec::new();
+        loop {
+            let Some(entry) = self
+                .waiting
+                .get(&terminal.id())
+                .and_then(|queue| queue.first())
+                .copied()
+            else {
+                break;
+            };
+            if capacity.reserve(terminal, entry.quantity()).is_err() {
+                break;
+            }
+            let Some(queue) = self.waiting.get_mut(&terminal.id()) else {
+                break;
+            };
+            let entry = queue.remove(0);
+            admitted.push(entry);
+        }
+        if self.waiting.get(&terminal.id()).is_some_and(Vec::is_empty) {
+            self.waiting.remove(&terminal.id());
+        }
+        admitted
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +240,43 @@ mod tests {
             .release(terminal.id(), QuantityMilli::new(700))
             .expect("release");
         assert!(ledger.used().is_empty());
+    }
+    #[test]
+    fn terminal_queue_is_fifo_and_head_blocks_later_cargo() {
+        let terminal = LogisticsTerminal::new(
+            TerminalId::new(1),
+            RegionId::new(1),
+            FirmId::new(1),
+            QuantityMilli::new(1000),
+            Money::from_minor_units(1),
+            1,
+        )
+        .expect("terminal");
+        let mut queue = TerminalQueue::default();
+        queue
+            .enqueue(
+                terminal.id(),
+                TerminalQueueEntry::new(crate::ShipmentId::new(1), QuantityMilli::new(700)),
+            )
+            .expect("queue");
+        queue
+            .enqueue(
+                terminal.id(),
+                TerminalQueueEntry::new(crate::ShipmentId::new(2), QuantityMilli::new(400)),
+            )
+            .expect("queue");
+        let mut capacity = TerminalCapacityLedger::default();
+        let admitted = queue.admit(&terminal, &mut capacity);
+        assert_eq!(
+            admitted
+                .iter()
+                .map(|entry| entry.shipment())
+                .collect::<Vec<_>>(),
+            vec![crate::ShipmentId::new(1)]
+        );
+        assert_eq!(
+            queue.waiting()[&terminal.id()][0].shipment(),
+            crate::ShipmentId::new(2)
+        );
     }
 }
