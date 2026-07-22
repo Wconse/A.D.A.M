@@ -213,9 +213,37 @@ impl HouseholdCohort {
             Money::from_minor_units(self.liquid_wealth.minor_units() - amount.minor_units());
         Ok(())
     }
+    pub(crate) fn apply_monthly_cashflow(&mut self) -> Result<HouseholdCashflow, WorldError> {
+        let income = self.annual_income.minor_units() / 12;
+        let available = self
+            .liquid_wealth
+            .minor_units()
+            .checked_add(income)
+            .ok_or(WorldError::ArithmeticOverflow("household monthly income"))?;
+        let scheduled = (self.debt.minor_units() / 120).max(0);
+        let paid = available.min(scheduled);
+        self.liquid_wealth = Money::from_minor_units(available - paid);
+        self.debt = Money::from_minor_units(self.debt.minor_units() - paid);
+        Ok(HouseholdCashflow {
+            cohort: self.id,
+            income: Money::from_minor_units(income),
+            debt_service: Money::from_minor_units(paid),
+            ending_wealth: self.liquid_wealth,
+            ending_debt: self.debt,
+        })
+    }
     pub(crate) const fn set_people(&mut self, value: Population) {
         self.people = value;
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HouseholdCashflow {
+    pub cohort: CohortId,
+    pub income: Money,
+    pub debt_service: Money,
+    pub ending_wealth: Money,
+    pub ending_debt: Money,
 }
 
 impl World {
@@ -337,6 +365,35 @@ impl World {
             })
             .collect();
         Ok(changes)
+    }
+}
+
+impl World {
+    /// Applies monthly household income and debt service in canonical cohort order.
+    /// # Errors
+    /// Returns an error on arithmetic overflow before later cohorts are processed.
+    pub fn execute_monthly_household_cashflows(
+        &mut self,
+    ) -> Result<Vec<HouseholdCashflow>, WorldError> {
+        let mut updated = self.cohorts.clone();
+        let mut rows = Vec::new();
+        for cohort in updated.values_mut() {
+            rows.push(cohort.apply_monthly_cashflow()?);
+        }
+        self.cohorts = updated;
+        for row in &rows {
+            self.events.append(
+                self.date,
+                crate::DomainEvent::HouseholdCashflowApplied {
+                    cohort: row.cohort,
+                    income: row.income,
+                    debt_service: row.debt_service,
+                    ending_wealth: row.ending_wealth,
+                    ending_debt: row.ending_debt,
+                },
+            );
+        }
+        Ok(rows)
     }
 }
 

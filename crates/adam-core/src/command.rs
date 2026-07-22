@@ -5,6 +5,7 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    ExecuteMonthlyHouseholdCashflows,
     ExecuteMonthlyProduction,
     EnqueueTerminalShipment {
         terminal: TerminalId,
@@ -62,6 +63,9 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::ExecuteMonthlyHouseholdCashflows => {
+                world.execute_monthly_household_cashflows().map(|_| ())
+            }
             Self::ExecuteMonthlyProduction => world.execute_monthly_production().map(|_| ()),
             Self::EnqueueTerminalShipment { terminal, shipment } => {
                 world.enqueue_terminal_shipment(*terminal, *shipment)
