@@ -510,6 +510,23 @@ impl LegShipmentLifecycle {
     pub fn current_route(&self) -> Option<RouteId> {
         self.routes.get(self.current_leg).copied()
     }
+    #[must_use]
+    pub fn routes(&self) -> &[RouteId] {
+        &self.routes
+    }
+    #[must_use]
+    pub fn remaining_days(&self) -> u32 {
+        if self.status == ShipmentStatus::Delivered {
+            return 0;
+        }
+        u32::from(self.remaining_leg_days)
+            + self
+                .leg_days
+                .iter()
+                .skip(self.current_leg + 1)
+                .map(|v| u32::from(*v))
+                .sum::<u32>()
+    }
     /// Advances across route legs and returns legs completed during this step.
     /// # Errors
     /// Returns an error unless the shipment is in transit.

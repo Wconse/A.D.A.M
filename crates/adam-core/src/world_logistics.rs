@@ -1,6 +1,6 @@
 use crate::{
-    ContractId, FirmId, FreightCapacityLedger, GoodId, LogisticsRoute, Money, MultiLegShipmentPlan,
-    QuantityMilli, RouteCapacityLedger, RouteId, ShipmentId, ShipmentLifecycle, ShipmentOrder,
+    ContractId, FirmId, FreightCapacityLedger, GoodId, LegShipmentLifecycle, LogisticsRoute, Money,
+    MultiLegShipmentPlan, QuantityMilli, RouteCapacityLedger, RouteId, ShipmentId, ShipmentOrder,
     ShipmentStatus, World, WorldError, plan_multileg_shipment,
 };
 use std::collections::BTreeMap;
@@ -13,7 +13,7 @@ pub struct InventoryShipment {
     quantity: QuantityMilli,
     total_cost: crate::Money,
     capacity_contracts: Vec<Option<ContractId>>,
-    lifecycle: ShipmentLifecycle,
+    lifecycle: LegShipmentLifecycle,
 }
 impl InventoryShipment {
     #[must_use]
@@ -49,7 +49,7 @@ impl InventoryShipment {
         self.lifecycle.status()
     }
     #[must_use]
-    pub const fn remaining_days(&self) -> u32 {
+    pub fn remaining_days(&self) -> u32 {
         self.lifecycle.remaining_days()
     }
     #[must_use]
@@ -214,8 +214,9 @@ impl World {
                 self.freight_contracts(),
             )?;
         }
-        let mut lifecycle = ShipmentLifecycle::from_plan(&plan, order.quantity());
-        lifecycle.start(&mut self.route_capacity, &base_routes)?;
+        let lifecycle = LegShipmentLifecycle::from_plan(&plan, &base_routes)?;
+        self.route_capacity
+            .reserve(&plan, order.quantity(), &base_routes)?;
         self.freight_capacity = proposed_freight_capacity;
         self.firms
             .get_mut(&source)
@@ -269,19 +270,23 @@ impl World {
             .inventory_shipments
             .get_mut(&id)
             .ok_or(WorldError::UnknownShipment(id))?;
-        shipment
-            .lifecycle
-            .advance_days(days, &mut self.route_capacity)?;
-        if shipment.lifecycle.status() == ShipmentStatus::Delivered {
-            for (route, contract) in shipment
+        let completed = shipment.lifecycle.advance_days(days)?;
+        for route in completed {
+            let index = shipment
                 .lifecycle
                 .routes()
                 .iter()
-                .zip(&shipment.capacity_contracts)
-            {
-                self.freight_capacity
-                    .release(*route, shipment.quantity, *contract)?;
-            }
+                .position(|candidate| *candidate == route)
+                .ok_or(WorldError::UnknownLogisticsRoute(route))?;
+            self.route_capacity
+                .release(std::slice::from_ref(&route), shipment.quantity)?;
+            self.freight_capacity.release(
+                route,
+                shipment.quantity,
+                shipment.capacity_contracts[index],
+            )?;
+        }
+        if shipment.lifecycle.status() == ShipmentStatus::Delivered {
             self.firms
                 .get_mut(&shipment.destination)
                 .ok_or(WorldError::UnknownFirm(shipment.destination))?
