@@ -213,6 +213,9 @@ impl World {
         self.cohorts = cohorts;
         self.employment_agreements = agreements;
         for row in &records {
+            self.record_firm_payroll(row.firm, row.owed, row.paid, row.arrears)?;
+        }
+        for row in &records {
             self.events.append(
                 self.date,
                 crate::DomainEvent::PayrollSettled {

@@ -1,5 +1,6 @@
 #![doc = "Deterministic, engine-independent simulation core for A.D.A.M."]
 
+pub mod accounting;
 pub mod board;
 pub mod business;
 pub mod cohort;
@@ -22,6 +23,7 @@ pub mod value;
 pub mod world;
 pub mod world_logistics;
 
+pub use accounting::FirmMonthlyAccounts;
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{

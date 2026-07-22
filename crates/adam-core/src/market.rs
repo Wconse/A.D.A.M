@@ -167,6 +167,23 @@ impl crate::World {
         self.monthly_consumption = consumption;
         self.unmet_demand = clearing.unmet.clone();
         self.deprivation_pressure = pressure;
+        let mut revenues: std::collections::BTreeMap<FirmId, Money> =
+            std::collections::BTreeMap::new();
+        for fill in &clearing.fills {
+            let current = revenues.get(&fill.seller).copied().unwrap_or_default();
+            revenues.insert(
+                fill.seller,
+                Money::from_minor_units(
+                    current
+                        .minor_units()
+                        .checked_add(fill.spend.minor_units())
+                        .ok_or(WorldError::ArithmeticOverflow("seller revenue aggregation"))?,
+                ),
+            );
+        }
+        for (firm, revenue) in revenues {
+            self.record_firm_sale(firm, revenue)?;
+        }
         for fill in &clearing.fills {
             self.events.append(
                 self.date,

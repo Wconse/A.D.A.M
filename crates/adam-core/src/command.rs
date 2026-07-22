@@ -5,6 +5,7 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    ResetMonthlyFirmAccounts,
     ChangeEmploymentWorkers {
         firm: FirmId,
         cohort: crate::CohortId,
@@ -73,6 +74,10 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::ResetMonthlyFirmAccounts => {
+                world.reset_monthly_firm_accounts();
+                Ok(())
+            }
             Self::ChangeEmploymentWorkers {
                 firm,
                 cohort,

@@ -604,6 +604,7 @@ pub struct World {
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
+    pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
@@ -650,6 +651,7 @@ impl World {
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
+            firm_monthly_accounts: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -901,6 +903,17 @@ impl World {
             hash.write_u32(row.survival_shortage_months());
             hash.write_u32(row.unemployment_months());
             hash.write_u32(row.debt_distress_months());
+        }
+    }
+
+    fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.firm_monthly_accounts.len() as u64);
+        for (firm, row) in &self.firm_monthly_accounts {
+            hash.write_u32(firm.get());
+            hash.write_i64(row.sales_revenue().minor_units());
+            hash.write_i64(row.wages_owed().minor_units());
+            hash.write_i64(row.wages_paid().minor_units());
+            hash.write_i64(row.wage_arrears().minor_units());
         }
     }
 
@@ -1199,6 +1212,7 @@ impl World {
         self.write_freight_contract_fingerprint(&mut hash);
         self.write_terminal_fingerprint(&mut hash);
         self.write_employment_fingerprint(&mut hash);
+        self.write_accounting_fingerprint(&mut hash);
         self.write_market_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
