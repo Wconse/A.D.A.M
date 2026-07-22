@@ -34,6 +34,15 @@ impl FirmMonthlyAccounts {
         Ok(())
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EmploymentAdjustmentProposal {
+    pub firm: FirmId,
+    pub cohort: crate::CohortId,
+    pub current_workers: u64,
+    pub affordable_workers: u64,
+    pub wage_coverage_bps: u16,
+}
+
 impl World {
     pub(crate) fn record_firm_sale(
         &mut self,
@@ -65,6 +74,40 @@ impl World {
     }
     pub fn reset_monthly_firm_accounts(&mut self) {
         self.firm_monthly_accounts.clear();
+    }
+    /// Produces advisory staffing proposals from realized payroll coverage; it does not fire workers automatically.
+    #[must_use]
+    pub fn plan_cash_constrained_staffing(&self) -> Vec<EmploymentAdjustmentProposal> {
+        let mut proposals = Vec::new();
+        for ((firm, cohort), agreement) in &self.employment_agreements {
+            if !agreement.active() {
+                continue;
+            }
+            let Some(accounts) = self.firm_monthly_accounts.get(firm) else {
+                continue;
+            };
+            let owed = accounts.wages_owed().minor_units();
+            if owed <= 0 {
+                continue;
+            }
+            let paid = accounts.wages_paid().minor_units().max(0);
+            let coverage =
+                u16::try_from((i128::from(paid) * 10_000 / i128::from(owed)).clamp(0, 10_000))
+                    .unwrap_or(10_000);
+            if coverage < 10_000 {
+                let affordable =
+                    u64::try_from(i128::from(agreement.workers()) * i128::from(coverage) / 10_000)
+                        .unwrap_or(0);
+                proposals.push(EmploymentAdjustmentProposal {
+                    firm: *firm,
+                    cohort: *cohort,
+                    current_workers: agreement.workers(),
+                    affordable_workers: affordable,
+                    wage_coverage_bps: coverage,
+                });
+            }
+        }
+        proposals
     }
     #[must_use]
     pub fn firm_monthly_accounts(&self) -> &BTreeMap<FirmId, FirmMonthlyAccounts> {

@@ -23,7 +23,7 @@ pub mod value;
 pub mod world;
 pub mod world_logistics;
 
-pub use accounting::FirmMonthlyAccounts;
+pub use accounting::{EmploymentAdjustmentProposal, FirmMonthlyAccounts};
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
 pub use cohort::{
