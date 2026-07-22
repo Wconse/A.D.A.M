@@ -49,7 +49,7 @@ pub use logistics::{
 pub use market::{MarketClearing, MarketFill, MarketOffer, MarketOrder, clear_local_market};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
-pub use social::SocialStress;
+pub use social::{SocialStress, SocialStressMemory};
 pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
 pub use time::{SimDate, TimeError};
 pub use value::{BasisPoints, Money, Population, QuantityMilli, RatePpm, ValueError};

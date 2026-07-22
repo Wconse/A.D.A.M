@@ -5,6 +5,7 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    AccumulateMonthlySocialStress,
     DeriveMonthlySocialStress,
     SettleLocalMarket(MarketClearing),
     ExecuteMonthlyHouseholdCashflows,
@@ -65,6 +66,7 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::AccumulateMonthlySocialStress => world.accumulate_monthly_social_stress(),
             Self::DeriveMonthlySocialStress => world.derive_monthly_social_stress(),
             Self::SettleLocalMarket(clearing) => world.settle_local_market(clearing),
             Self::ExecuteMonthlyHouseholdCashflows => {
