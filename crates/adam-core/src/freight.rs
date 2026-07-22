@@ -1,4 +1,7 @@
-use crate::{BasisPoints, ContractId, FirmId, Money, QuantityMilli, RouteId, WorldError};
+use crate::{
+    BasisPoints, ContractId, DomainEvent, FirmId, Money, QuantityMilli, RouteId, World, WorldError,
+};
+use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ContractStatus {
     Proposed,
@@ -78,8 +81,24 @@ impl FreightContract {
     pub const fn status(&self) -> ContractStatus {
         self.status
     }
+    #[must_use]
+    pub const fn start_month(&self) -> u32 {
+        self.start_month
+    }
+    #[must_use]
+    pub const fn end_month(&self) -> u32 {
+        self.end_month
+    }
     pub fn activate(&mut self) {
         self.status = ContractStatus::Active;
+    }
+    pub fn expire_if_due(&mut self, month: u32) -> bool {
+        if self.status == ContractStatus::Active && month >= self.end_month {
+            self.status = ContractStatus::Expired;
+            true
+        } else {
+            false
+        }
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -148,6 +167,105 @@ pub fn evaluate_freight_economics(
         margin: Money::from_minor_units(revenue - operating),
     })
 }
+impl World {
+    /// Registers a proposed freight contract after validating parties, route ownership, and capacity.
+    /// # Errors
+    /// Returns an error for duplicate IDs, unknown references, carrier mismatch, or excess capacity.
+    pub fn register_freight_contract(
+        &mut self,
+        contract: FreightContract,
+    ) -> Result<(), WorldError> {
+        if self.freight_contracts.contains_key(&contract.id()) {
+            return Err(WorldError::DuplicateFreightContract(contract.id()));
+        }
+        if !self.firms().contains_key(&contract.shipper()) {
+            return Err(WorldError::UnknownFirm(contract.shipper()));
+        }
+        if !self.firms().contains_key(&contract.carrier()) {
+            return Err(WorldError::UnknownFirm(contract.carrier()));
+        }
+        let route = self
+            .logistics_routes()
+            .get(&contract.route())
+            .ok_or(WorldError::UnknownLogisticsRoute(contract.route()))?;
+        if route.carrier() != Some(contract.carrier()) {
+            return Err(WorldError::InvalidFreightContract(
+                "contract carrier does not own route",
+            ));
+        }
+        if contract.reserved_capacity().get() > route.capacity().get() {
+            return Err(WorldError::InvalidFreightContract(
+                "reserved capacity exceeds route capacity",
+            ));
+        }
+        self.events.append(
+            self.date,
+            DomainEvent::FreightContractRegistered {
+                contract: contract.id(),
+                shipper: contract.shipper(),
+                carrier: contract.carrier(),
+                route: contract.route(),
+            },
+        );
+        self.freight_contracts.insert(contract.id(), contract);
+        Ok(())
+    }
+    /// Activates a proposed freight contract.
+    /// # Errors
+    /// Returns an error for an unknown or non-proposed contract.
+    pub fn activate_freight_contract(&mut self, id: ContractId) -> Result<(), WorldError> {
+        let contract = self
+            .freight_contracts
+            .get_mut(&id)
+            .ok_or(WorldError::UnknownFreightContract(id))?;
+        if contract.status() != ContractStatus::Proposed {
+            return Err(WorldError::InvalidFreightContract(
+                "contract is not proposed",
+            ));
+        }
+        contract.activate();
+        self.events.append(
+            self.date,
+            DomainEvent::FreightContractActivated { contract: id },
+        );
+        Ok(())
+    }
+    /// Stores a route's operating-cost profile.
+    /// # Errors
+    /// Returns an error for an unknown route.
+    pub fn set_route_operating_cost(
+        &mut self,
+        route: RouteId,
+        cost: RouteOperatingCost,
+    ) -> Result<(), WorldError> {
+        if !self.logistics_routes().contains_key(&route) {
+            return Err(WorldError::UnknownLogisticsRoute(route));
+        }
+        self.route_operating_costs.insert(route, cost);
+        Ok(())
+    }
+    pub fn expire_freight_contracts(&mut self, month: u32) {
+        for contract in self.freight_contracts.values_mut() {
+            if contract.expire_if_due(month) {
+                self.events.append(
+                    self.date,
+                    DomainEvent::FreightContractExpired {
+                        contract: contract.id(),
+                    },
+                );
+            }
+        }
+    }
+    #[must_use]
+    pub fn freight_contracts(&self) -> &BTreeMap<ContractId, FreightContract> {
+        &self.freight_contracts
+    }
+    #[must_use]
+    pub fn route_operating_costs(&self) -> &BTreeMap<RouteId, RouteOperatingCost> {
+        &self.route_operating_costs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

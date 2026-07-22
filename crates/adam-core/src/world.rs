@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile,
+    ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile, ContractId,
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
-    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, InventoryShipment, InvestmentProject,
-    LogisticsRoute, Money, NeedProfileId, OwnershipStake, Population, PowerNodeId,
-    ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId, ResolutionStatus,
-    RouteCapacityLedger, RouteId, ShipmentId, SimDate, TimeError, WorldSeed,
+    FirmId, FirmPolicy, FreightContract, Good, GoodId, HouseholdCohort, InventoryShipment,
+    InvestmentProject, LogisticsRoute, Money, NeedProfileId, OwnershipStake, Population,
+    PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId, ResolutionStatus,
+    RouteCapacityLedger, RouteId, RouteOperatingCost, ShipmentId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -390,6 +390,8 @@ pub enum WorldError {
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
     InvalidFreightContract(&'static str),
+    DuplicateFreightContract(ContractId),
+    UnknownFreightContract(ContractId),
     DuplicateLogisticsRoute(RouteId),
     DuplicateShipment(ShipmentId),
     UnknownShipment(ShipmentId),
@@ -494,6 +496,10 @@ impl fmt::Display for WorldError {
             Self::InvalidFreightContract(reason) => {
                 write!(formatter, "invalid freight contract: {reason}")
             }
+            Self::DuplicateFreightContract(id) => {
+                write!(formatter, "freight contract {id} already exists")
+            }
+            Self::UnknownFreightContract(id) => write!(formatter, "unknown freight contract {id}"),
             Self::DuplicateLogisticsRoute(id) => {
                 write!(formatter, "logistics route {id} already exists")
             }
@@ -575,6 +581,8 @@ pub struct World {
     pub(crate) logistics_routes: BTreeMap<RouteId, LogisticsRoute>,
     pub(crate) route_capacity: RouteCapacityLedger,
     pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
+    pub(crate) freight_contracts: BTreeMap<ContractId, FreightContract>,
+    pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -608,6 +616,8 @@ impl World {
             logistics_routes: BTreeMap::new(),
             route_capacity: RouteCapacityLedger::default(),
             inventory_shipments: BTreeMap::new(),
+            freight_contracts: BTreeMap::new(),
+            route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -786,6 +796,31 @@ impl World {
     #[must_use]
     pub const fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    fn write_freight_contract_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.freight_contracts.len() as u64);
+        for (id, c) in &self.freight_contracts {
+            hash.write_u32(id.get());
+            hash.write_u32(c.shipper().get());
+            hash.write_u32(c.carrier().get());
+            hash.write_u32(c.route().get());
+            hash.write_u64(c.reserved_capacity().get());
+            hash.write_u16(c.discount().get());
+            hash.write_u32(c.start_month());
+            hash.write_u32(c.end_month());
+            hash.write_u8(match c.status() {
+                crate::ContractStatus::Proposed => 1,
+                crate::ContractStatus::Active => 2,
+                crate::ContractStatus::Expired => 3,
+                crate::ContractStatus::Terminated => 4,
+            });
+        }
+        hash.write_u64(self.route_operating_costs.len() as u64);
+        for (route, cost) in &self.route_operating_costs {
+            hash.write_u32(route.get());
+            hash.write_i64(cost.total_per_unit().minor_units());
+        }
     }
 
     fn write_logistics_fingerprint(&self, hash: &mut StableHasher) {
@@ -996,6 +1031,7 @@ impl World {
         self.write_board_fingerprint(&mut hash);
         self.write_investment_fingerprint(&mut hash);
         self.write_logistics_fingerprint(&mut hash);
+        self.write_freight_contract_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
             hash.write_u32(actor.get());

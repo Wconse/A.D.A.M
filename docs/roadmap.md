@@ -171,6 +171,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Integrated routes, capacity, shipment commands/events, and atomic firm inventory debit/credit into authoritative World; added end-to-end delivery test.
 - Added carrier-owned routes and atomic fixed-point freight payments from shippers to carriers with liquidity checks and shipment cost fingerprinting.
 - Added long-term freight contract values, reserved capacity, term/status, discounts, route fuel/labor/maintenance costs, and deterministic carrier margin evaluation.
+- Integrated freight contracts and route operating-cost profiles into World with validation, commands, lifecycle events, save/replay, expiry, and fingerprinting.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

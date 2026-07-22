@@ -1,9 +1,12 @@
 use crate::{
-    ActorId, BasisPoints, BoardResolution, BoardVote, FirmId, FirmPolicy, InvestmentProject,
-    ProjectId, ResolutionId, ShipmentId, ShipmentOrder, World, WorldError,
+    ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmId, FirmPolicy,
+    FreightContract, InvestmentProject, ProjectId, ResolutionId, ShipmentId, ShipmentOrder, World,
+    WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    RegisterFreightContract(FreightContract),
+    ActivateFreightContract(ContractId),
     StartInventoryShipment {
         source: FirmId,
         destination: FirmId,
@@ -51,6 +54,10 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::RegisterFreightContract(contract) => {
+                world.register_freight_contract(contract.clone())
+            }
+            Self::ActivateFreightContract(id) => world.activate_freight_contract(*id),
             Self::StartInventoryShipment {
                 source,
                 destination,
