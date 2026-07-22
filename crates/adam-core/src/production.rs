@@ -340,8 +340,22 @@ impl World {
             .values()
             .map(|firm| {
                 let recipe = &self.production_recipes[&firm.recipe()];
-                let labor_batches = firm
-                    .workers()
+                let contracted_workers: u64 = self
+                    .employment_agreements
+                    .values()
+                    .filter(|agreement| agreement.active() && agreement.firm() == firm.id())
+                    .map(crate::EmploymentAgreement::workers)
+                    .sum();
+                let effective_workers = if self
+                    .employment_agreements
+                    .values()
+                    .any(|agreement| agreement.firm() == firm.id())
+                {
+                    contracted_workers
+                } else {
+                    firm.workers()
+                };
+                let labor_batches = effective_workers
                     .checked_mul(1_000)
                     .ok_or(WorldError::ArithmeticOverflow("firm labor capacity"))?
                     / recipe.labor_milli_worker_months();

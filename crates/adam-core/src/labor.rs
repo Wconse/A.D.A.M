@@ -57,6 +57,10 @@ impl EmploymentAgreement {
     pub const fn active(&self) -> bool {
         self.active
     }
+    pub(crate) fn set_workers(&mut self, workers: u64) {
+        self.workers = workers;
+        self.active = workers > 0;
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PayrollRecord {
@@ -113,6 +117,62 @@ impl World {
             ));
         }
         self.employment_agreements.insert(key, agreement);
+        Ok(())
+    }
+    /// Changes staffed workers in an existing agreement; zero workers terminates active work while preserving arrears.
+    /// # Errors
+    /// Returns an error for unknown references or worker over-allocation.
+    pub fn change_employment_workers(
+        &mut self,
+        firm: FirmId,
+        cohort: CohortId,
+        workers: u64,
+    ) -> Result<(), WorldError> {
+        let key = (firm, cohort);
+        let definition = self
+            .firms()
+            .get(&firm)
+            .ok_or(WorldError::UnknownFirm(firm))?;
+        let population = self
+            .cohorts
+            .get(&cohort)
+            .ok_or(WorldError::UnknownCohort(cohort))?
+            .people()
+            .people();
+        let firm_other: u64 = self
+            .employment_agreements
+            .iter()
+            .filter(|(key, row)| key.0 == firm && key.1 != cohort && row.active())
+            .map(|(_, row)| row.workers())
+            .sum();
+        let cohort_other: u64 = self
+            .employment_agreements
+            .iter()
+            .filter(|(key, row)| key.1 == cohort && key.0 != firm && row.active())
+            .map(|(_, row)| row.workers())
+            .sum();
+        if firm_other + workers > definition.workers() || cohort_other + workers > population {
+            return Err(WorldError::InvalidEmployment(
+                "worker change exceeds firm or cohort limit",
+            ));
+        }
+        let agreement =
+            self.employment_agreements
+                .get_mut(&key)
+                .ok_or(WorldError::InvalidEmployment(
+                    "employment agreement is missing",
+                ))?;
+        let previous = agreement.workers();
+        agreement.set_workers(workers);
+        self.events.append(
+            self.date,
+            crate::DomainEvent::EmploymentChanged {
+                firm,
+                cohort,
+                previous_workers: previous,
+                current_workers: workers,
+            },
+        );
         Ok(())
     }
     /// Pays wages from firm cash to cohort wealth; unpaid obligations become arrears.

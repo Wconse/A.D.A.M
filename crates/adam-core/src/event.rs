@@ -31,6 +31,12 @@ pub enum DomainEvent {
         quantity: QuantityMilli,
         spend: Money,
     },
+    EmploymentChanged {
+        firm: FirmId,
+        cohort: CohortId,
+        previous_workers: u64,
+        current_workers: u64,
+    },
     PayrollSettled {
         firm: FirmId,
         cohort: CohortId,
