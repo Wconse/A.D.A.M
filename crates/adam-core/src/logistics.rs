@@ -454,6 +454,93 @@ impl ShipmentLifecycle {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LegShipmentLifecycle {
+    shipment: ShipmentId,
+    routes: Vec<RouteId>,
+    leg_days: Vec<u16>,
+    current_leg: usize,
+    remaining_leg_days: u16,
+    status: ShipmentStatus,
+}
+impl LegShipmentLifecycle {
+    /// Builds per-leg transit state from a routed shipment plan.
+    /// # Errors
+    /// Returns an error for an empty path or missing route definition.
+    pub fn from_plan(
+        plan: &MultiLegShipmentPlan,
+        routes: &[LogisticsRoute],
+    ) -> Result<Self, WorldError> {
+        if plan.routes.is_empty() {
+            return Err(WorldError::InvalidLogistics("shipment path is empty"));
+        }
+        let by_id: std::collections::BTreeMap<_, _> = routes.iter().map(|r| (r.id(), r)).collect();
+        let mut leg_days = Vec::with_capacity(plan.routes.len());
+        for id in &plan.routes {
+            leg_days.push(
+                by_id
+                    .get(id)
+                    .ok_or(WorldError::UnknownLogisticsRoute(*id))?
+                    .transit_days(),
+            );
+        }
+        let remaining_leg_days = leg_days[0];
+        Ok(Self {
+            shipment: plan.shipment,
+            routes: plan.routes.clone(),
+            leg_days,
+            current_leg: 0,
+            remaining_leg_days,
+            status: ShipmentStatus::InTransit,
+        })
+    }
+    #[must_use]
+    pub const fn status(&self) -> ShipmentStatus {
+        self.status
+    }
+    #[must_use]
+    pub const fn current_leg(&self) -> usize {
+        self.current_leg
+    }
+    #[must_use]
+    pub const fn remaining_leg_days(&self) -> u16 {
+        self.remaining_leg_days
+    }
+    #[must_use]
+    pub fn current_route(&self) -> Option<RouteId> {
+        self.routes.get(self.current_leg).copied()
+    }
+    /// Advances across route legs and returns legs completed during this step.
+    /// # Errors
+    /// Returns an error unless the shipment is in transit.
+    pub fn advance_days(&mut self, mut days: u32) -> Result<Vec<RouteId>, WorldError> {
+        if self.status != ShipmentStatus::InTransit {
+            return Err(WorldError::InvalidLogistics(
+                "leg shipment is not in transit",
+            ));
+        }
+        let mut completed = Vec::new();
+        while days > 0 && self.status == ShipmentStatus::InTransit {
+            let remaining = u32::from(self.remaining_leg_days);
+            if days < remaining {
+                self.remaining_leg_days -= u16::try_from(days)
+                    .map_err(|_| WorldError::ArithmeticOverflow("leg transit days"))?;
+                break;
+            }
+            days -= remaining;
+            completed.push(self.routes[self.current_leg]);
+            self.current_leg += 1;
+            if self.current_leg == self.routes.len() {
+                self.remaining_leg_days = 0;
+                self.status = ShipmentStatus::Delivered;
+            } else {
+                self.remaining_leg_days = self.leg_days[self.current_leg];
+            }
+        }
+        Ok(completed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,5 +654,50 @@ mod tests {
         shipment.advance_days(2, &mut ledger).expect("deliver");
         assert!(ledger.reserved().is_empty());
         assert_eq!(shipment.status(), ShipmentStatus::Delivered);
+    }
+    #[test]
+    fn leg_progress_crosses_multiple_routes_exactly() {
+        let routes = vec![
+            LogisticsRoute::new(
+                RouteId::new(1),
+                RegionId::new(1),
+                RegionId::new(2),
+                TransportMode::Rail,
+                QuantityMilli::new(1000),
+                Money::from_minor_units(10),
+                2,
+                9500,
+            )
+            .expect("route"),
+            LogisticsRoute::new(
+                RouteId::new(2),
+                RegionId::new(2),
+                RegionId::new(3),
+                TransportMode::Road,
+                QuantityMilli::new(1000),
+                Money::from_minor_units(10),
+                3,
+                9500,
+            )
+            .expect("route"),
+        ];
+        let plan = MultiLegShipmentPlan {
+            shipment: ShipmentId::new(8),
+            routes: vec![RouteId::new(1), RouteId::new(2)],
+            total_cost: Money::from_minor_units(20),
+            arrival_days: 5,
+        };
+        let mut lifecycle = LegShipmentLifecycle::from_plan(&plan, &routes).expect("lifecycle");
+        assert_eq!(
+            lifecycle.advance_days(3).expect("advance"),
+            vec![RouteId::new(1)]
+        );
+        assert_eq!(lifecycle.current_route(), Some(RouteId::new(2)));
+        assert_eq!(lifecycle.remaining_leg_days(), 2);
+        assert_eq!(
+            lifecycle.advance_days(2).expect("advance"),
+            vec![RouteId::new(2)]
+        );
+        assert_eq!(lifecycle.status(), ShipmentStatus::Delivered);
     }
 }
