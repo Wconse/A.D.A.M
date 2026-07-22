@@ -178,6 +178,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added renewable monthly contract/spot capacity periods with isolated reservations, exact release, and deterministic pruning.
 - Added deterministic per-leg shipment progression with current-route state, exact transit-day consumption, and multi-leg completion reporting.
 - Migrated authoritative inventory shipments to per-leg progression with immediate general and contract/spot capacity release on each completed route.
+- Added explicit intermodal terminal-handling phases and causal route/transfer completion transitions between shipment legs.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

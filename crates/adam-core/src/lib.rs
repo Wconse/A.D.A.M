@@ -36,9 +36,10 @@ pub use ids::{
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use logistics::{
-    LegShipmentLifecycle, LogisticsRoute, MultiLegShipmentPlan, RouteCapacityLedger,
-    ShipmentLifecycle, ShipmentOrder, ShipmentPlan, ShipmentStatus, TransportMode,
-    plan_direct_shipment, plan_multileg_shipment,
+    IntermodalPhase, IntermodalShipmentLifecycle, LegShipmentLifecycle, LogisticsRoute,
+    MultiLegShipmentPlan, RouteCapacityLedger, ShipmentLifecycle, ShipmentOrder, ShipmentPlan,
+    ShipmentStatus, ShipmentTransition, TransportMode, plan_direct_shipment,
+    plan_multileg_shipment,
 };
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};

@@ -558,6 +558,127 @@ impl LegShipmentLifecycle {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum IntermodalPhase {
+    Transit,
+    TerminalHandling,
+    Delivered,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShipmentTransition {
+    RouteCompleted(RouteId),
+    TransferCompleted { after_leg: usize },
+}
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IntermodalShipmentLifecycle {
+    shipment: ShipmentId,
+    routes: Vec<RouteId>,
+    leg_days: Vec<u16>,
+    transfer_days: Vec<u16>,
+    current_leg: usize,
+    remaining_days: u16,
+    phase: IntermodalPhase,
+}
+impl IntermodalShipmentLifecycle {
+    /// Creates explicit transit and terminal-handling phases.
+    /// # Errors
+    /// Returns an error for missing routes or a transfer-duration count different from `routes.len() - 1`.
+    pub fn from_plan(
+        plan: &MultiLegShipmentPlan,
+        routes: &[LogisticsRoute],
+        transfer_days: Vec<u16>,
+    ) -> Result<Self, WorldError> {
+        if plan.routes.is_empty()
+            || transfer_days.len() != plan.routes.len().saturating_sub(1)
+            || transfer_days.contains(&0)
+        {
+            return Err(WorldError::InvalidLogistics(
+                "invalid intermodal transfer schedule",
+            ));
+        }
+        let by_id: std::collections::BTreeMap<_, _> =
+            routes.iter().map(|route| (route.id(), route)).collect();
+        let mut leg_days = Vec::with_capacity(plan.routes.len());
+        for id in &plan.routes {
+            leg_days.push(
+                by_id
+                    .get(id)
+                    .ok_or(WorldError::UnknownLogisticsRoute(*id))?
+                    .transit_days(),
+            );
+        }
+        Ok(Self {
+            shipment: plan.shipment,
+            routes: plan.routes.clone(),
+            remaining_days: leg_days[0],
+            leg_days,
+            transfer_days,
+            current_leg: 0,
+            phase: IntermodalPhase::Transit,
+        })
+    }
+    #[must_use]
+    pub const fn phase(&self) -> IntermodalPhase {
+        self.phase
+    }
+    #[must_use]
+    pub const fn current_leg(&self) -> usize {
+        self.current_leg
+    }
+    #[must_use]
+    pub const fn remaining_days(&self) -> u16 {
+        self.remaining_days
+    }
+    #[must_use]
+    pub fn current_route(&self) -> Option<RouteId> {
+        (self.phase == IntermodalPhase::Transit).then(|| self.routes[self.current_leg])
+    }
+    /// Advances through transit and terminal handling, reporting causal transitions.
+    /// # Errors
+    /// Returns an error after delivery.
+    pub fn advance_days(&mut self, mut days: u32) -> Result<Vec<ShipmentTransition>, WorldError> {
+        if self.phase == IntermodalPhase::Delivered {
+            return Err(WorldError::InvalidLogistics(
+                "intermodal shipment is delivered",
+            ));
+        }
+        let mut transitions = Vec::new();
+        while days > 0 && self.phase != IntermodalPhase::Delivered {
+            let remaining = u32::from(self.remaining_days);
+            if days < remaining {
+                self.remaining_days -= u16::try_from(days)
+                    .map_err(|_| WorldError::ArithmeticOverflow("intermodal days"))?;
+                break;
+            }
+            days -= remaining;
+            match self.phase {
+                IntermodalPhase::Transit => {
+                    transitions.push(ShipmentTransition::RouteCompleted(
+                        self.routes[self.current_leg],
+                    ));
+                    if self.current_leg + 1 == self.routes.len() {
+                        self.remaining_days = 0;
+                        self.phase = IntermodalPhase::Delivered;
+                    } else {
+                        self.remaining_days = self.transfer_days[self.current_leg];
+                        self.phase = IntermodalPhase::TerminalHandling;
+                    }
+                }
+                IntermodalPhase::TerminalHandling => {
+                    transitions.push(ShipmentTransition::TransferCompleted {
+                        after_leg: self.current_leg,
+                    });
+                    self.current_leg += 1;
+                    self.remaining_days = self.leg_days[self.current_leg];
+                    self.phase = IntermodalPhase::Transit;
+                }
+                IntermodalPhase::Delivered => break,
+            }
+        }
+        Ok(transitions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,5 +837,51 @@ mod tests {
             vec![RouteId::new(2)]
         );
         assert_eq!(lifecycle.status(), ShipmentStatus::Delivered);
+    }
+    #[test]
+    fn intermodal_transfer_delays_next_route() {
+        let routes = vec![
+            LogisticsRoute::new(
+                RouteId::new(1),
+                RegionId::new(1),
+                RegionId::new(2),
+                TransportMode::Rail,
+                QuantityMilli::new(1000),
+                Money::from_minor_units(10),
+                2,
+                9500,
+            )
+            .expect("route"),
+            LogisticsRoute::new(
+                RouteId::new(2),
+                RegionId::new(2),
+                RegionId::new(3),
+                TransportMode::Sea,
+                QuantityMilli::new(1000),
+                Money::from_minor_units(10),
+                3,
+                9500,
+            )
+            .expect("route"),
+        ];
+        let plan = MultiLegShipmentPlan {
+            shipment: ShipmentId::new(9),
+            routes: vec![RouteId::new(1), RouteId::new(2)],
+            total_cost: Money::from_minor_units(20),
+            arrival_days: 5,
+        };
+        let mut lifecycle =
+            IntermodalShipmentLifecycle::from_plan(&plan, &routes, vec![1]).expect("lifecycle");
+        assert_eq!(
+            lifecycle.advance_days(2).expect("advance"),
+            vec![ShipmentTransition::RouteCompleted(RouteId::new(1))]
+        );
+        assert_eq!(lifecycle.phase(), IntermodalPhase::TerminalHandling);
+        assert_eq!(
+            lifecycle.advance_days(1).expect("handling"),
+            vec![ShipmentTransition::TransferCompleted { after_leg: 0 }]
+        );
+        assert_eq!(lifecycle.current_route(), Some(RouteId::new(2)));
+        assert_eq!(lifecycle.remaining_days(), 3);
     }
 }
