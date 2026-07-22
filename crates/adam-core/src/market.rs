@@ -127,8 +127,46 @@ impl crate::World {
         }
         self.cohorts = cohorts;
         self.firms = firms;
+        let mut weighted_desired: std::collections::BTreeMap<CohortId, u128> =
+            std::collections::BTreeMap::new();
+        let mut weighted_unmet: std::collections::BTreeMap<CohortId, u128> =
+            std::collections::BTreeMap::new();
+        let weight = |tier: NeedTier| -> u128 {
+            match tier {
+                NeedTier::Survival => 4,
+                NeedTier::Participation => 3,
+                NeedTier::Development => 2,
+                NeedTier::Discretionary => 1,
+            }
+        };
+        for ((cohort, _good, tier), quantity) in &consumption {
+            *weighted_desired.entry(*cohort).or_default() +=
+                u128::from(quantity.get()) * weight(*tier);
+        }
+        for ((cohort, _good, tier), quantity) in &clearing.unmet {
+            let value = u128::from(quantity.get()) * weight(*tier);
+            *weighted_desired.entry(*cohort).or_default() += value;
+            *weighted_unmet.entry(*cohort).or_default() += value;
+        }
+        let mut pressure = std::collections::BTreeMap::new();
+        for cohort in weighted_desired.keys() {
+            let desired = weighted_desired[cohort];
+            let unmet = weighted_unmet.get(cohort).copied().unwrap_or_default();
+            let bps = if desired == 0 {
+                0
+            } else {
+                u16::try_from(unmet * 10_000 / desired)
+                    .map_err(|_| WorldError::ArithmeticOverflow("deprivation pressure"))?
+            };
+            pressure.insert(
+                *cohort,
+                crate::BasisPoints::new(bps)
+                    .map_err(|_| WorldError::ArithmeticOverflow("deprivation bounds"))?,
+            );
+        }
         self.monthly_consumption = consumption;
         self.unmet_demand = clearing.unmet.clone();
+        self.deprivation_pressure = pressure;
         for fill in &clearing.fills {
             self.events.append(
                 self.date,
@@ -155,6 +193,12 @@ impl crate::World {
     #[must_use]
     pub fn unmet_demand(&self) -> &BTreeUnmet {
         &self.unmet_demand
+    }
+    #[must_use]
+    pub fn deprivation_pressure(
+        &self,
+    ) -> &std::collections::BTreeMap<CohortId, crate::BasisPoints> {
+        &self.deprivation_pressure
     }
 }
 

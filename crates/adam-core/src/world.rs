@@ -622,6 +622,7 @@ pub struct World {
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
+    pub(crate) deprivation_pressure: BTreeMap<CohortId, BasisPoints>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -663,6 +664,7 @@ impl World {
             regional_prices: BTreeMap::new(),
             monthly_consumption: BTreeMap::new(),
             unmet_demand: BTreeMap::new(),
+            deprivation_pressure: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -865,6 +867,11 @@ impl World {
                 crate::NeedTier::Discretionary => 4,
             });
             hash.write_u64(q.get());
+        }
+        hash.write_u64(self.deprivation_pressure.len() as u64);
+        for (cohort, value) in &self.deprivation_pressure {
+            hash.write_u32(cohort.get());
+            hash.write_u16(value.get());
         }
     }
 
