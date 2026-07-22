@@ -213,6 +213,20 @@ impl HouseholdCohort {
             Money::from_minor_units(self.liquid_wealth.minor_units() - amount.minor_units());
         Ok(())
     }
+    pub(crate) fn credit_wealth(&mut self, amount: Money) -> Result<(), WorldError> {
+        let value = self
+            .liquid_wealth
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("household wealth credit"))?;
+        if value < 0 {
+            return Err(WorldError::InvalidCohort(
+                "wealth credit cannot make wealth negative",
+            ));
+        }
+        self.liquid_wealth = Money::from_minor_units(value);
+        Ok(())
+    }
     pub(crate) fn apply_monthly_cashflow(&mut self) -> Result<HouseholdCashflow, WorldError> {
         let income = self.annual_income.minor_units() / 12;
         let available = self

@@ -9,6 +9,7 @@ pub mod event;
 pub mod freight;
 pub mod ids;
 pub mod investment;
+pub mod labor;
 pub mod logistics;
 pub mod market;
 pub mod production;
@@ -40,6 +41,7 @@ pub use ids::{
     ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
+pub use labor::{EmploymentAgreement, PayrollRecord};
 pub use logistics::{
     IntermodalPhase, IntermodalShipmentLifecycle, LegShipmentLifecycle, LogisticsRoute,
     MultiLegShipmentPlan, RouteCapacityLedger, ShipmentLifecycle, ShipmentOrder, ShipmentPlan,

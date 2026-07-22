@@ -31,6 +31,13 @@ pub enum DomainEvent {
         quantity: QuantityMilli,
         spend: Money,
     },
+    PayrollSettled {
+        firm: FirmId,
+        cohort: CohortId,
+        owed: Money,
+        paid: Money,
+        arrears: Money,
+    },
     ProductionCompleted {
         firm: FirmId,
         good: GoodId,

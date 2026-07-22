@@ -386,6 +386,7 @@ pub enum WorldError {
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
+    InvalidEmployment(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
     UnknownBoardResolution(ResolutionId),
@@ -490,6 +491,7 @@ impl fmt::Display for WorldError {
                 write!(formatter, "cohort {id} has insufficient cash")
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
+            Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidProduction(reason) => {
                 write!(formatter, "invalid production model: {reason}")
             }
@@ -602,6 +604,7 @@ pub struct World {
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
+    pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
@@ -647,6 +650,7 @@ impl World {
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
+            employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
             firm_appointments: BTreeMap::new(),
@@ -897,6 +901,17 @@ impl World {
             hash.write_u32(row.survival_shortage_months());
             hash.write_u32(row.unemployment_months());
             hash.write_u32(row.debt_distress_months());
+        }
+    }
+
+    fn write_employment_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.employment_agreements.len() as u64);
+        for ((firm, cohort), row) in &self.employment_agreements {
+            hash.write_u32(firm.get());
+            hash.write_u32(cohort.get());
+            hash.write_u64(row.workers());
+            hash.write_i64(row.wage().minor_units());
+            hash.write_i64(row.arrears().minor_units());
         }
     }
 
@@ -1183,6 +1198,7 @@ impl World {
         self.write_logistics_fingerprint(&mut hash);
         self.write_freight_contract_fingerprint(&mut hash);
         self.write_terminal_fingerprint(&mut hash);
+        self.write_employment_fingerprint(&mut hash);
         self.write_market_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
