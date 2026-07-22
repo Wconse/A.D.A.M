@@ -175,6 +175,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Applied active contract discounts and route operating costs to shipment routing and atomic shipper/carrier cash settlement.
 - Added separate guaranteed contract and residual spot capacity ledgers with protected reservations and releases.
 - Integrated contract/spot pool selection, atomic reservation, shipment provenance, delivery release, save/replay, and fingerprinting into authoritative World shipments.
+- Added renewable monthly contract/spot capacity periods with isolated reservations, exact release, and deterministic pruning.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

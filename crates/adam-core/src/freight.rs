@@ -383,6 +383,63 @@ impl FreightCapacityLedger {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MonthlyFreightCapacityLedger {
+    periods: BTreeMap<u32, FreightCapacityLedger>,
+}
+impl MonthlyFreightCapacityLedger {
+    #[must_use]
+    pub fn periods(&self) -> &BTreeMap<u32, FreightCapacityLedger> {
+        &self.periods
+    }
+    /// Reserves contract or spot capacity in one simulation month.
+    /// # Errors
+    /// Returns an error when month zero is used or the selected monthly pool lacks capacity.
+    pub fn reserve(
+        &mut self,
+        month: u32,
+        route: &crate::LogisticsRoute,
+        quantity: QuantityMilli,
+        contract: Option<&FreightContract>,
+        contracts: &BTreeMap<ContractId, FreightContract>,
+    ) -> Result<(), WorldError> {
+        if month == 0 {
+            return Err(WorldError::InvalidFreightContract(
+                "capacity month must be positive",
+            ));
+        }
+        let mut period = self.periods.get(&month).cloned().unwrap_or_default();
+        period.reserve(route, quantity, contract, contracts)?;
+        self.periods.insert(month, period);
+        Ok(())
+    }
+    /// Releases capacity from its original simulation month.
+    /// # Errors
+    /// Returns an error for a missing month or excessive release.
+    pub fn release(
+        &mut self,
+        month: u32,
+        route: RouteId,
+        quantity: QuantityMilli,
+        contract: Option<ContractId>,
+    ) -> Result<(), WorldError> {
+        let period = self
+            .periods
+            .get_mut(&month)
+            .ok_or(WorldError::InvalidFreightContract(
+                "capacity month is missing",
+            ))?;
+        period.release(route, quantity, contract)?;
+        if period.contract_used().is_empty() && period.spot_used().is_empty() {
+            self.periods.remove(&month);
+        }
+        Ok(())
+    }
+    pub fn close_before(&mut self, month: u32) {
+        self.periods.retain(|period, _| *period >= month);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +513,33 @@ mod tests {
             .reserve(&route, QuantityMilli::new(600), Some(&contract), &contracts)
             .expect("contract");
         assert_eq!(ledger.contract_used()[&ContractId::new(1)].get(), 600);
+    }
+    #[test]
+    fn monthly_capacity_does_not_leak_between_periods() {
+        let route = crate::LogisticsRoute::new(
+            RouteId::new(1),
+            crate::RegionId::new(1),
+            crate::RegionId::new(2),
+            crate::TransportMode::Rail,
+            QuantityMilli::new(1000),
+            Money::from_minor_units(10),
+            2,
+            9500,
+        )
+        .expect("route");
+        let contracts = BTreeMap::new();
+        let mut ledger = MonthlyFreightCapacityLedger::default();
+        ledger
+            .reserve(1, &route, QuantityMilli::new(1000), None, &contracts)
+            .expect("month one");
+        ledger
+            .reserve(2, &route, QuantityMilli::new(1000), None, &contracts)
+            .expect("month two");
+        assert_eq!(ledger.periods().len(), 2);
+        ledger
+            .release(1, route.id(), QuantityMilli::new(1000), None)
+            .expect("release");
+        assert!(!ledger.periods().contains_key(&1));
+        assert!(ledger.periods().contains_key(&2));
     }
 }
