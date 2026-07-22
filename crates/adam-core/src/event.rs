@@ -6,6 +6,13 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    MarketTrade {
+        buyer: CohortId,
+        seller: FirmId,
+        good: GoodId,
+        quantity: QuantityMilli,
+        spend: Money,
+    },
     ProductionCompleted {
         firm: FirmId,
         good: GoodId,

@@ -86,6 +86,42 @@ pub fn clear_local_market(
     }
     Ok(MarketClearing { fills, unmet })
 }
+impl crate::World {
+    /// Atomically settles pre-cleared market fills against household wealth and firm inventories.
+    /// # Errors
+    /// Returns an error without mutation for insufficient cash, stock, or arithmetic overflow.
+    pub fn settle_local_market(&mut self, clearing: &MarketClearing) -> Result<(), WorldError> {
+        let mut cohorts = self.cohorts.clone();
+        let mut firms = self.firms.clone();
+        for fill in &clearing.fills {
+            cohorts
+                .get_mut(&fill.buyer)
+                .ok_or(WorldError::UnknownCohort(fill.buyer))?
+                .debit_wealth(fill.spend)?;
+            let firm = firms
+                .get_mut(&fill.seller)
+                .ok_or(WorldError::UnknownFirm(fill.seller))?;
+            firm.debit_inventory(fill.good, fill.quantity)?;
+            firm.apply_cash_delta(fill.spend)?;
+        }
+        self.cohorts = cohorts;
+        self.firms = firms;
+        for fill in &clearing.fills {
+            self.events.append(
+                self.date,
+                crate::DomainEvent::MarketTrade {
+                    buyer: fill.buyer,
+                    seller: fill.seller,
+                    good: fill.good,
+                    quantity: fill.quantity,
+                    spend: fill.spend,
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -205,6 +205,14 @@ impl HouseholdCohort {
     pub const fn debt(&self) -> Money {
         self.debt
     }
+    pub(crate) fn debit_wealth(&mut self, amount: Money) -> Result<(), WorldError> {
+        if amount.minor_units() < 0 || self.liquid_wealth.minor_units() < amount.minor_units() {
+            return Err(WorldError::InsufficientHouseholdCash(self.id));
+        }
+        self.liquid_wealth =
+            Money::from_minor_units(self.liquid_wealth.minor_units() - amount.minor_units());
+        Ok(())
+    }
     pub(crate) const fn set_people(&mut self, value: Population) {
         self.people = value;
     }

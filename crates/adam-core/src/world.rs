@@ -383,6 +383,8 @@ pub enum WorldError {
     InvalidCohort(&'static str),
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
+    InsufficientHouseholdCash(CohortId),
+    UnknownCohort(CohortId),
     InvalidProduction(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
@@ -482,6 +484,10 @@ impl fmt::Display for WorldError {
             Self::InvalidCohort(reason) => write!(formatter, "invalid household cohort: {reason}"),
             Self::InvalidConsumptionProfile(reason) => {
                 write!(formatter, "invalid consumption profile: {reason}")
+            }
+            Self::UnknownCohort(id) => write!(formatter, "unknown cohort {id}"),
+            Self::InsufficientHouseholdCash(id) => {
+                write!(formatter, "cohort {id} has insufficient cash")
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::InvalidProduction(reason) => {
