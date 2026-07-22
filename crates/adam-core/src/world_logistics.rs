@@ -11,6 +11,7 @@ pub struct InventoryShipment {
     source: FirmId,
     destination: FirmId,
     quantity: QuantityMilli,
+    total_cost: crate::Money,
     lifecycle: ShipmentLifecycle,
 }
 impl InventoryShipment {
@@ -33,6 +34,10 @@ impl InventoryShipment {
     #[must_use]
     pub const fn quantity(&self) -> QuantityMilli {
         self.quantity
+    }
+    #[must_use]
+    pub const fn total_cost(&self) -> crate::Money {
+        self.total_cost
     }
     #[must_use]
     pub const fn status(&self) -> ShipmentStatus {
@@ -60,6 +65,12 @@ impl World {
         }
         if !self.regions().contains_key(&route.destination()) {
             return Err(WorldError::UnknownRegion(route.destination()));
+        }
+        let carrier = route.carrier().ok_or(WorldError::InvalidLogistics(
+            "route requires a carrier firm",
+        ))?;
+        if !self.firms().contains_key(&carrier) {
+            return Err(WorldError::UnknownFirm(carrier));
         }
         self.logistics_routes.insert(route.id(), route);
         Ok(())
@@ -108,12 +119,45 @@ impl World {
         }
         let routes: Vec<_> = self.logistics_routes.values().cloned().collect();
         let plan: MultiLegShipmentPlan = plan_multileg_shipment(order, &routes, max_legs)?;
+        let route_map: BTreeMap<_, _> = routes.iter().map(|route| (route.id(), route)).collect();
+        let mut carrier_payments: BTreeMap<FirmId, i64> = BTreeMap::new();
+        for route_id in &plan.routes {
+            let route = route_map[route_id];
+            let carrier = route.carrier().ok_or(WorldError::InvalidLogistics(
+                "route requires a carrier firm",
+            ))?;
+            let cost = i128::from(route.cost_per_unit().minor_units())
+                * i128::from(order.quantity().get())
+                / i128::from(QuantityMilli::SCALE);
+            let cost = i64::try_from(cost)
+                .map_err(|_| WorldError::ArithmeticOverflow("carrier payment"))?;
+            let current = carrier_payments.get(&carrier).copied().unwrap_or_default();
+            carrier_payments.insert(
+                carrier,
+                current
+                    .checked_add(cost)
+                    .ok_or(WorldError::ArithmeticOverflow("carrier payment total"))?,
+            );
+        }
+        if self.firms()[&source].cash().minor_units() < plan.total_cost.minor_units() {
+            return Err(WorldError::InsufficientFirmCash(source));
+        }
         let mut lifecycle = ShipmentLifecycle::from_plan(&plan, order.quantity());
         lifecycle.start(&mut self.route_capacity, &routes)?;
         self.firms
             .get_mut(&source)
             .ok_or(WorldError::UnknownFirm(source))?
             .debit_inventory(order.good(), order.quantity())?;
+        self.firms
+            .get_mut(&source)
+            .ok_or(WorldError::UnknownFirm(source))?
+            .debit_cash(plan.total_cost)?;
+        for (carrier, value) in carrier_payments {
+            self.firms
+                .get_mut(&carrier)
+                .ok_or(WorldError::UnknownFirm(carrier))?
+                .credit_cash(crate::Money::from_minor_units(value))?;
+        }
         self.events.append(
             self.date,
             crate::DomainEvent::ShipmentStarted {
@@ -122,6 +166,7 @@ impl World {
                 source,
                 destination,
                 quantity: order.quantity(),
+                total_cost: plan.total_cost,
             },
         );
         self.inventory_shipments.insert(
@@ -132,6 +177,7 @@ impl World {
                 source,
                 destination,
                 quantity: order.quantity(),
+                total_cost: plan.total_cost,
                 lifecycle,
             },
         );
@@ -270,7 +316,8 @@ mod tests {
                     2,
                     9500,
                 )
-                .expect("route"),
+                .expect("route")
+                .with_carrier(FirmId::new(2)),
             )
             .expect("route");
         let order = ShipmentOrder::new(
@@ -288,6 +335,8 @@ mod tests {
             world.firms()[&FirmId::new(1)].inventories()[&GoodId::new(1)].get(),
             600
         );
+        assert_eq!(world.firms()[&FirmId::new(1)].cash().minor_units(), 96);
+        assert_eq!(world.firms()[&FirmId::new(2)].cash().minor_units(), 104);
         assert_eq!(
             world.route_capacity().reserved()[&RouteId::new(1)].get(),
             400

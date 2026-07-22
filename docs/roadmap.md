@@ -169,6 +169,7 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Added deterministic multi-leg routing with cycle avoidance, leg limits, per-leg capacity, total cost, transit time, and stable tie-breaking.
 - Added atomic shared-capacity reservations and a serializable planned/in-transit/delivered shipment lifecycle with release on delivery.
 - Integrated routes, capacity, shipment commands/events, and atomic firm inventory debit/credit into authoritative World; added end-to-end delivery test.
+- Added carrier-owned routes and atomic fixed-point freight payments from shippers to carriers with liquidity checks and shipment cost fingerprinting.
 - Documented playable firm governance, consumer brand choice, advertising, route logistics, and logistics companies.
 - Added strict namespaced mod manifests and deterministic dependency/load-order resolution.
 - Added the layered content registry with explicit non-silent patch operations and provenance.

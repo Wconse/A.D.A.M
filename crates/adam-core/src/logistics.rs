@@ -1,4 +1,4 @@
-use crate::{GoodId, Money, QuantityMilli, RegionId, RouteId, ShipmentId, WorldError};
+use crate::{FirmId, GoodId, Money, QuantityMilli, RegionId, RouteId, ShipmentId, WorldError};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TransportMode {
     Road,
@@ -16,6 +16,7 @@ pub struct LogisticsRoute {
     cost_per_unit: Money,
     transit_days: u16,
     reliability_bps: u16,
+    carrier: Option<FirmId>,
 }
 impl LogisticsRoute {
     /// Creates a directed transport service route.
@@ -49,6 +50,7 @@ impl LogisticsRoute {
             cost_per_unit,
             transit_days,
             reliability_bps,
+            carrier: None,
         })
     }
     #[must_use]
@@ -82,6 +84,15 @@ impl LogisticsRoute {
     #[must_use]
     pub const fn reliability_bps(&self) -> u16 {
         self.reliability_bps
+    }
+    #[must_use]
+    pub const fn carrier(&self) -> Option<FirmId> {
+        self.carrier
+    }
+    #[must_use]
+    pub const fn with_carrier(mut self, carrier: FirmId) -> Self {
+        self.carrier = Some(carrier);
+        self
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

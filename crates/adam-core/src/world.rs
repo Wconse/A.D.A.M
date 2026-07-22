@@ -800,6 +800,7 @@ impl World {
             hash.write_i64(route.cost_per_unit().minor_units());
             hash.write_u16(route.transit_days());
             hash.write_u16(route.reliability_bps());
+            hash.write_u32(route.carrier().map_or(0, FirmId::get));
         }
         hash.write_u64(self.route_capacity.reserved().len() as u64);
         for (id, quantity) in self.route_capacity.reserved() {
@@ -813,6 +814,7 @@ impl World {
             hash.write_u32(shipment.source().get());
             hash.write_u32(shipment.destination().get());
             hash.write_u64(shipment.quantity().get());
+            hash.write_i64(shipment.total_cost().minor_units());
             hash.write_u32(shipment.remaining_days());
             hash.write_u8(match shipment.status() {
                 crate::ShipmentStatus::Planned => 1,

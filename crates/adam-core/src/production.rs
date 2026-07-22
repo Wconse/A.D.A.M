@@ -178,6 +178,23 @@ impl Firm {
     pub(crate) const fn set_cash(&mut self, value: Money) {
         self.cash = value;
     }
+    pub(crate) fn debit_cash(&mut self, amount: Money) -> Result<(), WorldError> {
+        let value = amount.minor_units();
+        if value < 0 || self.cash.minor_units() < value {
+            return Err(WorldError::InsufficientFirmCash(self.id));
+        }
+        self.cash = Money::from_minor_units(self.cash.minor_units() - value);
+        Ok(())
+    }
+    pub(crate) fn credit_cash(&mut self, amount: Money) -> Result<(), WorldError> {
+        let value = self
+            .cash
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("firm cash credit"))?;
+        self.cash = Money::from_minor_units(value);
+        Ok(())
+    }
     pub(crate) fn debit_inventory(
         &mut self,
         good: GoodId,

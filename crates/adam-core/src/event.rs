@@ -15,6 +15,7 @@ pub enum DomainEvent {
         source: FirmId,
         destination: FirmId,
         quantity: QuantityMilli,
+        total_cost: Money,
     },
     ShipmentDelivered {
         shipment: ShipmentId,
