@@ -15,7 +15,7 @@ pub struct MarketOrder {
     pub quantity: QuantityMilli,
     pub max_spend: Money,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketFill {
     pub buyer: CohortId,
     pub seller: FirmId,
@@ -23,7 +23,7 @@ pub struct MarketFill {
     pub quantity: QuantityMilli,
     pub spend: Money,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketClearing {
     pub fills: Vec<MarketFill>,
     pub unmet: BTreeUnmet,
@@ -104,8 +104,23 @@ impl crate::World {
             firm.debit_inventory(fill.good, fill.quantity)?;
             firm.apply_cash_delta(fill.spend)?;
         }
+        let mut consumption: std::collections::BTreeMap<(CohortId, GoodId), QuantityMilli> =
+            std::collections::BTreeMap::new();
+        for fill in &clearing.fills {
+            let key = (fill.buyer, fill.good);
+            let current = consumption.get(&key).copied().unwrap_or_default();
+            let next = QuantityMilli::new(
+                current
+                    .get()
+                    .checked_add(fill.quantity.get())
+                    .ok_or(WorldError::ArithmeticOverflow("monthly consumption"))?,
+            );
+            consumption.insert(key, next);
+        }
         self.cohorts = cohorts;
         self.firms = firms;
+        self.monthly_consumption = consumption;
+        self.unmet_demand = clearing.unmet.clone();
         for fill in &clearing.fills {
             self.events.append(
                 self.date,
@@ -119,6 +134,19 @@ impl crate::World {
             );
         }
         Ok(())
+    }
+}
+
+impl crate::World {
+    #[must_use]
+    pub fn monthly_consumption(
+        &self,
+    ) -> &std::collections::BTreeMap<(CohortId, GoodId), QuantityMilli> {
+        &self.monthly_consumption
+    }
+    #[must_use]
+    pub fn unmet_demand(&self) -> &BTreeUnmet {
+        &self.unmet_demand
     }
 }
 

@@ -1,10 +1,11 @@
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmId, FirmPolicy,
-    FreightContract, InvestmentProject, ProjectId, ResolutionId, ShipmentId, ShipmentOrder,
-    TerminalId, World, WorldError,
+    FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId, ShipmentId,
+    ShipmentOrder, TerminalId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    SettleLocalMarket(MarketClearing),
     ExecuteMonthlyHouseholdCashflows,
     ExecuteMonthlyProduction,
     EnqueueTerminalShipment {
@@ -63,6 +64,7 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::SettleLocalMarket(clearing) => world.settle_local_market(clearing),
             Self::ExecuteMonthlyHouseholdCashflows => {
                 world.execute_monthly_household_cashflows().map(|_| ())
             }

@@ -1,4 +1,4 @@
-use crate::{TerminalCapacityLedger, TerminalId, TerminalQueue};
+use crate::{QuantityMilli, TerminalCapacityLedger, TerminalId, TerminalQueue};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -620,6 +620,8 @@ pub struct World {
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
+    pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId), QuantityMilli>,
+    pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId), QuantityMilli>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -659,6 +661,8 @@ impl World {
             route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
+            monthly_consumption: BTreeMap::new(),
+            unmet_demand: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -835,6 +839,21 @@ impl World {
     #[must_use]
     pub const fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    fn write_market_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.monthly_consumption.len() as u64);
+        for ((cohort, good), q) in &self.monthly_consumption {
+            hash.write_u32(cohort.get());
+            hash.write_u32(good.get());
+            hash.write_u64(q.get());
+        }
+        hash.write_u64(self.unmet_demand.len() as u64);
+        for ((cohort, good), q) in &self.unmet_demand {
+            hash.write_u32(cohort.get());
+            hash.write_u32(good.get());
+            hash.write_u64(q.get());
+        }
     }
 
     fn write_terminal_fingerprint(&self, hash: &mut StableHasher) {
@@ -1101,6 +1120,7 @@ impl World {
     }
 
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn stable_fingerprint(&self) -> u64 {
         let mut hash = StableHasher::new();
         hash.write_u32(crate::SIMULATION_VERSION);
@@ -1119,6 +1139,7 @@ impl World {
         self.write_logistics_fingerprint(&mut hash);
         self.write_freight_contract_fingerprint(&mut hash);
         self.write_terminal_fingerprint(&mut hash);
+        self.write_market_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
             hash.write_u32(actor.get());
