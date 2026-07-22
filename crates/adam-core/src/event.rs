@@ -1,11 +1,19 @@
 use crate::{
     ActorId, BasisPoints, BoardVote, CohortId, ContractId, CountryId, FirmId, GoodId, Money,
     NeedProfileId, Population, PowerNodeId, ProjectId, QuantityMilli, RatePpm, RegionId,
-    ResolutionId, ResolutionStatus, RouteId, ShipmentId, SimDate,
+    ResolutionId, ResolutionStatus, RouteId, ShipmentId, SimDate, TerminalId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    ShipmentQueuedAtTerminal {
+        shipment: ShipmentId,
+        terminal: TerminalId,
+    },
+    ShipmentAdmittedToTerminal {
+        shipment: ShipmentId,
+        terminal: TerminalId,
+    },
     FreightContractRegistered {
         contract: ContractId,
         shipper: FirmId,

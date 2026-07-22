@@ -1,4 +1,4 @@
-use crate::{TerminalCapacityLedger, TerminalId};
+use crate::{TerminalCapacityLedger, TerminalId, TerminalQueue};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -395,6 +395,7 @@ pub enum WorldError {
     InvalidTerminal(&'static str),
     DuplicateTerminal(TerminalId),
     InsufficientTerminalCapacity(TerminalId),
+    UnknownTerminal(TerminalId),
     DuplicateFreightContract(ContractId),
     UnknownFreightContract(ContractId),
     InsufficientContractCapacity(ContractId),
@@ -502,6 +503,7 @@ impl fmt::Display for WorldError {
             Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
             Self::InvalidTerminal(reason) => write!(formatter, "invalid terminal: {reason}"),
             Self::DuplicateTerminal(id) => write!(formatter, "terminal {id} already exists"),
+            Self::UnknownTerminal(id) => write!(formatter, "unknown terminal {id}"),
             Self::InsufficientTerminalCapacity(id) => {
                 write!(formatter, "terminal {id} has insufficient capacity")
             }
@@ -603,6 +605,7 @@ pub struct World {
     pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
     pub(crate) terminals: BTreeMap<TerminalId, LogisticsTerminal>,
     pub(crate) terminal_capacity: TerminalCapacityLedger,
+    pub(crate) terminal_queue: TerminalQueue,
     pub(crate) freight_contracts: BTreeMap<ContractId, FreightContract>,
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
@@ -641,6 +644,7 @@ impl World {
             inventory_shipments: BTreeMap::new(),
             terminals: BTreeMap::new(),
             terminal_capacity: TerminalCapacityLedger::default(),
+            terminal_queue: TerminalQueue::default(),
             freight_contracts: BTreeMap::new(),
             route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
@@ -837,6 +841,15 @@ impl World {
         for (id, q) in self.terminal_capacity.used() {
             hash.write_u32(id.get());
             hash.write_u64(q.get());
+        }
+        hash.write_u64(self.terminal_queue.waiting().len() as u64);
+        for (id, entries) in self.terminal_queue.waiting() {
+            hash.write_u32(id.get());
+            hash.write_u64(entries.len() as u64);
+            for entry in entries {
+                hash.write_u32(entry.shipment().get());
+                hash.write_u64(entry.quantity().get());
+            }
         }
     }
 

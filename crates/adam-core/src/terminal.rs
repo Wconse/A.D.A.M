@@ -134,6 +134,64 @@ impl World {
     pub const fn terminal_capacity(&self) -> &TerminalCapacityLedger {
         &self.terminal_capacity
     }
+    /// Queues an existing shipment at a terminal.
+    /// # Errors
+    /// Returns an error for unknown references or duplicate queue membership.
+    pub fn enqueue_terminal_shipment(
+        &mut self,
+        terminal: TerminalId,
+        shipment: crate::ShipmentId,
+    ) -> Result<(), WorldError> {
+        if !self.terminals.contains_key(&terminal) {
+            return Err(WorldError::UnknownTerminal(terminal));
+        }
+        let quantity = self
+            .inventory_shipments()
+            .get(&shipment)
+            .ok_or(WorldError::UnknownShipment(shipment))?
+            .quantity();
+        self.terminal_queue
+            .enqueue(terminal, TerminalQueueEntry::new(shipment, quantity))?;
+        self.events.append(
+            self.date,
+            crate::DomainEvent::ShipmentQueuedAtTerminal { shipment, terminal },
+        );
+        Ok(())
+    }
+    /// Admits FIFO shipments against shared terminal capacity.
+    /// # Errors
+    /// Returns an error for an unknown terminal.
+    pub fn admit_terminal_shipments(
+        &mut self,
+        terminal: TerminalId,
+    ) -> Result<Vec<crate::ShipmentId>, WorldError> {
+        let definition = self
+            .terminals
+            .get(&terminal)
+            .cloned()
+            .ok_or(WorldError::UnknownTerminal(terminal))?;
+        let admitted = self
+            .terminal_queue
+            .admit(&definition, &mut self.terminal_capacity);
+        let ids = admitted
+            .iter()
+            .map(|entry| entry.shipment())
+            .collect::<Vec<_>>();
+        for shipment in &ids {
+            self.events.append(
+                self.date,
+                crate::DomainEvent::ShipmentAdmittedToTerminal {
+                    shipment: *shipment,
+                    terminal,
+                },
+            );
+        }
+        Ok(ids)
+    }
+    #[must_use]
+    pub const fn terminal_queue(&self) -> &TerminalQueue {
+        &self.terminal_queue
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TerminalQueueEntry {
