@@ -178,6 +178,48 @@ impl Firm {
     pub(crate) const fn set_cash(&mut self, value: Money) {
         self.cash = value;
     }
+    pub(crate) fn debit_inventory(
+        &mut self,
+        good: GoodId,
+        quantity: QuantityMilli,
+    ) -> Result<(), WorldError> {
+        let current = self
+            .inventories
+            .get(&good)
+            .copied()
+            .unwrap_or_default()
+            .get();
+        if current < quantity.get() {
+            return Err(WorldError::InsufficientFirmInventory {
+                firm: self.id,
+                good,
+            });
+        }
+        let next = current - quantity.get();
+        if next == 0 {
+            self.inventories.remove(&good);
+        } else {
+            self.inventories.insert(good, QuantityMilli::new(next));
+        }
+        Ok(())
+    }
+    pub(crate) fn credit_inventory(
+        &mut self,
+        good: GoodId,
+        quantity: QuantityMilli,
+    ) -> Result<(), WorldError> {
+        let current = self
+            .inventories
+            .get(&good)
+            .copied()
+            .unwrap_or_default()
+            .get();
+        let next = current
+            .checked_add(quantity.get())
+            .ok_or(WorldError::ArithmeticOverflow("firm inventory credit"))?;
+        self.inventories.insert(good, QuantityMilli::new(next));
+        Ok(())
+    }
     pub(crate) fn add_capacity(&mut self, value: u64) -> Result<(), WorldError> {
         self.capacity_batches = self
             .capacity_batches

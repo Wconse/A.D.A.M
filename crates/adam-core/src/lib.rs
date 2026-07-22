@@ -15,6 +15,7 @@ mod simulation;
 pub mod time;
 pub mod value;
 pub mod world;
+pub mod world_logistics;
 
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
@@ -30,7 +31,8 @@ pub use ids::{
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use logistics::{
-    LogisticsRoute, ShipmentOrder, ShipmentPlan, TransportMode, plan_direct_shipment,
+    LogisticsRoute, MultiLegShipmentPlan, RouteCapacityLedger, ShipmentLifecycle, ShipmentOrder,
+    ShipmentPlan, ShipmentStatus, TransportMode, plan_direct_shipment, plan_multileg_shipment,
 };
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
@@ -40,6 +42,7 @@ pub use world::{
     Actor, Country, CountryIndicators, Influence, PowerNode, PowerNodeKind, Region, World,
     WorldError,
 };
+pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
 pub const SIMULATION_VERSION: u32 = 6;

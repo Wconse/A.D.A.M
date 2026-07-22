@@ -19,6 +19,7 @@ All notable project changes are documented here. The format follows Keep a Chang
 - Added deterministic firm production planning constrained by labor, capital capacity, and intermediate inventories.
 - Added authoritative firm ownership, voting authorization, persisted policies, and replayable management commands.
 - Added board-funded investment projects that convert committed cash into constructed production capacity over time.
+- Added authoritative multi-leg inventory shipments with shared route capacity and firm stock transfer.
 - Added deterministic mod manifests, layered content patches, provenance history, and canonical merged-content fingerprints.
 - Added save/mod-set compatibility metadata and multi-layer registry conflict reports.
 - Added complete binary world snapshot round-trips with deterministic continuation tests.

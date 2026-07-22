@@ -1,9 +1,19 @@
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, FirmId, FirmPolicy, InvestmentProject,
-    ProjectId, ResolutionId, World, WorldError,
+    ProjectId, ResolutionId, ShipmentId, ShipmentOrder, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    StartInventoryShipment {
+        source: FirmId,
+        destination: FirmId,
+        order: ShipmentOrder,
+        max_legs: usize,
+    },
+    AdvanceInventoryShipment {
+        shipment: ShipmentId,
+        days: u32,
+    },
     LaunchInvestmentProject(InvestmentProject),
     AdvanceInvestmentProject(ProjectId),
     ProposeBoardResolution(BoardResolution),
@@ -41,6 +51,15 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::StartInventoryShipment {
+                source,
+                destination,
+                order,
+                max_legs,
+            } => world.start_inventory_shipment(*source, *destination, order, *max_legs),
+            Self::AdvanceInventoryShipment { shipment, days } => {
+                world.advance_inventory_shipment(*shipment, *days)
+            }
             Self::LaunchInvestmentProject(project) => {
                 world.launch_investment_project(project.clone())
             }

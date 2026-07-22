@@ -4,9 +4,10 @@ use std::fmt;
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, CohortId, ConsumptionProfile,
     CorporateAction, CorporateRole, CountryId, DomainEvent, EventLog, Firm, FirmAppointment,
-    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, InvestmentProject, Money, NeedProfileId,
-    OwnershipStake, Population, PowerNodeId, ProductionRecipe, ProjectId, RecipeId, RegionId,
-    ResolutionId, ResolutionStatus, RouteId, ShipmentId, SimDate, TimeError, WorldSeed,
+    FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, InventoryShipment, InvestmentProject,
+    LogisticsRoute, Money, NeedProfileId, OwnershipStake, Population, PowerNodeId,
+    ProductionRecipe, ProjectId, RecipeId, RegionId, ResolutionId, ResolutionStatus,
+    RouteCapacityLedger, RouteId, ShipmentId, SimDate, TimeError, WorldSeed,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -388,6 +389,13 @@ pub enum WorldError {
     InsufficientCommittedInvestment(FirmId),
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
+    DuplicateLogisticsRoute(RouteId),
+    DuplicateShipment(ShipmentId),
+    UnknownShipment(ShipmentId),
+    InsufficientFirmInventory {
+        firm: FirmId,
+        good: GoodId,
+    },
     NoFeasibleLogisticsRoute(ShipmentId),
     UnknownLogisticsRoute(RouteId),
     InsufficientRouteCapacity(RouteId),
@@ -482,6 +490,15 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid investment project: {reason}")
             }
             Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
+            Self::DuplicateLogisticsRoute(id) => {
+                write!(formatter, "logistics route {id} already exists")
+            }
+            Self::DuplicateShipment(id) => write!(formatter, "shipment {id} already exists"),
+            Self::UnknownShipment(id) => write!(formatter, "unknown shipment {id}"),
+            Self::InsufficientFirmInventory { firm, good } => write!(
+                formatter,
+                "firm {firm} has insufficient inventory of good {good}"
+            ),
             Self::UnknownLogisticsRoute(id) => write!(formatter, "unknown logistics route {id}"),
             Self::InsufficientRouteCapacity(id) => {
                 write!(formatter, "route {id} has insufficient capacity")
@@ -551,6 +568,9 @@ pub struct World {
     pub(crate) actor_cash: BTreeMap<ActorId, Money>,
     pub(crate) committed_investments: BTreeMap<FirmId, Money>,
     pub(crate) investment_projects: BTreeMap<ProjectId, InvestmentProject>,
+    pub(crate) logistics_routes: BTreeMap<RouteId, LogisticsRoute>,
+    pub(crate) route_capacity: RouteCapacityLedger,
+    pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
@@ -581,6 +601,9 @@ impl World {
             actor_cash: BTreeMap::new(),
             committed_investments: BTreeMap::new(),
             investment_projects: BTreeMap::new(),
+            logistics_routes: BTreeMap::new(),
+            route_capacity: RouteCapacityLedger::default(),
+            inventory_shipments: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             countries: BTreeMap::new(),
@@ -761,6 +784,50 @@ impl World {
         &self.events
     }
 
+    fn write_logistics_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.logistics_routes.len() as u64);
+        for (id, route) in &self.logistics_routes {
+            hash.write_u32(id.get());
+            hash.write_u32(route.origin().get());
+            hash.write_u32(route.destination().get());
+            hash.write_u8(match route.mode() {
+                crate::TransportMode::Road => 1,
+                crate::TransportMode::Rail => 2,
+                crate::TransportMode::Sea => 3,
+                crate::TransportMode::Air => 4,
+            });
+            hash.write_u64(route.capacity().get());
+            hash.write_i64(route.cost_per_unit().minor_units());
+            hash.write_u16(route.transit_days());
+            hash.write_u16(route.reliability_bps());
+        }
+        hash.write_u64(self.route_capacity.reserved().len() as u64);
+        for (id, quantity) in self.route_capacity.reserved() {
+            hash.write_u32(id.get());
+            hash.write_u64(quantity.get());
+        }
+        hash.write_u64(self.inventory_shipments.len() as u64);
+        for (id, shipment) in &self.inventory_shipments {
+            hash.write_u32(id.get());
+            hash.write_u32(shipment.good().get());
+            hash.write_u32(shipment.source().get());
+            hash.write_u32(shipment.destination().get());
+            hash.write_u64(shipment.quantity().get());
+            hash.write_u32(shipment.remaining_days());
+            hash.write_u8(match shipment.status() {
+                crate::ShipmentStatus::Planned => 1,
+                crate::ShipmentStatus::Reserved => 2,
+                crate::ShipmentStatus::InTransit => 3,
+                crate::ShipmentStatus::Delivered => 4,
+                crate::ShipmentStatus::Cancelled => 5,
+            });
+            hash.write_u64(shipment.routes().len() as u64);
+            for route in shipment.routes() {
+                hash.write_u32(route.get());
+            }
+        }
+    }
+
     fn write_investment_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.investment_projects.len() as u64);
         for (id, project) in &self.investment_projects {
@@ -922,6 +989,7 @@ impl World {
         self.write_business_fingerprint(&mut hash);
         self.write_board_fingerprint(&mut hash);
         self.write_investment_fingerprint(&mut hash);
+        self.write_logistics_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
             hash.write_u32(actor.get());

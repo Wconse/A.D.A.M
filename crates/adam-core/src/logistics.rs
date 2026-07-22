@@ -75,6 +75,14 @@ impl LogisticsRoute {
     pub const fn transit_days(&self) -> u16 {
         self.transit_days
     }
+    #[must_use]
+    pub const fn mode(&self) -> TransportMode {
+        self.mode
+    }
+    #[must_use]
+    pub const fn reliability_bps(&self) -> u16 {
+        self.reliability_bps
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShipmentOrder {
@@ -103,6 +111,30 @@ impl ShipmentOrder {
             quantity,
             max_total_cost,
         }
+    }
+    #[must_use]
+    pub const fn id(&self) -> ShipmentId {
+        self.id
+    }
+    #[must_use]
+    pub const fn good(&self) -> GoodId {
+        self.good
+    }
+    #[must_use]
+    pub const fn origin(&self) -> RegionId {
+        self.origin
+    }
+    #[must_use]
+    pub const fn destination(&self) -> RegionId {
+        self.destination
+    }
+    #[must_use]
+    pub const fn quantity(&self) -> QuantityMilli {
+        self.quantity
+    }
+    #[must_use]
+    pub const fn max_total_cost(&self) -> Money {
+        self.max_total_cost
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -349,6 +381,18 @@ impl ShipmentLifecycle {
     #[must_use]
     pub const fn remaining_days(&self) -> u32 {
         self.remaining_days
+    }
+    #[must_use]
+    pub const fn id(&self) -> ShipmentId {
+        self.id
+    }
+    #[must_use]
+    pub fn routes(&self) -> &[RouteId] {
+        &self.routes
+    }
+    #[must_use]
+    pub const fn quantity(&self) -> QuantityMilli {
+        self.quantity
     }
     /// Reserves route capacity and starts transit.
     /// # Errors
