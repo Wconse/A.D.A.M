@@ -663,6 +663,7 @@ pub struct World {
     pub(crate) last_emergency_relief_date: Option<SimDate>,
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
+    pub(crate) last_household_coping_date: Option<SimDate>,
     pub(crate) last_cohort_health_date: Option<SimDate>,
     pub(crate) last_cohort_experience_date: Option<SimDate>,
     pub(crate) last_annual_closure_year: Option<i32>,
@@ -724,6 +725,7 @@ impl World {
             last_emergency_relief_date: None,
             last_payroll_date: None,
             last_household_cashflow_date: None,
+            last_household_coping_date: None,
             last_cohort_health_date: None,
             last_cohort_experience_date: None,
             last_annual_closure_year: None,
@@ -1024,6 +1026,7 @@ impl World {
             self.last_emergency_relief_date,
             self.last_payroll_date,
             self.last_household_cashflow_date,
+            self.last_household_coping_date,
             self.last_cohort_health_date,
             self.last_cohort_experience_date,
         ] {

@@ -6,6 +6,7 @@ pub mod business;
 pub mod cohort;
 pub mod command;
 pub mod commerce;
+pub mod coping;
 pub mod demand;
 pub mod event;
 pub mod freight;
@@ -38,6 +39,7 @@ pub use cohort::{
 };
 pub use command::{WorldCommand, replay_commands};
 pub use commerce::{MonthlyCommercialCycleResult, MonthlyEconomicCycleResult};
+pub use coping::HouseholdSurvivalBorrowing;
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
@@ -82,4 +84,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 19;
+pub const SIMULATION_VERSION: u32 = 20;

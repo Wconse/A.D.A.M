@@ -45,6 +45,7 @@ pub enum WorldCommand {
     DeriveMonthlySocialStress,
     SettleLocalMarket(MarketClearing),
     ExecuteMonthlyHouseholdCashflows,
+    ExecuteMonthlyHouseholdCoping,
     ExecuteMonthlyProduction,
     EnqueueTerminalShipment {
         terminal: TerminalId,
@@ -154,6 +155,9 @@ impl WorldCommand {
             Self::SettleLocalMarket(clearing) => world.settle_local_market(clearing),
             Self::ExecuteMonthlyHouseholdCashflows => {
                 world.execute_monthly_household_cashflows().map(|_| ())
+            }
+            Self::ExecuteMonthlyHouseholdCoping => {
+                world.execute_monthly_household_coping().map(|_| ())
             }
             Self::ExecuteMonthlyProduction => world.execute_monthly_production().map(|_| ()),
             Self::EnqueueTerminalShipment { terminal, shipment } => {

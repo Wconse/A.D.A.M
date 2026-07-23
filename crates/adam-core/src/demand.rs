@@ -340,6 +340,27 @@ impl World {
         Ok(intents)
     }
 
+    pub(crate) fn monthly_survival_cost(&self, cohort: CohortId) -> Result<Money, WorldError> {
+        let cohort = self
+            .cohorts
+            .get(&cohort)
+            .ok_or(WorldError::UnknownCohort(cohort))?;
+        let profile = self
+            .consumption_profiles
+            .get(&cohort.need_profile())
+            .ok_or(WorldError::UnknownNeedProfile(cohort.need_profile()))?;
+        let cost = self
+            .price_targets(cohort, profile, NeedTier::Survival)?
+            .into_iter()
+            .try_fold(0_i128, |sum, row| {
+                sum.checked_add(row.cost)
+                    .ok_or(WorldError::ArithmeticOverflow("monthly survival cost"))
+            })?;
+        Ok(Money::from_minor_units(i64::try_from(cost).map_err(
+            |_| WorldError::ArithmeticOverflow("monthly survival cost"),
+        )?))
+    }
+
     fn price_targets(
         &self,
         cohort: &crate::HouseholdCohort,

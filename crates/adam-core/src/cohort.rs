@@ -230,6 +230,26 @@ impl HouseholdCohort {
         self.liquid_wealth = Money::from_minor_units(value);
         Ok(())
     }
+    pub(crate) fn borrow_for_survival(&mut self, amount: Money) -> Result<(), WorldError> {
+        if amount.minor_units() <= 0 {
+            return Err(WorldError::InvalidCohort(
+                "survival borrowing must be positive",
+            ));
+        }
+        let wealth = self
+            .liquid_wealth
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("survival borrowing wealth"))?;
+        let debt = self
+            .debt
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("survival borrowing debt"))?;
+        self.liquid_wealth = Money::from_minor_units(wealth);
+        self.debt = Money::from_minor_units(debt);
+        Ok(())
+    }
     pub(crate) fn apply_monthly_cashflow(
         &mut self,
         income: Money,

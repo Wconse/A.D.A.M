@@ -77,6 +77,12 @@ pub enum DomainEvent {
         health_risk: BasisPoints,
         unrest_pressure: BasisPoints,
     },
+    HouseholdSurvivalBorrowed {
+        cohort: CohortId,
+        amount: Money,
+        ending_wealth: Money,
+        ending_debt: Money,
+    },
     HouseholdCashflowApplied {
         cohort: CohortId,
         income: Money,

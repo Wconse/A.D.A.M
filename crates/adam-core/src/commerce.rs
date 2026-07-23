@@ -1,7 +1,7 @@
 use crate::{
     DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
-    HouseholdCashflow, MarketClearing, MarketOrder, PayrollRecord, ProductionPlan, SimDate, World,
-    WorldError, clear_local_market,
+    HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord,
+    ProductionPlan, SimDate, World, WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +18,7 @@ pub struct MonthlyEconomicCycleResult {
     pub next_date: SimDate,
     pub payroll: Vec<PayrollRecord>,
     pub household_cashflows: Vec<HouseholdCashflow>,
+    pub household_borrowing: Vec<HouseholdSurvivalBorrowing>,
     pub commercial: MonthlyCommercialCycleResult,
     pub management_decisions: Vec<FirmManagementDecision>,
     pub emergency_relief: Vec<EmergencyReliefPayment>,
@@ -116,6 +117,7 @@ impl World {
         let completed_date = next.date;
         let payroll = next.execute_monthly_payroll()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
+        let household_borrowing = next.execute_monthly_household_coping()?;
         let commercial = next.execute_monthly_commercial_cycle()?;
         let management_decisions = next.execute_observed_firm_management()?;
         next.derive_monthly_social_stress()?;
@@ -140,6 +142,7 @@ impl World {
             next_date: next.date,
             payroll,
             household_cashflows,
+            household_borrowing,
             commercial,
             management_decisions,
             emergency_relief,
@@ -395,6 +398,80 @@ mod tests {
             .count();
         assert_eq!(monthly_cycles, 600);
         assert_eq!(annual_closures, 50);
+    }
+
+    fn borrowing_world() -> World {
+        let mut world = commercial_world(true);
+        world.cohorts.insert(
+            CohortId::new(1),
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(1),
+                1,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Employed,
+                Money::from_minor_units(600),
+                Money::default(),
+                Money::default(),
+            )
+            .expect("cohort"),
+        );
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(1_000),
+            )
+            .expect("price");
+        world
+    }
+
+    #[test]
+    fn households_borrow_for_survival_until_the_income_based_ceiling_binds() {
+        let mut direct = borrowing_world();
+        let mut replayed = direct.clone();
+        let first = direct
+            .execute_monthly_economic_cycle()
+            .expect("first month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed first month");
+
+        assert_eq!(first.household_borrowing.len(), 1);
+        assert_eq!(
+            first.household_borrowing[0].amount,
+            Money::from_minor_units(950)
+        );
+        assert_eq!(first.commercial.clearing.fills.len(), 1);
+        assert_eq!(
+            direct.household_cohorts()[&CohortId::new(1)].debt(),
+            Money::from_minor_units(950)
+        );
+        assert!(first.emergency_relief.is_empty());
+        assert_eq!(direct, replayed);
+
+        let second = direct
+            .execute_monthly_economic_cycle()
+            .expect("second month");
+        assert_eq!(second.household_borrowing.len(), 1);
+        assert_eq!(
+            second.household_borrowing[0].amount,
+            Money::from_minor_units(257)
+        );
+        assert_eq!(
+            direct.household_cohorts()[&CohortId::new(1)].debt(),
+            Money::from_minor_units(1_200)
+        );
+        assert_eq!(
+            direct.cohort_health()[&CohortId::new(1)]
+                .survival_fulfillment()
+                .get(),
+            3_000
+        );
     }
 
     fn relief_world(with_supply: bool) -> World {
