@@ -13,6 +13,7 @@ pub mod investment;
 pub mod labor;
 pub mod logistics;
 pub mod market;
+pub mod observation;
 pub mod production;
 pub mod rng;
 mod simulation;
@@ -53,6 +54,7 @@ pub use logistics::{
     plan_multileg_shipment,
 };
 pub use market::{MarketClearing, MarketFill, MarketOffer, MarketOrder, clear_local_market};
+pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use production::{Firm, ProductionInput, ProductionPlan, ProductionRecipe};
 pub use rng::{RandomStream, WorldSeed};
 pub use social::{CohortExperience, SocialStress, SocialStressMemory};
@@ -66,4 +68,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 8;
+pub const SIMULATION_VERSION: u32 = 9;

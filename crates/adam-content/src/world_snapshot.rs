@@ -114,6 +114,9 @@ mod tests {
             )
             .expect("firm");
         world
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("observation capture");
+        world
             .update_firm_expectations(
                 FirmId::new(1),
                 FirmExpectations::new(
@@ -153,6 +156,7 @@ mod tests {
             loaded.firm_expectations()[&FirmId::new(1)].horizon_months(),
             2
         );
+        assert_eq!(loaded.firm_operating_history()[&FirmId::new(1)].len(), 1);
     }
     #[test]
     fn incompatible_mod_content_blocks_world_decode() {

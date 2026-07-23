@@ -419,6 +419,7 @@ impl World {
                 firm.debit_inventory(input.good(), QuantityMilli::new(amount))?;
             }
             firm.credit_inventory(plan.output_good(), plan.output())?;
+            self.record_firm_production(plan.firm(), plan.batches())?;
             self.events.append(
                 self.date,
                 crate::DomainEvent::ProductionCompleted {

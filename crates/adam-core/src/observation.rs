@@ -1,0 +1,247 @@
+use std::collections::BTreeMap;
+
+use crate::{FirmId, GoodId, Money, SimDate, World, WorldError};
+
+pub const FIRM_OBSERVATION_HISTORY_LIMIT: usize = 12;
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FirmOperatingObservation {
+    date: SimDate,
+    sales_revenue: Money,
+    produced_batches: u64,
+    input_prices: BTreeMap<GoodId, Money>,
+}
+impl FirmOperatingObservation {
+    #[must_use]
+    pub const fn date(&self) -> SimDate {
+        self.date
+    }
+    #[must_use]
+    pub const fn sales_revenue(&self) -> Money {
+        self.sales_revenue
+    }
+    #[must_use]
+    pub const fn produced_batches(&self) -> u64 {
+        self.produced_batches
+    }
+    #[must_use]
+    pub const fn input_prices(&self) -> &BTreeMap<GoodId, Money> {
+        &self.input_prices
+    }
+}
+
+pub(crate) struct ObservedOperatingBaseline {
+    pub(crate) monthly_sales: Money,
+    pub(crate) produced_batches: u64,
+    pub(crate) input_prices: BTreeMap<GoodId, Money>,
+}
+
+impl World {
+    /// Captures one bounded monthly observation before the monthly accounts are reset.
+    /// # Errors
+    /// Returns an error for an unknown firm or a missing observed input price.
+    pub fn capture_monthly_firm_observation(
+        &mut self,
+        firm: FirmId,
+    ) -> Result<FirmOperatingObservation, WorldError> {
+        let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
+        let recipe = self
+            .production_recipes
+            .get(&definition.recipe())
+            .ok_or(WorldError::UnknownRecipe(definition.recipe()))?;
+        let mut input_prices = BTreeMap::new();
+        for input in recipe.inputs() {
+            let price = self
+                .regional_prices
+                .get(&(definition.region(), input.good()))
+                .copied()
+                .ok_or(WorldError::MissingRegionalPrice {
+                    region: definition.region(),
+                    good: input.good(),
+                })?;
+            input_prices.insert(input.good(), price);
+        }
+        let accounts = self
+            .firm_monthly_accounts
+            .get(&firm)
+            .copied()
+            .unwrap_or_default();
+        let observation = FirmOperatingObservation {
+            date: self.date,
+            sales_revenue: accounts.sales_revenue(),
+            produced_batches: accounts.produced_batches(),
+            input_prices,
+        };
+        let history = self.firm_operating_history.entry(firm).or_default();
+        if history.len() == FIRM_OBSERVATION_HISTORY_LIMIT {
+            history.remove(0);
+        }
+        history.push(observation.clone());
+        self.events.append(
+            self.date,
+            crate::DomainEvent::FirmOperatingObservationCaptured {
+                firm,
+                sales_revenue: observation.sales_revenue(),
+                produced_batches: observation.produced_batches(),
+                input_prices: observation
+                    .input_prices()
+                    .iter()
+                    .map(|(good, price)| (*good, *price))
+                    .collect(),
+            },
+        );
+        Ok(observation)
+    }
+
+    pub(crate) fn observed_operating_baseline(
+        &self,
+        firm: FirmId,
+    ) -> Result<Option<ObservedOperatingBaseline>, WorldError> {
+        let Some(history) = self
+            .firm_operating_history
+            .get(&firm)
+            .filter(|history| !history.is_empty())
+        else {
+            return Ok(None);
+        };
+        let count = i128::try_from(history.len())
+            .map_err(|_| WorldError::ArithmeticOverflow("firm observation count"))?;
+        let sales = history.iter().try_fold(0_i128, |sum, observation| {
+            sum.checked_add(i128::from(observation.sales_revenue().minor_units()))
+                .ok_or(WorldError::ArithmeticOverflow("observed sales history"))
+        })? / count;
+        let batches = history.iter().try_fold(0_u128, |sum, observation| {
+            sum.checked_add(u128::from(observation.produced_batches()))
+                .ok_or(WorldError::ArithmeticOverflow(
+                    "observed production history",
+                ))
+        })? / u128::try_from(history.len())
+            .map_err(|_| WorldError::ArithmeticOverflow("firm observation count"))?;
+        let mut price_totals: BTreeMap<GoodId, (i128, u64)> = BTreeMap::new();
+        for observation in history {
+            for (good, price) in observation.input_prices() {
+                let row = price_totals.entry(*good).or_default();
+                row.0 = row
+                    .0
+                    .checked_add(i128::from(price.minor_units()))
+                    .ok_or(WorldError::ArithmeticOverflow("observed input prices"))?;
+                row.1 = row
+                    .1
+                    .checked_add(1)
+                    .ok_or(WorldError::ArithmeticOverflow("observed price count"))?;
+            }
+        }
+        let input_prices = price_totals
+            .into_iter()
+            .map(|(good, (sum, samples))| {
+                let average = sum / i128::from(samples);
+                Ok((
+                    good,
+                    Money::from_minor_units(
+                        i64::try_from(average)
+                            .map_err(|_| WorldError::ArithmeticOverflow("average input price"))?,
+                    ),
+                ))
+            })
+            .collect::<Result<_, WorldError>>()?;
+        Ok(Some(ObservedOperatingBaseline {
+            monthly_sales: Money::from_minor_units(
+                i64::try_from(sales)
+                    .map_err(|_| WorldError::ArithmeticOverflow("average observed sales"))?,
+            ),
+            produced_batches: u64::try_from(batches)
+                .map_err(|_| WorldError::ArithmeticOverflow("average produced batches"))?,
+            input_prices,
+        }))
+    }
+
+    #[must_use]
+    pub fn firm_operating_history(&self) -> &BTreeMap<FirmId, Vec<FirmOperatingObservation>> {
+        &self.firm_operating_history
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Country, CountryId, Firm, Good, GoodId, Population, ProductionRecipe, QuantityMilli,
+        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+    };
+
+    fn world() -> World {
+        let mut world = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country");
+        world
+            .register_good(Good::new(GoodId::new(1), "Output").expect("good"))
+            .expect("good");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(1),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Output recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(1),
+                    "Firm",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::from_minor_units(1_000),
+                    BTreeMap::new(),
+                )
+                .expect("firm"),
+            )
+            .expect("firm");
+        world
+    }
+
+    #[test]
+    fn history_is_bounded_and_capture_is_replayable() {
+        let mut direct = world();
+        for _ in 0..FIRM_OBSERVATION_HISTORY_LIMIT {
+            direct
+                .capture_monthly_firm_observation(FirmId::new(1))
+                .expect("capture");
+        }
+        let mut replayed = direct.clone();
+        direct
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("capture");
+        WorldCommand::CaptureMonthlyFirmObservation {
+            firm: FirmId::new(1),
+        }
+        .apply(&mut replayed)
+        .expect("replay capture");
+        assert_eq!(
+            direct.firm_operating_history()[&FirmId::new(1)].len(),
+            FIRM_OBSERVATION_HISTORY_LIMIT
+        );
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+}

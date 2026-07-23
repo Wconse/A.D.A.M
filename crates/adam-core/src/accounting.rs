@@ -7,6 +7,7 @@ pub struct FirmMonthlyAccounts {
     wages_owed: Money,
     wages_paid: Money,
     wage_arrears: Money,
+    produced_batches: u64,
 }
 impl FirmMonthlyAccounts {
     #[must_use]
@@ -25,6 +26,10 @@ impl FirmMonthlyAccounts {
     pub const fn wage_arrears(self) -> Money {
         self.wage_arrears
     }
+    #[must_use]
+    pub const fn produced_batches(self) -> u64 {
+        self.produced_batches
+    }
     fn add(field: &mut Money, value: Money, label: &'static str) -> Result<(), WorldError> {
         *field = Money::from_minor_units(
             field
@@ -40,12 +45,14 @@ impl FirmMonthlyAccounts {
 pub enum FirmExpectationSource {
     Management,
     ObservedOperations,
+    ObservedHistory,
 }
 impl FirmExpectationSource {
     pub(crate) const fn fingerprint_tag(self) -> u8 {
         match self {
             Self::Management => 1,
             Self::ObservedOperations => 2,
+            Self::ObservedHistory => 3,
         }
     }
 }
@@ -169,6 +176,18 @@ impl World {
         row.wage_arrears = arrears;
         Ok(())
     }
+    pub(crate) fn record_firm_production(
+        &mut self,
+        firm: FirmId,
+        batches: u64,
+    ) -> Result<(), WorldError> {
+        let row = self.firm_monthly_accounts.entry(firm).or_default();
+        row.produced_batches = row
+            .produced_batches
+            .checked_add(batches)
+            .ok_or(WorldError::ArithmeticOverflow("firm produced batches"))?;
+        Ok(())
+    }
     pub fn reset_monthly_firm_accounts(&mut self) {
         self.firm_monthly_accounts.clear();
     }
@@ -212,35 +231,59 @@ impl World {
                 "forecast horizon must be positive",
             ));
         }
+        let baseline = self.observed_operating_baseline(firm)?;
         let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
         let region = definition.region();
         let recipe = self
             .production_recipes
             .get(&definition.recipe())
             .ok_or(WorldError::UnknownRecipe(definition.recipe()))?;
-        let planned_batches = self
-            .plan_monthly_production()?
-            .into_iter()
-            .find(|plan| plan.firm() == firm)
-            .ok_or(WorldError::UnknownFirm(firm))?
-            .batches();
-        let monthly_sales = self
-            .firm_monthly_accounts
-            .get(&firm)
-            .map_or(0_i64, |accounts| accounts.sales_revenue().minor_units());
+        let (monthly_sales, planned_batches, source) = if let Some(observed) = &baseline {
+            (
+                observed.monthly_sales.minor_units(),
+                observed.produced_batches,
+                FirmExpectationSource::ObservedHistory,
+            )
+        } else {
+            let planned_batches = self
+                .plan_monthly_production()?
+                .into_iter()
+                .find(|plan| plan.firm() == firm)
+                .ok_or(WorldError::UnknownFirm(firm))?
+                .batches();
+            let monthly_sales = self
+                .firm_monthly_accounts
+                .get(&firm)
+                .map_or(0_i64, |accounts| accounts.sales_revenue().minor_units());
+            (
+                monthly_sales,
+                planned_batches,
+                FirmExpectationSource::ObservedOperations,
+            )
+        };
         let expected_sales = i128::from(monthly_sales)
             .checked_mul(i128::from(horizon_months))
             .ok_or(WorldError::ArithmeticOverflow("expected sales revenue"))?;
         let mut expected_inputs = 0_i128;
         for input in recipe.inputs() {
-            let price = self
-                .regional_prices
-                .get(&(region, input.good()))
-                .ok_or(WorldError::MissingRegionalPrice {
-                    region,
-                    good: input.good(),
-                })?
-                .minor_units();
+            let price = if let Some(observed) = &baseline {
+                observed
+                    .input_prices
+                    .get(&input.good())
+                    .ok_or(WorldError::MissingRegionalPrice {
+                        region,
+                        good: input.good(),
+                    })?
+                    .minor_units()
+            } else {
+                self.regional_prices
+                    .get(&(region, input.good()))
+                    .ok_or(WorldError::MissingRegionalPrice {
+                        region,
+                        good: input.good(),
+                    })?
+                    .minor_units()
+            };
             let quantity = i128::from(input.quantity_per_batch().get())
                 .checked_mul(i128::from(planned_batches))
                 .and_then(|value| value.checked_mul(i128::from(horizon_months)))
@@ -264,7 +307,7 @@ impl World {
             ),
             Money::default(),
             horizon_months,
-            FirmExpectationSource::ObservedOperations,
+            source,
         )?;
         self.update_firm_expectations(firm, expectations)?;
         Ok(expectations)
@@ -539,11 +582,30 @@ mod tests {
     }
 
     #[test]
-    fn observed_operations_derive_replayable_sales_and_input_costs() {
+    fn observed_history_derives_replayable_average_sales_and_input_costs() {
         let mut direct = staffed_world(20_000);
         direct
             .record_firm_sale(FirmId::new(1), Money::from_minor_units(1_000))
             .expect("sale observation");
+        direct
+            .record_firm_production(FirmId::new(1), 40)
+            .expect("production observation");
+        direct
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("first observation");
+        direct.reset_monthly_firm_accounts();
+        direct
+            .set_regional_price(RegionId::new(1), GoodId::new(2), Money::from_minor_units(5))
+            .expect("second input price");
+        direct
+            .record_firm_sale(FirmId::new(1), Money::from_minor_units(3_000))
+            .expect("sale observation");
+        direct
+            .record_firm_production(FirmId::new(1), 20)
+            .expect("production observation");
+        direct
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("second observation");
         let mut replayed = direct.clone();
         let cash_before = direct.firms()[&FirmId::new(1)].cash();
         let inventory_before = direct.firms()[&FirmId::new(1)].inventories().clone();
@@ -558,10 +620,10 @@ mod tests {
         .apply(&mut replayed)
         .expect("replayed derivation");
 
-        assert_eq!(derived.expected_sales_revenue().minor_units(), 2_000);
-        assert_eq!(derived.expected_input_costs().minor_units(), 600);
+        assert_eq!(derived.expected_sales_revenue().minor_units(), 4_000);
+        assert_eq!(derived.expected_input_costs().minor_units(), 480);
         assert_eq!(derived.expected_financing(), Money::default());
-        assert_eq!(derived.source(), FirmExpectationSource::ObservedOperations);
+        assert_eq!(derived.source(), FirmExpectationSource::ObservedHistory);
         assert_eq!(direct, replayed);
         assert_eq!(direct.firms()[&FirmId::new(1)].cash(), cash_before);
         assert_eq!(

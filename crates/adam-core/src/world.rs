@@ -610,6 +610,7 @@ pub struct World {
     pub(crate) firms: BTreeMap<FirmId, Firm>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
+    pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
@@ -658,6 +659,7 @@ impl World {
             firms: BTreeMap::new(),
             firm_monthly_accounts: BTreeMap::new(),
             firm_expectations: BTreeMap::new(),
+            firm_operating_history: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -922,6 +924,22 @@ impl World {
             hash.write_u16(row.horizon_months());
             hash.write_u8(row.source().fingerprint_tag());
         }
+        hash.write_u64(self.firm_operating_history.len() as u64);
+        for (firm, history) in &self.firm_operating_history {
+            hash.write_u32(firm.get());
+            hash.write_u64(history.len() as u64);
+            for observation in history {
+                hash.write_i32(observation.date().year());
+                hash.write_u16(observation.date().day_of_year());
+                hash.write_i64(observation.sales_revenue().minor_units());
+                hash.write_u64(observation.produced_batches());
+                hash.write_u64(observation.input_prices().len() as u64);
+                for (good, price) in observation.input_prices() {
+                    hash.write_u32(good.get());
+                    hash.write_i64(price.minor_units());
+                }
+            }
+        }
         hash.write_u64(self.firm_monthly_accounts.len() as u64);
         for (firm, row) in &self.firm_monthly_accounts {
             hash.write_u32(firm.get());
@@ -929,6 +947,7 @@ impl World {
             hash.write_i64(row.wages_owed().minor_units());
             hash.write_i64(row.wages_paid().minor_units());
             hash.write_i64(row.wage_arrears().minor_units());
+            hash.write_u64(row.produced_batches());
         }
     }
 

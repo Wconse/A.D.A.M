@@ -5,6 +5,9 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    CaptureMonthlyFirmObservation {
+        firm: FirmId,
+    },
     DeriveFirmExpectationsFromObservations {
         firm: FirmId,
         horizon_months: u16,
@@ -82,6 +85,9 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::CaptureMonthlyFirmObservation { firm } => {
+                world.capture_monthly_firm_observation(*firm).map(|_| ())
+            }
             Self::DeriveFirmExpectationsFromObservations {
                 firm,
                 horizon_months,
