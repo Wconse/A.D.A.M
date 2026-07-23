@@ -12,6 +12,39 @@ pub struct EmergencyReliefPayment {
     pub country: CountryId,
     pub cohort: CohortId,
     pub amount: Money,
+    pub public_borrowing: Money,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum EmergencyReliefStrategy {
+    TreasuryOnly,
+    BorrowWithinDebtLimit,
+    Inaction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GovernmentEmergencyPolicy {
+    strategy: EmergencyReliefStrategy,
+}
+
+impl Default for GovernmentEmergencyPolicy {
+    fn default() -> Self {
+        Self {
+            strategy: EmergencyReliefStrategy::TreasuryOnly,
+        }
+    }
+}
+
+impl GovernmentEmergencyPolicy {
+    #[must_use]
+    pub const fn new(strategy: EmergencyReliefStrategy) -> Self {
+        Self { strategy }
+    }
+
+    #[must_use]
+    pub const fn strategy(self) -> EmergencyReliefStrategy {
+        self.strategy
+    }
 }
 
 impl World {
@@ -154,10 +187,101 @@ impl World {
         Ok(())
     }
 
-    /// Funds next-month survival purchases when settled offers existed but households could not afford them.
-    ///
+    /// Sets the emergency-response strategy under a current political-office holder's authority.
     /// # Errors
-    /// Returns an error on duplicate execution or a failed transfer without partially applying the response.
+    /// Returns an error for an unknown country or unauthorized actor without changing policy.
+    pub fn set_government_emergency_policy(
+        &mut self,
+        actor: ActorId,
+        country: CountryId,
+        policy: GovernmentEmergencyPolicy,
+    ) -> Result<(), WorldError> {
+        if !self.countries.contains_key(&country) {
+            return Err(WorldError::UnknownCountry(country));
+        }
+        if !self.can_authorize_emergency_relief(actor, country) {
+            return Err(WorldError::UnauthorizedGovernmentAction { actor, country });
+        }
+        self.government_emergency_policies.insert(country, policy);
+        self.events.append(
+            self.date,
+            DomainEvent::GovernmentEmergencyPolicySet {
+                actor,
+                country,
+                strategy: policy.strategy(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Issues bounded public debt and credits the proceeds to treasury for emergency relief.
+    /// # Errors
+    /// Returns an error for invalid amounts, unauthorized actors, disallowed strategy, or debt-limit excess.
+    pub fn issue_emergency_relief_debt(
+        &mut self,
+        actor: ActorId,
+        country: CountryId,
+        amount: Money,
+    ) -> Result<(), WorldError> {
+        if amount.minor_units() <= 0 {
+            return Err(WorldError::InvalidEmergencyRelief(
+                "public borrowing amount must be positive",
+            ));
+        }
+        if !self.can_authorize_emergency_relief(actor, country) {
+            return Err(WorldError::UnauthorizedGovernmentAction { actor, country });
+        }
+        let policy = self
+            .government_emergency_policies
+            .get(&country)
+            .copied()
+            .unwrap_or_default();
+        if policy.strategy() != EmergencyReliefStrategy::BorrowWithinDebtLimit {
+            return Err(WorldError::InvalidEmergencyRelief(
+                "current emergency policy does not authorize public borrowing",
+            ));
+        }
+        let headroom = self.emergency_debt_headroom(country)?;
+        if amount.minor_units() > headroom {
+            return Err(WorldError::InvalidEmergencyRelief(
+                "public emergency debt limit exceeded",
+            ));
+        }
+        let indicators = self.countries[&country].indicators();
+        let debt = indicators
+            .public_debt()
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("emergency public debt"))?;
+        let treasury = indicators
+            .treasury()
+            .minor_units()
+            .checked_add(amount.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("borrowed treasury cash"))?;
+        let country_state = self
+            .countries
+            .get_mut(&country)
+            .ok_or(WorldError::UnknownCountry(country))?;
+        country_state
+            .indicators_mut()
+            .set_public_debt(Money::from_minor_units(debt));
+        country_state
+            .indicators_mut()
+            .set_treasury(Money::from_minor_units(treasury));
+        self.events.append(
+            self.date,
+            DomainEvent::EmergencyReliefDebtIssued {
+                actor,
+                country,
+                amount,
+            },
+        );
+        Ok(())
+    }
+
+    /// Funds next-month survival purchases according to the country's explicit emergency policy.
+    /// # Errors
+    /// Returns an error on duplicate execution or a failed debt/transfer command without partial response.
     pub fn execute_observed_emergency_relief(
         &mut self,
     ) -> Result<Vec<EmergencyReliefPayment>, WorldError> {
@@ -175,8 +299,35 @@ impl World {
             let Some(actor) = self.emergency_relief_actor(country) else {
                 continue;
             };
+            let policy = next
+                .government_emergency_policies
+                .get(&country)
+                .copied()
+                .unwrap_or_default();
+            if policy.strategy() == EmergencyReliefStrategy::Inaction {
+                continue;
+            }
             let treasury = next.countries[&country].indicators().treasury();
-            let amount = Money::from_minor_units(gap.min(&treasury).minor_units().max(0));
+            let needed = gap
+                .minor_units()
+                .saturating_sub(treasury.minor_units())
+                .max(0);
+            let public_borrowing =
+                if policy.strategy() == EmergencyReliefStrategy::BorrowWithinDebtLimit {
+                    Money::from_minor_units(needed.min(next.emergency_debt_headroom(country)?))
+                } else {
+                    Money::default()
+                };
+            if public_borrowing.minor_units() > 0 {
+                WorldCommand::IssueEmergencyReliefDebt {
+                    actor,
+                    country,
+                    amount: public_borrowing,
+                }
+                .apply(&mut next)?;
+            }
+            let available = next.countries[&country].indicators().treasury();
+            let amount = Money::from_minor_units(gap.min(&available).minor_units().max(0));
             if amount.minor_units() == 0 {
                 continue;
             }
@@ -191,6 +342,7 @@ impl World {
                 country,
                 cohort: *cohort,
                 amount,
+                public_borrowing,
             });
         }
         next.last_emergency_relief_date = Some(next.date);
@@ -210,6 +362,35 @@ impl World {
     #[must_use]
     pub fn monthly_affordability_gaps(&self) -> &BTreeMap<CohortId, Money> {
         &self.monthly_affordability_gaps
+    }
+
+    #[must_use]
+    pub fn government_emergency_policies(&self) -> &BTreeMap<CountryId, GovernmentEmergencyPolicy> {
+        &self.government_emergency_policies
+    }
+
+    fn emergency_debt_headroom(&self, country: CountryId) -> Result<i64, WorldError> {
+        let output = self
+            .regions
+            .values()
+            .filter(|region| region.country() == country)
+            .try_fold(0_i128, |sum, region| {
+                sum.checked_add(i128::from(region.annual_output().minor_units()))
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "country relief debt capacity",
+                    ))
+            })?;
+        let limit = output
+            .checked_mul(2)
+            .ok_or(WorldError::ArithmeticOverflow("relief debt limit"))?;
+        let debt = i128::from(
+            self.countries[&country]
+                .indicators()
+                .public_debt()
+                .minor_units(),
+        );
+        i64::try_from(limit.saturating_sub(debt).max(0))
+            .map_err(|_| WorldError::ArithmeticOverflow("relief debt headroom"))
     }
 
     fn can_authorize_emergency_relief(&self, actor: ActorId, country: CountryId) -> bool {

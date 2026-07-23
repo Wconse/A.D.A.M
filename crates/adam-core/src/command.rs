@@ -11,6 +11,16 @@ pub enum WorldCommand {
     ExecuteMonthlyCommercialCycle,
     ExecuteObservedFirmManagement,
     ExecuteObservedEmergencyRelief,
+    SetGovernmentEmergencyPolicy {
+        actor: ActorId,
+        country: crate::CountryId,
+        policy: crate::GovernmentEmergencyPolicy,
+    },
+    IssueEmergencyReliefDebt {
+        actor: ActorId,
+        country: crate::CountryId,
+        amount: crate::Money,
+    },
     FundEmergencyRelief {
         actor: ActorId,
         cohort: crate::CohortId,
@@ -116,6 +126,16 @@ impl WorldCommand {
             Self::ExecuteObservedEmergencyRelief => {
                 world.execute_observed_emergency_relief().map(|_| ())
             }
+            Self::SetGovernmentEmergencyPolicy {
+                actor,
+                country,
+                policy,
+            } => world.set_government_emergency_policy(*actor, *country, *policy),
+            Self::IssueEmergencyReliefDebt {
+                actor,
+                country,
+                amount,
+            } => world.issue_emergency_relief_debt(*actor, *country, *amount),
             Self::FundEmergencyRelief {
                 actor,
                 cohort,

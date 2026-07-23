@@ -158,10 +158,11 @@ mod tests {
     use crate::{
         Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget,
         CorporateRole, Country, CountryId, CountryIndicators, DemandBasis, EducationLevel,
-        EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort,
-        HouseholdType, Money, NeedProfileId, NeedTier, OwnershipStake, Population, PowerNode,
-        PowerNodeId, PowerNodeKind, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId,
-        SimDate, WorldCommand, WorldSeed,
+        EmergencyReliefStrategy, EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good,
+        GoodId, GovernmentEmergencyPolicy, HouseholdCohort, HouseholdType, Money, NeedProfileId,
+        NeedTier, OwnershipStake, Population, PowerNode, PowerNodeId, PowerNodeKind,
+        ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand,
+        WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -523,6 +524,89 @@ mod tests {
                 .expect("zero target");
         }
         world
+    }
+
+    #[test]
+    fn public_borrowing_policy_funds_relief_beyond_current_treasury() {
+        let mut direct = relief_world(true);
+        direct.countries.insert(
+            CountryId::new(1),
+            Country::new(CountryId::new(1), "A")
+                .expect("country")
+                .with_indicators(CountryIndicators::new(
+                    Money::from_minor_units(5),
+                    Money::default(),
+                    BasisPoints::HALF,
+                    BasisPoints::HALF,
+                )),
+        );
+        direct
+            .regions
+            .get_mut(&RegionId::new(1))
+            .expect("region")
+            .set_annual_output(Money::from_minor_units(100));
+        WorldCommand::SetGovernmentEmergencyPolicy {
+            actor: ActorId::new(1),
+            country: CountryId::new(1),
+            policy: GovernmentEmergencyPolicy::new(EmergencyReliefStrategy::BorrowWithinDebtLimit),
+        }
+        .apply(&mut direct)
+        .expect("borrowing policy");
+        let mut replayed = direct.clone();
+
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed month");
+
+        assert_eq!(result.emergency_relief.len(), 1);
+        assert_eq!(
+            result.emergency_relief[0].public_borrowing,
+            Money::from_minor_units(5)
+        );
+        let indicators = direct.countries()[&CountryId::new(1)].indicators();
+        assert_eq!(indicators.treasury(), Money::default());
+        assert_eq!(indicators.public_debt(), Money::from_minor_units(5));
+        assert_eq!(
+            direct.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(10)
+        );
+        assert_eq!(direct, replayed);
+    }
+
+    #[test]
+    fn inaction_policy_leaves_affordability_crisis_unfunded() {
+        let mut world = relief_world(true);
+        WorldCommand::SetGovernmentEmergencyPolicy {
+            actor: ActorId::new(1),
+            country: CountryId::new(1),
+            policy: GovernmentEmergencyPolicy::new(EmergencyReliefStrategy::Inaction),
+        }
+        .apply(&mut world)
+        .expect("inaction policy");
+        let result = world
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+
+        assert!(result.emergency_relief.is_empty());
+        assert_eq!(
+            world.countries()[&CountryId::new(1)]
+                .indicators()
+                .treasury(),
+            Money::from_minor_units(100)
+        );
+        assert_eq!(
+            world.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::default()
+        );
+        assert_eq!(
+            world.cohort_health()[&CohortId::new(1)]
+                .survival_fulfillment()
+                .get(),
+            0
+        );
     }
 
     #[test]

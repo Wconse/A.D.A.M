@@ -702,6 +702,7 @@ pub struct World {
     pub(crate) social_stress_memory: BTreeMap<CohortId, crate::SocialStressMemory>,
     pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
     pub(crate) cohort_health: BTreeMap<CohortId, crate::CohortHealth>,
+    pub(crate) government_emergency_policies: BTreeMap<CountryId, crate::GovernmentEmergencyPolicy>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -764,6 +765,7 @@ impl World {
             social_stress_memory: BTreeMap::new(),
             cohort_experience: BTreeMap::new(),
             cohort_health: BTreeMap::new(),
+            government_emergency_policies: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -783,6 +785,8 @@ impl World {
         if self.countries.contains_key(&country.id()) {
             return Err(WorldError::DuplicateCountry(country.id()));
         }
+        self.government_emergency_policies
+            .insert(country.id(), crate::GovernmentEmergencyPolicy::default());
         self.events.append(
             self.date,
             DomainEvent::CountryRegistered {
@@ -1424,6 +1428,15 @@ impl World {
             hash.write_u32(region.get());
             hash.write_u32(good.get());
             hash.write_i64(price.minor_units());
+        }
+        hash.write_u64(self.government_emergency_policies.len() as u64);
+        for (country, policy) in &self.government_emergency_policies {
+            hash.write_u32(country.get());
+            hash.write_u8(match policy.strategy() {
+                crate::EmergencyReliefStrategy::TreasuryOnly => 1,
+                crate::EmergencyReliefStrategy::BorrowWithinDebtLimit => 2,
+                crate::EmergencyReliefStrategy::Inaction => 3,
+            });
         }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {

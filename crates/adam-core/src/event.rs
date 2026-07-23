@@ -24,6 +24,16 @@ pub enum DomainEvent {
         market_fills: u64,
         firms_observed: u64,
     },
+    GovernmentEmergencyPolicySet {
+        actor: ActorId,
+        country: CountryId,
+        strategy: crate::EmergencyReliefStrategy,
+    },
+    EmergencyReliefDebtIssued {
+        actor: ActorId,
+        country: CountryId,
+        amount: Money,
+    },
     EmergencyReliefFunded {
         actor: ActorId,
         country: CountryId,
