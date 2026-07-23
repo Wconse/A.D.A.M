@@ -14,6 +14,7 @@ pub mod ids;
 pub mod investment;
 pub mod labor;
 pub mod logistics;
+pub mod management;
 pub mod market;
 pub mod observation;
 pub mod production;
@@ -57,6 +58,7 @@ pub use logistics::{
     ShipmentStatus, ShipmentTransition, TransportMode, plan_direct_shipment,
     plan_multileg_shipment,
 };
+pub use management::FirmManagementDecision;
 pub use market::{
     FirmMarketOfferPlan, MarketClearing, MarketFill, MarketOffer, MarketOfferOutcome, MarketOrder,
     clear_local_market,
@@ -78,4 +80,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 17;
+pub const SIMULATION_VERSION: u32 = 18;

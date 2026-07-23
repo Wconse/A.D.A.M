@@ -1,6 +1,6 @@
 use crate::{
-    DemandIntent, FirmMarketOfferPlan, HouseholdCashflow, MarketClearing, MarketOrder,
-    PayrollRecord, ProductionPlan, SimDate, World, WorldError, clear_local_market,
+    DemandIntent, FirmManagementDecision, FirmMarketOfferPlan, HouseholdCashflow, MarketClearing,
+    MarketOrder, PayrollRecord, ProductionPlan, SimDate, World, WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +18,7 @@ pub struct MonthlyEconomicCycleResult {
     pub payroll: Vec<PayrollRecord>,
     pub household_cashflows: Vec<HouseholdCashflow>,
     pub commercial: MonthlyCommercialCycleResult,
+    pub management_decisions: Vec<FirmManagementDecision>,
 }
 
 impl World {
@@ -113,6 +114,7 @@ impl World {
         let payroll = next.execute_monthly_payroll()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
         let commercial = next.execute_monthly_commercial_cycle()?;
+        let management_decisions = next.execute_observed_firm_management()?;
         next.derive_monthly_social_stress()?;
         next.update_monthly_cohort_health()?;
         next.update_monthly_cohort_experience()?;
@@ -135,6 +137,7 @@ impl World {
             payroll,
             household_cashflows,
             commercial,
+            management_decisions,
         };
         *self = next;
         Ok(result)

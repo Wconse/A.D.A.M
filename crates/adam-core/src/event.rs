@@ -24,6 +24,10 @@ pub enum DomainEvent {
         market_fills: u64,
         firms_observed: u64,
     },
+    ObservedFirmManagementCompleted {
+        firms_reviewed: u64,
+        targets_changed: u64,
+    },
     FirmProductionTargetSet {
         actor: ActorId,
         firm: FirmId,

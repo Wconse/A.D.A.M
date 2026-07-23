@@ -9,6 +9,7 @@ pub enum WorldCommand {
     AdvanceMonth,
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
+    ExecuteObservedFirmManagement,
     SetFirmProductionTarget {
         actor: ActorId,
         firm: FirmId,
@@ -100,6 +101,9 @@ impl WorldCommand {
             Self::ExecuteMonthlyEconomicCycle => world.execute_monthly_economic_cycle().map(|_| ()),
             Self::ExecuteMonthlyCommercialCycle => {
                 world.execute_monthly_commercial_cycle().map(|_| ())
+            }
+            Self::ExecuteObservedFirmManagement => {
+                world.execute_observed_firm_management().map(|_| ())
             }
             Self::SetFirmProductionTarget {
                 actor,

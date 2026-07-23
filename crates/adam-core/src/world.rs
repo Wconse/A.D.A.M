@@ -641,6 +641,7 @@ pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
+    pub(crate) last_firm_management_date: Option<SimDate>,
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
     pub(crate) last_cohort_health_date: Option<SimDate>,
@@ -699,6 +700,7 @@ impl World {
             seed,
             date: start_date,
             last_commercial_cycle_date: None,
+            last_firm_management_date: None,
             last_payroll_date: None,
             last_household_cashflow_date: None,
             last_cohort_health_date: None,
@@ -991,6 +993,7 @@ impl World {
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
         for date in [
             self.last_commercial_cycle_date,
+            self.last_firm_management_date,
             self.last_payroll_date,
             self.last_household_cashflow_date,
             self.last_cohort_health_date,
