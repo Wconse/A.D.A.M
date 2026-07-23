@@ -108,6 +108,13 @@ pub enum DomainEvent {
         ending_wealth: Money,
         ending_debt: Money,
     },
+    FirmSalesTaxPaid {
+        firm: FirmId,
+        country: CountryId,
+        taxable_sales: Money,
+        liability: Money,
+        paid: Money,
+    },
     MarketTrade {
         buyer: CohortId,
         seller: FirmId,

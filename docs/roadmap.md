@@ -250,3 +250,17 @@ Every accepted slice updates this file with status, tests, measurements, known a
 - Added schema-v5 producing content: recipes, firms, employment, ownership, appointments, policies, and initial targets now build an executable survival economy in all three example regions. Partial contracts reduce fallback income only for their contracted worker share, fixing the artificial loss of whole-cohort income. The seed-47 50-year audit now finishes with 36,843,754 people, active production and trade, and about 98.4% minimum survival fulfillment instead of collapsing to 100 people. Next gate: derive regional output and fiscal capacity from micro production, payroll, and trade so the legacy macro harness cannot diverge from material activity.
 
 - Closed macroeconomic output from the monthly market path: economic years now sum settled local trade into regional annual output, then use that same material base for fiscal closure, debt, and politics. A no-trade test produces zero output and zero fiscal activity instead of seeded phantom growth. The calibrated seed-47 fifty-year audit ends with active production and trade, about 31.1 million people, and regional outputs near 5.3–6.1 trillion rather than independently growing toward 100 trillion. Next gate: attribute taxes, procurement, inventory investment, and intermediate consumption without double counting.
+
+### Realized fiscal revenue gate
+
+Completed vertical slice:
+
+```text
+realized firm sales
+→ liquidity-bounded sales-tax payment
+→ country revenue
+→ treasury / public debt
+→ political closure
+```
+
+The next accounting gate is to separate final consumption, intermediate consumption, inventory investment, and government procurement so regional value added does not double-count turnover.

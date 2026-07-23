@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    BasisPoints, CohortId, CountryId, DomainEvent, Money, Population, RatePpm, RegionId, World,
-    WorldError,
+    BasisPoints, CohortId, CountryId, DomainEvent, FirmId, Money, Population, RatePpm, RegionId,
+    World, WorldError,
 };
 
 const DEMOGRAPHY_DOMAIN: u64 = 0x4445_4d4f_4752_4150;
 const ECONOMY_DOMAIN: u64 = 0x4543_4f4e_4f4d_5900;
 const POLITICS_DOMAIN: u64 = 0x504f_4c49_5449_4353;
 const RATE_SCALE: i128 = 1_000_000;
+const SALES_TAX_BPS: i128 = 2_000;
 
 #[derive(Clone, Debug)]
 struct RegionUpdate {
@@ -18,6 +19,15 @@ struct RegionUpdate {
     annual_output: Money,
     output_rate: RatePpm,
     cohort_populations: Vec<(CohortId, Population)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FirmTaxUpdate {
+    firm: FirmId,
+    country: CountryId,
+    taxable_sales: Money,
+    liability: Money,
+    paid: Money,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,6 +69,7 @@ impl World {
         self.apply_year(
             simulated_year,
             close_date,
+            &[],
             &region_updates,
             &country_updates,
         );
@@ -92,9 +103,17 @@ impl World {
             months.push(next.execute_monthly_economic_cycle()?);
         }
         let region_updates = next.plan_material_regions(closed_year, &months)?;
-        let country_updates = next.plan_countries(closed_year, &region_updates)?;
+        let tax_updates = next.plan_firm_sales_taxes()?;
+        let country_updates =
+            next.plan_material_countries(closed_year, &region_updates, &tax_updates)?;
         let close_date = next.date;
-        next.apply_year(closed_year, close_date, &region_updates, &country_updates);
+        next.apply_year(
+            closed_year,
+            close_date,
+            &tax_updates,
+            &region_updates,
+            &country_updates,
+        );
         next.events.append(
             close_date,
             DomainEvent::EconomicYearCompleted {
@@ -218,6 +237,91 @@ impl World {
             .collect()
     }
 
+    fn plan_firm_sales_taxes(&self) -> Result<Vec<FirmTaxUpdate>, WorldError> {
+        self.firms
+            .values()
+            .filter_map(|firm| {
+                let history = self.firm_operating_history.get(&firm.id())?;
+                let taxable_sales = history.iter().try_fold(0_i128, |total, observation| {
+                    total
+                        .checked_add(i128::from(observation.sales_revenue().minor_units()))
+                        .ok_or(WorldError::ArithmeticOverflow("annual taxable firm sales"))
+                });
+                Some((firm, taxable_sales))
+            })
+            .map(|(firm, taxable_sales)| {
+                let taxable_sales = taxable_sales?;
+                let liability = taxable_sales
+                    .checked_mul(SALES_TAX_BPS)
+                    .ok_or(WorldError::ArithmeticOverflow("annual firm sales tax"))?
+                    / 10_000;
+                let liability = money_from_i128(liability, "annual firm sales tax")?;
+                let paid = Money::from_minor_units(
+                    firm.cash()
+                        .minor_units()
+                        .max(0)
+                        .min(liability.minor_units()),
+                );
+                let country = self
+                    .regions
+                    .get(&firm.region())
+                    .expect("registered firm region exists")
+                    .country();
+                Ok(FirmTaxUpdate {
+                    firm: firm.id(),
+                    country,
+                    taxable_sales: money_from_i128(taxable_sales, "annual taxable firm sales")?,
+                    liability,
+                    paid,
+                })
+            })
+            .collect()
+    }
+
+    fn plan_material_countries(
+        &self,
+        simulated_year: i32,
+        region_updates: &[RegionUpdate],
+        tax_updates: &[FirmTaxUpdate],
+    ) -> Result<Vec<CountryUpdate>, WorldError> {
+        let mut old_output = BTreeMap::<CountryId, i128>::new();
+        let mut new_output = BTreeMap::<CountryId, i128>::new();
+        let mut revenue = BTreeMap::<CountryId, i128>::new();
+        for region in self.regions.values() {
+            *old_output.entry(region.country()).or_default() +=
+                i128::from(region.annual_output().minor_units());
+        }
+        for update in region_updates {
+            let country = self
+                .regions
+                .get(&update.id)
+                .expect("planned region exists")
+                .country();
+            *new_output.entry(country).or_default() +=
+                i128::from(update.annual_output.minor_units());
+        }
+        for update in tax_updates {
+            let total = revenue.entry(update.country).or_default();
+            *total = total
+                .checked_add(i128::from(update.paid.minor_units()))
+                .ok_or(WorldError::ArithmeticOverflow("annual country tax revenue"))?;
+        }
+        self.countries
+            .values()
+            .map(|country| {
+                plan_material_country(
+                    self.seed,
+                    simulated_year,
+                    country.id(),
+                    country.indicators(),
+                    *old_output.get(&country.id()).unwrap_or(&0),
+                    *new_output.get(&country.id()).unwrap_or(&0),
+                    *revenue.get(&country.id()).unwrap_or(&0),
+                )
+            })
+            .collect()
+    }
+
     fn plan_countries(
         &self,
         simulated_year: i32,
@@ -258,9 +362,27 @@ impl World {
         &mut self,
         simulated_year: i32,
         close_date: crate::SimDate,
+        tax_updates: &[FirmTaxUpdate],
         region_updates: &[RegionUpdate],
         country_updates: &[CountryUpdate],
     ) {
+        for update in tax_updates {
+            self.firms
+                .get_mut(&update.firm)
+                .expect("planned tax firm exists")
+                .debit_cash(update.paid)
+                .expect("planned tax payment is liquid");
+            self.events.append(
+                close_date,
+                DomainEvent::FirmSalesTaxPaid {
+                    firm: update.firm,
+                    country: update.country,
+                    taxable_sales: update.taxable_sales,
+                    liability: update.liability,
+                    paid: update.paid,
+                },
+            );
+        }
         for update in region_updates {
             let region = self
                 .regions
@@ -386,6 +508,46 @@ fn output_rate(
     let shock = centered(&mut random, 12_000);
     let raw = 15_000 + population_rate.get() / 2 + legitimacy_effect + cohesion_effect + shock;
     RatePpm::new(raw.clamp(-150_000, 200_000)).expect("clamped output rate")
+}
+
+fn plan_material_country(
+    seed: crate::WorldSeed,
+    year: i32,
+    id: CountryId,
+    indicators: crate::CountryIndicators,
+    old_output: i128,
+    new_output: i128,
+    tax_revenue: i128,
+) -> Result<CountryUpdate, WorldError> {
+    let spending_bps = 2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10;
+    let revenue = money_from_i128(tax_revenue, "collected sales tax revenue")?;
+    let spending = money_from_i128(new_output * spending_bps / 10_000, "fiscal spending")?;
+    let balance = i128::from(revenue.minor_units()) - i128::from(spending.minor_units());
+    let (treasury, debt) = close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
+    let growth_ppm = if old_output == 0 {
+        0
+    } else {
+        ((new_output - old_output) * RATE_SCALE / old_output).clamp(-1_000_000, 1_000_000)
+    };
+    let fiscal_signal = if balance >= 0 { 35 } else { -70 };
+    let mut random = seed.stream_for(POLITICS_DOMAIN, id.get(), year);
+    let political_shock = centered(&mut random, 90);
+    let growth_signal = i32::try_from(growth_ppm / 250).expect("growth signal fits i32");
+    let legitimacy = indicators
+        .legitimacy()
+        .shifted(growth_signal + fiscal_signal + political_shock);
+    let cohesion = indicators
+        .elite_cohesion()
+        .shifted(fiscal_signal / 2 + political_shock / 3);
+    Ok(CountryUpdate {
+        id,
+        revenue,
+        spending,
+        treasury,
+        debt,
+        legitimacy,
+        cohesion,
+    })
 }
 
 fn plan_country(

@@ -370,6 +370,23 @@ mod tests {
                 .minor_units(),
             realized_output
         );
+        let expected_tax = realized_output * 2_000 / 10_000;
+        assert!(direct.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::FirmSalesTaxPaid {
+                taxable_sales,
+                liability,
+                paid,
+                ..
+            } if taxable_sales.minor_units() == realized_output
+                && liability.minor_units() == expected_tax
+                && paid.minor_units() == expected_tax
+        )));
+        assert!(direct.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::CountryFiscalYearClosed { revenue, .. }
+                if revenue.minor_units() == expected_tax
+        )));
         assert_eq!(direct.date(), SimDate::new(2026, 1).expect("date"));
         assert_eq!(direct.firm_operating_history()[&FirmId::new(1)].len(), 12);
         let monthly_cycles = direct
