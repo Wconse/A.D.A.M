@@ -264,3 +264,17 @@ realized firm sales
 ```
 
 The next accounting gate is to separate final consumption, intermediate consumption, inventory investment, and government procurement so regional value added does not double-count turnover.
+
+### Final consumption and inventory gate
+
+Completed vertical slice:
+
+```text
+settled household consumption
++ valued firm inventory change
+→ expenditure-side regional output
+→ fiscal spending / debt / politics
+→ causal chronicle
+```
+
+The next gate is explicit intermediate-goods procurement between firms. B2B turnover must move cash and inventories while regional output continues to count only final demand plus inventory investment, preventing double counting.

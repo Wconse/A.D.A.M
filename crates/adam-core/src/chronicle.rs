@@ -40,6 +40,10 @@ struct YearSummary {
     rationed_requested_milli: u128,
     rationed_available_milli: u128,
     politics_changes: u64,
+    measured_regions: u64,
+    final_consumption_minor: i128,
+    inventory_change_minor: i128,
+    measured_output_minor: i128,
     completed: bool,
 }
 
@@ -83,6 +87,17 @@ impl YearSummary {
                 self.rationing_actions += 1;
                 self.rationed_requested_milli += u128::from(requested.get());
                 self.rationed_available_milli += u128::from(available.get());
+            }
+            DomainEvent::RegionalOutputMeasured {
+                final_consumption,
+                inventory_change,
+                annual_output,
+                ..
+            } => {
+                self.measured_regions += 1;
+                self.final_consumption_minor += i128::from(final_consumption.minor_units());
+                self.inventory_change_minor += i128::from(inventory_change.minor_units());
+                self.measured_output_minor += i128::from(annual_output.minor_units());
             }
             DomainEvent::CountryPoliticsChanged { .. } => self.politics_changes += 1,
             DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
@@ -136,6 +151,15 @@ impl YearSummary {
                 self.production_milli, self.traded_milli
             ));
         }
+        if self.measured_regions > 0 {
+            sentences.push(format!(
+                "Annual accounts measured {} output from {} final consumption and {} inventory change across {} regions.",
+                self.measured_output_minor,
+                self.final_consumption_minor,
+                self.inventory_change_minor,
+                self.measured_regions
+            ));
+        }
         if self.politics_changes > 0 {
             sentences.push(format!(
                 "Political indicators changed in {} countries during annual closure.",
@@ -166,7 +190,7 @@ impl YearSummary {
             70
         } else if self.household_borrowing_minor > 0 {
             60
-        } else if self.production_milli > 0 || self.traded_milli > 0 {
+        } else if self.production_milli > 0 || self.traded_milli > 0 || self.measured_regions > 0 {
             40
         } else {
             10

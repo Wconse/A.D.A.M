@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    BasisPoints, CohortId, CountryId, DomainEvent, FirmId, Money, Population, RatePpm, RegionId,
-    World, WorldError,
+    BasisPoints, CohortId, CountryId, DomainEvent, FirmId, GoodId, Money, Population,
+    QuantityMilli, RatePpm, RegionId, World, WorldError,
 };
 
 const DEMOGRAPHY_DOMAIN: u64 = 0x4445_4d4f_4752_4150;
@@ -18,6 +18,7 @@ struct RegionUpdate {
     population_rate: RatePpm,
     annual_output: Money,
     output_rate: RatePpm,
+    material_components: Option<(Money, Money)>,
     cohort_populations: Vec<(CohortId, Population)>,
 }
 
@@ -98,11 +99,17 @@ impl World {
             return Err(WorldError::AnnualClosureAlreadyExecuted(closed_year));
         }
         let mut next = self.clone();
+        let opening_inventories: BTreeMap<FirmId, BTreeMap<GoodId, QuantityMilli>> = next
+            .firms
+            .iter()
+            .map(|(id, firm)| (*id, firm.inventories().clone()))
+            .collect();
         let mut months = Vec::with_capacity(12);
         for _ in 0..12 {
             months.push(next.execute_monthly_economic_cycle()?);
         }
-        let region_updates = next.plan_material_regions(closed_year, &months)?;
+        let region_updates =
+            next.plan_material_regions(closed_year, &opening_inventories, &months)?;
         let tax_updates = next.plan_firm_sales_taxes()?;
         let country_updates =
             next.plan_material_countries(closed_year, &region_updates, &tax_updates)?;
@@ -174,6 +181,7 @@ impl World {
                     population_rate,
                     annual_output,
                     output_rate,
+                    material_components: None,
                     cohort_populations,
                 })
             })
@@ -183,9 +191,10 @@ impl World {
     fn plan_material_regions(
         &self,
         simulated_year: i32,
+        opening_inventories: &BTreeMap<FirmId, BTreeMap<GoodId, QuantityMilli>>,
         months: &[crate::MonthlyEconomicCycleResult],
     ) -> Result<Vec<RegionUpdate>, WorldError> {
-        let mut realized_output = BTreeMap::<RegionId, i128>::new();
+        let mut final_consumption = BTreeMap::<RegionId, i128>::new();
         for month in months {
             for fill in &month.commercial.clearing.fills {
                 let region = self
@@ -193,14 +202,13 @@ impl World {
                     .get(&fill.seller)
                     .expect("settled market seller exists")
                     .region();
-                let total = realized_output.entry(region).or_default();
+                let total = final_consumption.entry(region).or_default();
                 *total = total
                     .checked_add(i128::from(fill.spend.minor_units()))
-                    .ok_or(WorldError::ArithmeticOverflow(
-                        "annual realized regional output",
-                    ))?;
+                    .ok_or(WorldError::ArithmeticOverflow("annual final consumption"))?;
             }
         }
+        let inventory_change = self.plan_regional_inventory_change(opening_inventories)?;
         self.regions
             .values()
             .map(|region| {
@@ -218,10 +226,16 @@ impl World {
                     indicators.legitimacy(),
                 );
                 let population = apply_population_rate(region.population(), population_rate)?;
-                let annual_output = money_from_i128(
-                    *realized_output.get(&region.id()).unwrap_or(&0),
-                    "annual realized regional output",
-                )?;
+                let consumption = *final_consumption.get(&region.id()).unwrap_or(&0);
+                let inventories = *inventory_change.get(&region.id()).unwrap_or(&0);
+                let measured =
+                    consumption
+                        .checked_add(inventories)
+                        .ok_or(WorldError::ArithmeticOverflow(
+                            "annual measured regional output",
+                        ))?;
+                let annual_output =
+                    money_from_i128(measured.max(0), "annual measured regional output")?;
                 let output_rate = realized_output_rate(region.annual_output(), annual_output);
                 let cohort_populations =
                     self.plan_region_cohort_rescale(region.id(), population)?;
@@ -231,10 +245,56 @@ impl World {
                     population_rate,
                     annual_output,
                     output_rate,
+                    material_components: Some((
+                        money_from_i128(consumption, "annual final consumption")?,
+                        money_from_i128(inventories, "annual inventory change")?,
+                    )),
                     cohort_populations,
                 })
             })
             .collect()
+    }
+
+    fn plan_regional_inventory_change(
+        &self,
+        opening: &BTreeMap<FirmId, BTreeMap<GoodId, QuantityMilli>>,
+    ) -> Result<BTreeMap<RegionId, i128>, WorldError> {
+        let mut changes = BTreeMap::<RegionId, i128>::new();
+        for firm in self.firms.values() {
+            let empty = BTreeMap::new();
+            let before = opening.get(&firm.id()).unwrap_or(&empty);
+            let goods: BTreeSet<_> = before
+                .keys()
+                .chain(firm.inventories().keys())
+                .copied()
+                .collect();
+            for good in goods {
+                let previous = before.get(&good).copied().unwrap_or_default().get();
+                let current = firm
+                    .inventories()
+                    .get(&good)
+                    .copied()
+                    .unwrap_or_default()
+                    .get();
+                let delta = i128::from(current) - i128::from(previous);
+                let price = self.regional_prices.get(&(firm.region(), good)).ok_or(
+                    WorldError::MissingRegionalPrice {
+                        region: firm.region(),
+                        good,
+                    },
+                )?;
+                let value = delta.checked_mul(i128::from(price.minor_units())).ok_or(
+                    WorldError::ArithmeticOverflow("regional inventory valuation"),
+                )? / i128::from(QuantityMilli::SCALE);
+                let total = changes.entry(firm.region()).or_default();
+                *total = total
+                    .checked_add(value)
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "annual regional inventory change",
+                    ))?;
+            }
+        }
+        Ok(changes)
     }
 
     fn plan_firm_sales_taxes(&self) -> Result<Vec<FirmTaxUpdate>, WorldError> {
@@ -358,6 +418,28 @@ impl World {
             .collect()
     }
 
+    fn record_region_output_events(&mut self, close_date: crate::SimDate, update: &RegionUpdate) {
+        if let Some((final_consumption, inventory_change)) = update.material_components {
+            self.events.append(
+                close_date,
+                DomainEvent::RegionalOutputMeasured {
+                    region: update.id,
+                    final_consumption,
+                    inventory_change,
+                    annual_output: update.annual_output,
+                },
+            );
+        }
+        self.events.append(
+            close_date,
+            DomainEvent::RegionOutputChanged {
+                region: update.id,
+                annual_output: update.annual_output,
+                rate: update.output_rate,
+            },
+        );
+    }
+
     fn apply_year(
         &mut self,
         simulated_year: i32,
@@ -398,14 +480,7 @@ impl World {
                     rate: update.population_rate,
                 },
             );
-            self.events.append(
-                close_date,
-                DomainEvent::RegionOutputChanged {
-                    region: update.id,
-                    annual_output: update.annual_output,
-                    rate: update.output_rate,
-                },
-            );
+            self.record_region_output_events(close_date, update);
             for (cohort_id, people) in &update.cohort_populations {
                 self.cohorts
                     .get_mut(cohort_id)

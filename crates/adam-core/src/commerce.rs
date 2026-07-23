@@ -364,11 +364,31 @@ mod tests {
             .flat_map(|month| &month.commercial.clearing.fills)
             .map(|fill| fill.spend.minor_units())
             .sum::<i64>();
+        let measured = direct
+            .events()
+            .events()
+            .iter()
+            .find_map(|event| match event.event() {
+                crate::DomainEvent::RegionalOutputMeasured {
+                    region,
+                    final_consumption,
+                    inventory_change,
+                    annual_output,
+                } if *region == RegionId::new(1) => Some((
+                    final_consumption.minor_units(),
+                    inventory_change.minor_units(),
+                    annual_output.minor_units(),
+                )),
+                _ => None,
+            })
+            .expect("material output measurement");
+        assert_eq!(measured.0, realized_output);
+        assert_eq!(measured.2, realized_output + measured.1);
         assert_eq!(
             direct.regions()[&RegionId::new(1)]
                 .annual_output()
                 .minor_units(),
-            realized_output
+            measured.2
         );
         let expected_tax = realized_output * 2_000 / 10_000;
         assert!(direct.events().events().iter().any(|event| matches!(

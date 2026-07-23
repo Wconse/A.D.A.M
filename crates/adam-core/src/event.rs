@@ -266,6 +266,12 @@ pub enum DomainEvent {
         population: Population,
         rate: RatePpm,
     },
+    RegionalOutputMeasured {
+        region: RegionId,
+        final_consumption: Money,
+        inventory_change: Money,
+        annual_output: Money,
+    },
     RegionOutputChanged {
         region: RegionId,
         annual_output: Money,

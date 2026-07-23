@@ -233,21 +233,21 @@ id = 101
 country_id = 1
 name = "Aster Metropolitan Region"
 population = 7200000
-annual_output_minor = 5209656000000
+annual_output_minor = 7205518000000
 
 [[regions]]
 id = 201
 country_id = 2
 name = "North Boreal Industrial Belt"
 population = 11400000
-annual_output_minor = 5992776000000
+annual_output_minor = 7261378000000
 
 [[regions]]
 id = 301
 country_id = 3
 name = "Cyrene Coastal Corridor"
 population = 8900000
-annual_output_minor = 5850720000000
+annual_output_minor = 7577160000000
 
 [[cohorts]]
 id = 10101
