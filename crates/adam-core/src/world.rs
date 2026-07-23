@@ -643,6 +643,7 @@ pub struct World {
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
+    pub(crate) last_cohort_health_date: Option<SimDate>,
     pub(crate) last_cohort_experience_date: Option<SimDate>,
     pub(crate) last_annual_closure_year: Option<i32>,
     pub(crate) goods: BTreeMap<GoodId, Good>,
@@ -678,6 +679,7 @@ pub struct World {
     pub(crate) social_stress: BTreeMap<CohortId, crate::SocialStress>,
     pub(crate) social_stress_memory: BTreeMap<CohortId, crate::SocialStressMemory>,
     pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
+    pub(crate) cohort_health: BTreeMap<CohortId, crate::CohortHealth>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -699,6 +701,7 @@ impl World {
             last_commercial_cycle_date: None,
             last_payroll_date: None,
             last_household_cashflow_date: None,
+            last_cohort_health_date: None,
             last_cohort_experience_date: None,
             last_annual_closure_year: None,
             goods: BTreeMap::new(),
@@ -734,6 +737,7 @@ impl World {
             social_stress: BTreeMap::new(),
             social_stress_memory: BTreeMap::new(),
             cohort_experience: BTreeMap::new(),
+            cohort_health: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -961,6 +965,13 @@ impl World {
             hash.write_u32(row.unemployment_months());
             hash.write_u32(row.debt_distress_months());
         }
+        hash.write_u64(self.cohort_health.len() as u64);
+        for (cohort, row) in &self.cohort_health {
+            hash.write_u32(cohort.get());
+            hash.write_u16(row.survival_fulfillment().get());
+            hash.write_u16(row.functional_capacity().get());
+            hash.write_u64(row.mortality_remainder_ppm());
+        }
     }
 
     fn write_market_offer_outcome_fingerprint(
@@ -982,6 +993,7 @@ impl World {
             self.last_commercial_cycle_date,
             self.last_payroll_date,
             self.last_household_cashflow_date,
+            self.last_cohort_health_date,
             self.last_cohort_experience_date,
         ] {
             match date {

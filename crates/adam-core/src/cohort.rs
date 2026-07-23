@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::{CohortId, DomainEvent, Money, NeedProfileId, Population, RegionId, World, WorldError};
+use crate::{
+    BasisPoints, CohortId, DomainEvent, Money, NeedProfileId, Population, RegionId, World,
+    WorldError,
+};
 
 #[derive(
     Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
@@ -252,6 +255,36 @@ impl HouseholdCohort {
     pub(crate) const fn set_people(&mut self, value: Population) {
         self.people = value;
     }
+    pub(crate) fn apply_excess_deaths(&mut self, survivors: Population) -> Result<(), WorldError> {
+        let previous = self.people.people();
+        let remaining = survivors.people();
+        if remaining > previous {
+            return Err(WorldError::InvalidCohort(
+                "deaths cannot increase population",
+            ));
+        }
+        if previous == 0 {
+            return Ok(());
+        }
+        self.households = if remaining == 0 {
+            0
+        } else {
+            let scaled = u64::try_from(
+                u128::from(self.households) * u128::from(remaining) / u128::from(previous),
+            )
+            .map_err(|_| WorldError::ArithmeticOverflow("surviving households"))?;
+            scaled.clamp(1, remaining)
+        };
+        self.annual_income = Money::from_minor_units(
+            i64::try_from(
+                i128::from(self.annual_income.minor_units()) * i128::from(remaining)
+                    / i128::from(previous),
+            )
+            .map_err(|_| WorldError::ArithmeticOverflow("surviving annual income"))?,
+        );
+        self.people = survivors;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -282,6 +315,8 @@ impl World {
         {
             return Err(WorldError::UnknownNeedProfile(cohort.need_profile()));
         }
+        self.cohort_health
+            .insert(cohort.id(), crate::CohortHealth::default());
         self.events.append(
             self.date,
             DomainEvent::HouseholdCohortRegistered {
@@ -408,7 +443,20 @@ impl World {
             let fallback = if contracted {
                 Money::default()
             } else {
-                Money::from_minor_units(cohort.annual_income().minor_units() / 12)
+                let capacity = self
+                    .cohort_health
+                    .get(&cohort.id())
+                    .map_or(BasisPoints::MAX, |health| {
+                        health.functional_capacity().get()
+                    });
+                Money::from_minor_units(
+                    i64::try_from(
+                        i128::from(cohort.annual_income().minor_units()) * i128::from(capacity)
+                            / 12
+                            / i128::from(BasisPoints::MAX),
+                    )
+                    .map_err(|_| WorldError::ArithmeticOverflow("health-adjusted income"))?,
+                )
             };
             rows.push(cohort.apply_monthly_cashflow(fallback)?);
         }

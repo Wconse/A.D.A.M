@@ -113,8 +113,9 @@ impl World {
         let payroll = next.execute_monthly_payroll()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
         let commercial = next.execute_monthly_commercial_cycle()?;
-        next.update_monthly_cohort_experience()?;
         next.derive_monthly_social_stress()?;
+        next.update_monthly_cohort_health()?;
+        next.update_monthly_cohort_experience()?;
         next.accumulate_monthly_social_stress()?;
         next.events.append(
             completed_date,
@@ -385,6 +386,57 @@ mod tests {
             .count();
         assert_eq!(monthly_cycles, 600);
         assert_eq!(annual_closures, 50);
+    }
+
+    #[test]
+    fn settled_survival_shortage_becomes_health_loss_and_excess_death() {
+        let mut world = commercial_world(true);
+        world
+            .regions
+            .get_mut(&RegionId::new(1))
+            .expect("region")
+            .set_population(Population::new(100));
+        world.cohorts.insert(
+            CohortId::new(1),
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(100),
+                40,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Employed,
+                Money::from_minor_units(120),
+                Money::from_minor_units(100),
+                Money::default(),
+            )
+            .expect("cohort"),
+        );
+        world.validate_population_accounting().expect("accounting");
+
+        for _ in 0..12 {
+            world
+                .execute_monthly_economic_cycle()
+                .expect("economic month");
+        }
+
+        let population = world.household_cohorts()[&CohortId::new(1)]
+            .people()
+            .people();
+        let health = world.cohort_health()[&CohortId::new(1)];
+        assert!(health.survival_fulfillment().get() < 500);
+        assert!(health.functional_capacity().get() < 3_000);
+        assert!(population < 100);
+        world.validate_population_accounting().expect("accounting");
+        assert!(world.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::CohortHealthUpdated {
+                excess_deaths: 1..,
+                ..
+            }
+        )));
     }
 
     #[test]

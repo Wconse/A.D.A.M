@@ -412,12 +412,27 @@ impl World {
             .values()
             .map(|firm| {
                 let recipe = &self.production_recipes[&firm.recipe()];
-                let contracted_workers: u64 = self
+                let contracted_workers = self
                     .employment_agreements
                     .values()
                     .filter(|agreement| agreement.active() && agreement.firm() == firm.id())
-                    .map(crate::EmploymentAgreement::workers)
-                    .sum();
+                    .try_fold(0_u64, |sum, agreement| {
+                        let cohort = &self.cohorts[&agreement.cohort()];
+                        let capacity = self
+                            .cohort_health
+                            .get(&agreement.cohort())
+                            .map_or(crate::BasisPoints::MAX, |health| {
+                                health.functional_capacity().get()
+                            });
+                        let present = agreement.workers().min(cohort.people().people());
+                        let effective = u64::try_from(
+                            u128::from(present) * u128::from(capacity)
+                                / u128::from(crate::BasisPoints::MAX),
+                        )
+                        .map_err(|_| WorldError::ArithmeticOverflow("healthy labor capacity"))?;
+                        sum.checked_add(effective)
+                            .ok_or(WorldError::ArithmeticOverflow("contracted labor capacity"))
+                    })?;
                 let effective_workers = if self
                     .employment_agreements
                     .values()

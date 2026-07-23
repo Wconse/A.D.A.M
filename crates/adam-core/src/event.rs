@@ -45,6 +45,13 @@ pub enum DomainEvent {
         horizon_months: u16,
         source: FirmExpectationSource,
     },
+    CohortHealthUpdated {
+        cohort: CohortId,
+        survival_fulfillment: BasisPoints,
+        functional_capacity: BasisPoints,
+        excess_deaths: u64,
+        survivors: Population,
+    },
     CohortExperienceUpdated {
         cohort: CohortId,
         survival_shortage_months: u32,

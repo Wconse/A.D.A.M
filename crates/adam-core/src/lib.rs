@@ -9,6 +9,7 @@ pub mod commerce;
 pub mod demand;
 pub mod event;
 pub mod freight;
+pub mod health;
 pub mod ids;
 pub mod investment;
 pub mod labor;
@@ -43,6 +44,7 @@ pub use freight::{
     ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics,
     MonthlyFreightCapacityLedger, RouteOperatingCost, evaluate_freight_economics,
 };
+pub use health::CohortHealth;
 pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
     ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
@@ -76,4 +78,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 16;
+pub const SIMULATION_VERSION: u32 = 17;
