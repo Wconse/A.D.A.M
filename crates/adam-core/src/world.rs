@@ -1437,6 +1437,10 @@ impl World {
                 crate::EmergencyReliefStrategy::BorrowWithinDebtLimit => 2,
                 crate::EmergencyReliefStrategy::Inaction => 3,
             });
+            hash.write_u8(match policy.physical_shortage_strategy() {
+                crate::PhysicalShortageStrategy::MarketAllocation => 1,
+                crate::PhysicalShortageStrategy::ProportionalRationing => 2,
+            });
         }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {

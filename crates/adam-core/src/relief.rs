@@ -23,14 +23,22 @@ pub enum EmergencyReliefStrategy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PhysicalShortageStrategy {
+    MarketAllocation,
+    ProportionalRationing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GovernmentEmergencyPolicy {
     strategy: EmergencyReliefStrategy,
+    physical_shortage_strategy: PhysicalShortageStrategy,
 }
 
 impl Default for GovernmentEmergencyPolicy {
     fn default() -> Self {
         Self {
             strategy: EmergencyReliefStrategy::TreasuryOnly,
+            physical_shortage_strategy: PhysicalShortageStrategy::MarketAllocation,
         }
     }
 }
@@ -38,12 +46,29 @@ impl Default for GovernmentEmergencyPolicy {
 impl GovernmentEmergencyPolicy {
     #[must_use]
     pub const fn new(strategy: EmergencyReliefStrategy) -> Self {
-        Self { strategy }
+        Self {
+            strategy,
+            physical_shortage_strategy: PhysicalShortageStrategy::MarketAllocation,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_physical_shortage_strategy(
+        mut self,
+        strategy: PhysicalShortageStrategy,
+    ) -> Self {
+        self.physical_shortage_strategy = strategy;
+        self
     }
 
     #[must_use]
     pub const fn strategy(self) -> EmergencyReliefStrategy {
         self.strategy
+    }
+
+    #[must_use]
+    pub const fn physical_shortage_strategy(self) -> PhysicalShortageStrategy {
+        self.physical_shortage_strategy
     }
 }
 

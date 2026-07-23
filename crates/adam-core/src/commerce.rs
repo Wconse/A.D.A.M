@@ -1,7 +1,7 @@
 use crate::{
     DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
     HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord,
-    ProductionPlan, SimDate, World, WorldError, clear_local_market,
+    ProductionPlan, SimDate, SurvivalRationingOutcome, World, WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,6 +9,7 @@ pub struct MonthlyCommercialCycleResult {
     pub production_plans: Vec<ProductionPlan>,
     pub offer_plans: Vec<FirmMarketOfferPlan>,
     pub demand_intents: Vec<DemandIntent>,
+    pub rationing: Vec<SurvivalRationingOutcome>,
     pub clearing: MarketClearing,
 }
 
@@ -42,7 +43,7 @@ impl World {
             .filter_map(|plan| plan.market_offer())
             .collect();
         let demand_intents = next.plan_monthly_household_demand()?;
-        let orders: Vec<_> = demand_intents
+        let mut orders: Vec<_> = demand_intents
             .iter()
             .map(|intent| {
                 let cohort = &next.cohorts[&intent.cohort()];
@@ -56,7 +57,9 @@ impl World {
                 }
             })
             .collect();
-        let clearing = clear_local_market(&orders, &offers)?;
+        let rationing = next.apply_survival_rationing(&mut orders, &offers)?;
+        let mut clearing = clear_local_market(&orders, &offers)?;
+        next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
         let firms: Vec<_> = next.firms.keys().copied().collect();
@@ -87,6 +90,7 @@ impl World {
             production_plans,
             offer_plans,
             demand_intents,
+            rationing,
             clearing,
         };
         *self = next;
@@ -160,9 +164,9 @@ mod tests {
         CorporateRole, Country, CountryId, CountryIndicators, DemandBasis, EducationLevel,
         EmergencyReliefStrategy, EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good,
         GoodId, GovernmentEmergencyPolicy, HouseholdCohort, HouseholdType, Money, NeedProfileId,
-        NeedTier, OwnershipStake, Population, PowerNode, PowerNodeId, PowerNodeKind,
-        ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand,
-        WorldSeed,
+        NeedTier, OwnershipStake, PhysicalShortageStrategy, Population, PowerNode, PowerNodeId,
+        PowerNodeKind, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate,
+        WorldCommand, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -524,6 +528,99 @@ mod tests {
                 .expect("zero target");
         }
         world
+    }
+
+    #[test]
+    fn proportional_rationing_shares_scarce_survival_supply_and_preserves_unmet_need() {
+        let mut direct = relief_world(true);
+        direct.cohorts.insert(
+            CohortId::new(1),
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(1),
+                1,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Employed,
+                Money::from_minor_units(120),
+                Money::from_minor_units(100),
+                Money::default(),
+            )
+            .expect("first funded cohort"),
+        );
+        direct.regions.insert(
+            RegionId::new(1),
+            Region::new(
+                RegionId::new(1),
+                CountryId::new(1),
+                "R",
+                Population::new(2),
+                Money::from_minor_units(1),
+            )
+            .expect("region"),
+        );
+        direct
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    CohortId::new(2),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(1),
+                    1,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::from_minor_units(120),
+                    Money::from_minor_units(100),
+                    Money::default(),
+                )
+                .expect("second cohort"),
+            )
+            .expect("register second cohort");
+        WorldCommand::SetGovernmentEmergencyPolicy {
+            actor: ActorId::new(1),
+            country: CountryId::new(1),
+            policy: GovernmentEmergencyPolicy::new(EmergencyReliefStrategy::TreasuryOnly)
+                .with_physical_shortage_strategy(PhysicalShortageStrategy::ProportionalRationing),
+        }
+        .apply(&mut direct)
+        .expect("rationing policy");
+        let mut replayed = direct.clone();
+
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed month");
+
+        assert_eq!(result.commercial.rationing.len(), 1);
+        let rationing = &result.commercial.rationing[0];
+        assert_eq!(rationing.requested, QuantityMilli::new(2_000));
+        assert_eq!(rationing.available, QuantityMilli::new(1_000));
+        assert_eq!(rationing.allocations.len(), 2);
+        assert!(
+            rationing
+                .allocations
+                .iter()
+                .all(|allocation| allocation.quota == QuantityMilli::new(500))
+        );
+        assert_eq!(result.commercial.clearing.fills.len(), 2);
+        for cohort in [CohortId::new(1), CohortId::new(2)] {
+            assert_eq!(
+                result.commercial.clearing.unmet[&(cohort, GoodId::new(1), NeedTier::Survival)],
+                QuantityMilli::new(500)
+            );
+            assert_eq!(
+                direct.cohort_health()[&cohort].survival_fulfillment().get(),
+                5_000
+            );
+        }
+        assert_eq!(direct, replayed);
     }
 
     #[test]

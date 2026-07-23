@@ -19,6 +19,7 @@ pub mod management;
 pub mod market;
 pub mod observation;
 pub mod production;
+pub mod rationing;
 pub mod relief;
 pub mod rng;
 mod simulation;
@@ -70,7 +71,11 @@ pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
 };
-pub use relief::{EmergencyReliefPayment, EmergencyReliefStrategy, GovernmentEmergencyPolicy};
+pub use rationing::{SurvivalRationingAllocation, SurvivalRationingOutcome};
+pub use relief::{
+    EmergencyReliefPayment, EmergencyReliefStrategy, GovernmentEmergencyPolicy,
+    PhysicalShortageStrategy,
+};
 pub use rng::{RandomStream, WorldSeed};
 pub use simulation::EconomicYearResult;
 pub use social::{CohortExperience, SocialStress, SocialStressMemory};
@@ -84,4 +89,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 21;
+pub const SIMULATION_VERSION: u32 = 22;

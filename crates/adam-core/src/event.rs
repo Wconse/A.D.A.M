@@ -24,6 +24,14 @@ pub enum DomainEvent {
         market_fills: u64,
         firms_observed: u64,
     },
+    SurvivalRationingApplied {
+        country: CountryId,
+        region: RegionId,
+        good: GoodId,
+        requested: QuantityMilli,
+        available: QuantityMilli,
+        cohorts: u64,
+    },
     GovernmentEmergencyPolicySet {
         actor: ActorId,
         country: CountryId,
