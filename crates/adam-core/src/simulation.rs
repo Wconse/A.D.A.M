@@ -91,7 +91,7 @@ impl World {
         for _ in 0..12 {
             months.push(next.execute_monthly_economic_cycle()?);
         }
-        let region_updates = next.plan_regions(closed_year)?;
+        let region_updates = next.plan_material_regions(closed_year, &months)?;
         let country_updates = next.plan_countries(closed_year, &region_updates)?;
         let close_date = next.date;
         next.apply_year(closed_year, close_date, &region_updates, &country_updates);
@@ -147,6 +147,63 @@ impl World {
                     indicators.elite_cohesion(),
                 );
                 let annual_output = apply_money_rate(region.annual_output(), output_rate)?;
+                let cohort_populations =
+                    self.plan_region_cohort_rescale(region.id(), population)?;
+                Ok(RegionUpdate {
+                    id: region.id(),
+                    population,
+                    population_rate,
+                    annual_output,
+                    output_rate,
+                    cohort_populations,
+                })
+            })
+            .collect()
+    }
+
+    fn plan_material_regions(
+        &self,
+        simulated_year: i32,
+        months: &[crate::MonthlyEconomicCycleResult],
+    ) -> Result<Vec<RegionUpdate>, WorldError> {
+        let mut realized_output = BTreeMap::<RegionId, i128>::new();
+        for month in months {
+            for fill in &month.commercial.clearing.fills {
+                let region = self
+                    .firms
+                    .get(&fill.seller)
+                    .expect("settled market seller exists")
+                    .region();
+                let total = realized_output.entry(region).or_default();
+                *total = total
+                    .checked_add(i128::from(fill.spend.minor_units()))
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "annual realized regional output",
+                    ))?;
+            }
+        }
+        self.regions
+            .values()
+            .map(|region| {
+                let indicators = self
+                    .countries
+                    .get(&region.country())
+                    .expect("registered region country exists")
+                    .indicators();
+                let population_rate = population_rate(
+                    self.seed,
+                    simulated_year,
+                    region.id(),
+                    region.population(),
+                    region.annual_output(),
+                    indicators.legitimacy(),
+                );
+                let population = apply_population_rate(region.population(), population_rate)?;
+                let annual_output = money_from_i128(
+                    *realized_output.get(&region.id()).unwrap_or(&0),
+                    "annual realized regional output",
+                )?;
+                let output_rate = realized_output_rate(region.annual_output(), annual_output);
                 let cohort_populations =
                     self.plan_region_cohort_rescale(region.id(), population)?;
                 Ok(RegionUpdate {
@@ -301,6 +358,18 @@ fn population_rate(
     let raw =
         4_000 + i32::try_from(prosperity).expect("clamped to i32") + legitimacy_effect + shock;
     RatePpm::new(raw.clamp(-30_000, 30_000)).expect("clamped population rate")
+}
+
+fn realized_output_rate(previous: Money, current: Money) -> RatePpm {
+    let previous = i128::from(previous.minor_units());
+    let current = i128::from(current.minor_units());
+    let rate = if previous == 0 {
+        if current == 0 { 0 } else { 1_000_000 }
+    } else {
+        ((current - previous) * RATE_SCALE / previous.abs()).clamp(-1_000_000, 1_000_000)
+    };
+    RatePpm::new(i32::try_from(rate).expect("clamped realized output rate"))
+        .expect("valid realized output rate")
 }
 
 fn output_rate(
@@ -476,6 +545,32 @@ mod tests {
         let stable_population = stable.regions()[&RegionId::new(1)].population();
         let fragile_population = fragile.regions()[&RegionId::new(1)].population();
         assert!(stable_population > fragile_population);
+    }
+
+    #[test]
+    fn economic_year_without_trade_eliminates_phantom_output() {
+        let mut world = economy(47, 5_000);
+        world
+            .regions
+            .get_mut(&RegionId::new(1))
+            .expect("region")
+            .set_population(Population::default());
+        world
+            .advance_economic_year()
+            .expect("material economic year");
+
+        assert_eq!(
+            world.regions()[&RegionId::new(1)].annual_output(),
+            Money::default()
+        );
+        assert!(world.events().events().iter().any(|event| matches!(
+            event.event(),
+            DomainEvent::CountryFiscalYearClosed {
+                revenue,
+                spending,
+                ..
+            } if *revenue == Money::default() && *spending == Money::default()
+        )));
     }
 
     #[test]

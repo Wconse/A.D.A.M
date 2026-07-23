@@ -358,6 +358,18 @@ mod tests {
 
         assert_eq!(result.closed_year, 2025);
         assert_eq!(result.months.len(), 12);
+        let realized_output = result
+            .months
+            .iter()
+            .flat_map(|month| &month.commercial.clearing.fills)
+            .map(|fill| fill.spend.minor_units())
+            .sum::<i64>();
+        assert_eq!(
+            direct.regions()[&RegionId::new(1)]
+                .annual_output()
+                .minor_units(),
+            realized_output
+        );
         assert_eq!(direct.date(), SimDate::new(2026, 1).expect("date"));
         assert_eq!(direct.firm_operating_history()[&FirmId::new(1)].len(), 12);
         let monthly_cycles = direct
