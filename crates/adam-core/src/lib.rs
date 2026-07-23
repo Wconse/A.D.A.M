@@ -3,6 +3,7 @@
 pub mod accounting;
 pub mod board;
 pub mod business;
+pub mod chronicle;
 pub mod cohort;
 pub mod command;
 pub mod commerce;
@@ -35,6 +36,7 @@ pub use accounting::{
 };
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
+pub use chronicle::ChronicleEntry;
 pub use cohort::{
     AgeBand, EducationLevel, EmploymentStatus, HouseholdCashflow, HouseholdCohort, HouseholdType,
 };

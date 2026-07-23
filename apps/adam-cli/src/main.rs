@@ -19,7 +19,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let source = fs::read_to_string(&arguments.config)?;
     let blueprint = WorldBlueprint::parse_toml(&source)?;
     let mut world = blueprint.build_world(WorldSeed::new(arguments.seed))?;
-    world.advance_years(arguments.years)?;
+    world.advance_economic_years(arguments.years)?;
     world.validate_population_accounting()?;
     let demand = world.plan_monthly_household_demand()?;
     let desired_quantity: u128 = demand
@@ -51,6 +51,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("monthly budgeted quantity milli: {budgeted_quantity}");
     println!("monthly reserved spend minor: {reserved_spend}");
     println!("events: {}", world.events().len());
+    println!("chronicle:");
+    for entry in world.chronicle() {
+        println!(
+            "{} [importance={}]: {}",
+            entry.year, entry.importance, entry.text
+        );
+    }
     for country in world.countries().values() {
         let state = country.indicators();
         println!(
