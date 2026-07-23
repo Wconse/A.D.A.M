@@ -6,6 +6,12 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    MonthlyCommercialCycleCompleted {
+        production_batches: u64,
+        seller_offers: u64,
+        market_fills: u64,
+        firms_observed: u64,
+    },
     FirmProductionTargetSet {
         actor: ActorId,
         firm: FirmId,

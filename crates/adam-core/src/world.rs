@@ -384,6 +384,7 @@ pub enum WorldError {
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
     InvalidMarketClearing(&'static str),
+    CommercialCycleAlreadyExecuted(SimDate),
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
@@ -500,6 +501,9 @@ impl fmt::Display for WorldError {
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::InvalidMarketClearing(reason) => {
                 write!(formatter, "invalid market clearing: {reason}")
+            }
+            Self::CommercialCycleAlreadyExecuted(date) => {
+                write!(formatter, "commercial cycle already executed for {date}")
             }
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidFirmExpectations(reason) => {
@@ -622,6 +626,7 @@ impl From<TimeError> for WorldError {
 pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
+    pub(crate) last_commercial_cycle_date: Option<SimDate>,
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
@@ -673,6 +678,7 @@ impl World {
         Self {
             seed,
             date: start_date,
+            last_commercial_cycle_date: None,
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
@@ -950,6 +956,14 @@ impl World {
     }
 
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
+        match self.last_commercial_cycle_date {
+            None => hash.write_u8(0),
+            Some(date) => {
+                hash.write_u8(1);
+                hash.write_i32(date.year());
+                hash.write_u16(date.day_of_year());
+            }
+        }
         hash.write_u64(self.firm_expectations.len() as u64);
         for (firm, row) in &self.firm_expectations {
             hash.write_u32(firm.get());
