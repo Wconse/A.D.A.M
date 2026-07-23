@@ -440,6 +440,31 @@ impl World {
     }
 }
 
+fn uncontracted_monthly_income(
+    annual_income: Money,
+    people: Population,
+    contracted_workers: u64,
+    functional_capacity: u16,
+) -> Result<Money, WorldError> {
+    if people.people() == 0 {
+        return Ok(Money::default());
+    }
+    let uncontracted_people = people.people().saturating_sub(contracted_workers);
+    let minor_units = i128::from(annual_income.minor_units())
+        .checked_mul(i128::from(uncontracted_people))
+        .and_then(|value| value.checked_mul(i128::from(functional_capacity)))
+        .ok_or(WorldError::ArithmeticOverflow(
+            "uncontracted household income",
+        ))?
+        / i128::from(people.people())
+        / 12
+        / i128::from(BasisPoints::MAX);
+    Ok(Money::from_minor_units(
+        i64::try_from(minor_units)
+            .map_err(|_| WorldError::ArithmeticOverflow("uncontracted household income"))?,
+    ))
+}
+
 impl World {
     /// Applies monthly household income and debt service in canonical cohort order.
     /// # Errors
@@ -456,28 +481,27 @@ impl World {
         let mut updated = self.cohorts.clone();
         let mut rows = Vec::new();
         for cohort in updated.values_mut() {
-            let contracted = self
+            let contracted_workers = self
                 .employment_agreements
                 .values()
-                .any(|agreement| agreement.active() && agreement.cohort() == cohort.id());
-            let fallback = if contracted {
-                Money::default()
-            } else {
-                let capacity = self
-                    .cohort_health
-                    .get(&cohort.id())
-                    .map_or(BasisPoints::MAX, |health| {
-                        health.functional_capacity().get()
-                    });
-                Money::from_minor_units(
-                    i64::try_from(
-                        i128::from(cohort.annual_income().minor_units()) * i128::from(capacity)
-                            / 12
-                            / i128::from(BasisPoints::MAX),
-                    )
-                    .map_err(|_| WorldError::ArithmeticOverflow("health-adjusted income"))?,
-                )
-            };
+                .filter(|agreement| agreement.active() && agreement.cohort() == cohort.id())
+                .try_fold(0_u64, |total, agreement| {
+                    total
+                        .checked_add(agreement.workers())
+                        .ok_or(WorldError::ArithmeticOverflow("contracted cohort workers"))
+                })?;
+            let capacity = self
+                .cohort_health
+                .get(&cohort.id())
+                .map_or(BasisPoints::MAX, |health| {
+                    health.functional_capacity().get()
+                });
+            let fallback = uncontracted_monthly_income(
+                cohort.annual_income(),
+                cohort.people(),
+                contracted_workers,
+                capacity,
+            )?;
             rows.push(cohort.apply_monthly_cashflow(fallback)?);
         }
         self.cohorts = updated;
@@ -602,6 +626,31 @@ mod tests {
                 (CohortId::new(1), Population::new(602)),
                 (CohortId::new(2), Population::new(401)),
             ]
+        );
+    }
+
+    #[test]
+    fn partial_employment_preserves_uncontracted_income() {
+        assert_eq!(
+            uncontracted_monthly_income(
+                Money::from_minor_units(1_200),
+                Population::new(100),
+                25,
+                BasisPoints::MAX,
+            )
+            .expect("partial income")
+            .minor_units(),
+            75
+        );
+        assert_eq!(
+            uncontracted_monthly_income(
+                Money::from_minor_units(1_200),
+                Population::new(100),
+                100,
+                BasisPoints::MAX,
+            )
+            .expect("fully contracted income"),
+            Money::default()
         );
     }
 

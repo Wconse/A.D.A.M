@@ -11,18 +11,21 @@ pub mod save_envelope;
 pub mod save_file;
 pub mod world_snapshot;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use adam_core::{
-    Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget, Country,
-    CountryId, CountryIndicators, DemandBasis, EducationLevel, EmploymentStatus, Good, GoodId,
-    HouseholdCohort, HouseholdType, Influence, Money, NeedProfileId, NeedTier, Population,
-    PowerNode, PowerNodeId, PowerNodeKind, QuantityMilli, Region, RegionId, SimDate, TimeError,
-    ValueError, World, WorldError, WorldSeed,
+    Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget,
+    CorporateRole, Country, CountryId, CountryIndicators, DemandBasis, EducationLevel,
+    EmploymentAgreement, EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId,
+    HouseholdCohort, HouseholdType, Influence, Money, NeedProfileId, NeedTier, OwnershipStake,
+    Population, PowerNode, PowerNodeId, PowerNodeKind, ProductionInput, ProductionRecipe,
+    QuantityMilli, RecipeId, Region, RegionId, SimDate, TimeError, ValueError, World, WorldError,
+    WorldSeed,
 };
 use serde::Deserialize;
 
-pub const WORLD_SCHEMA_VERSION: u32 = 4;
+pub const WORLD_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorldBlueprint {
@@ -30,6 +33,13 @@ pub struct WorldBlueprint {
     start_year: i32,
     countries: Vec<Country>,
     goods: Vec<Good>,
+    production_recipes: Vec<ProductionRecipe>,
+    firms: Vec<Firm>,
+    employment_agreements: Vec<EmploymentAgreement>,
+    ownership_stakes: Vec<OwnershipStake>,
+    firm_appointments: Vec<FirmAppointment>,
+    firm_policies: Vec<(ActorId, FirmId, FirmPolicy)>,
+    production_targets: Vec<(ActorId, FirmId, u64)>,
     consumption_profiles: Vec<ConsumptionProfile>,
     regional_prices: Vec<(RegionId, GoodId, Money)>,
     regions: Vec<Region>,
@@ -54,6 +64,13 @@ impl WorldBlueprint {
             start_year: raw.start_year,
             countries: parse_countries(raw.countries)?,
             goods: parse_goods(raw.goods)?,
+            production_recipes: parse_production_recipes(raw.production_recipes)?,
+            firms: parse_firms(raw.firms)?,
+            employment_agreements: parse_employment_agreements(raw.employment_agreements)?,
+            ownership_stakes: parse_ownership_stakes(raw.ownership_stakes)?,
+            firm_appointments: parse_firm_appointments(raw.firm_appointments)?,
+            firm_policies: parse_firm_policies(raw.firm_policies)?,
+            production_targets: parse_production_targets(raw.production_targets)?,
             consumption_profiles: parse_profiles(raw.consumption_profiles)?,
             regional_prices: parse_prices(raw.regional_prices)?,
             regions: parse_regions(raw.regions)?,
@@ -85,6 +102,11 @@ impl WorldBlueprint {
                 .register_good(good.clone())
                 .map_err(ContentError::Domain)?;
         }
+        for recipe in &self.production_recipes {
+            world
+                .register_production_recipe(recipe.clone())
+                .map_err(ContentError::Domain)?;
+        }
         for profile in &self.consumption_profiles {
             world
                 .register_consumption_profile(profile.clone())
@@ -93,6 +115,11 @@ impl WorldBlueprint {
         for region in &self.regions {
             world
                 .register_region(region.clone())
+                .map_err(ContentError::Domain)?;
+        }
+        for firm in &self.firms {
+            world
+                .register_firm(firm.clone())
                 .map_err(ContentError::Domain)?;
         }
         for (region, good, price) in &self.regional_prices {
@@ -108,9 +135,34 @@ impl WorldBlueprint {
         world
             .validate_population_accounting()
             .map_err(ContentError::Domain)?;
+        for agreement in &self.employment_agreements {
+            world
+                .register_employment_agreement(agreement.clone())
+                .map_err(ContentError::Domain)?;
+        }
         for actor in &self.actors {
             world
                 .register_actor(actor.clone())
+                .map_err(ContentError::Domain)?;
+        }
+        for stake in &self.ownership_stakes {
+            world
+                .register_ownership_stake(*stake)
+                .map_err(ContentError::Domain)?;
+        }
+        for appointment in &self.firm_appointments {
+            world
+                .register_firm_appointment(*appointment)
+                .map_err(ContentError::Domain)?;
+        }
+        for (actor, firm, policy) in &self.firm_policies {
+            world
+                .set_firm_policy(*actor, *firm, *policy)
+                .map_err(ContentError::Domain)?;
+        }
+        for (actor, firm, batches) in &self.production_targets {
+            world
+                .set_firm_production_target(*actor, *firm, *batches)
                 .map_err(ContentError::Domain)?;
         }
         for node in &self.power_nodes {
@@ -306,6 +358,143 @@ fn parse_cohorts(raw: Vec<RawCohort>) -> Result<Vec<HouseholdCohort>, ContentErr
         .collect()
 }
 
+fn parse_production_recipes(
+    raw: Vec<RawProductionRecipe>,
+) -> Result<Vec<ProductionRecipe>, ContentError> {
+    raw.into_iter()
+        .map(|recipe| {
+            let inputs = recipe
+                .inputs
+                .into_iter()
+                .map(|input| {
+                    Ok(ProductionInput::new(
+                        GoodId::new(non_zero_id("production input good", input.good_id)?),
+                        QuantityMilli::new(input.quantity_per_batch_milli),
+                    ))
+                })
+                .collect::<Result<Vec<_>, ContentError>>()?;
+            ProductionRecipe::new(
+                RecipeId::new(non_zero_id("recipe", recipe.id)?),
+                recipe.name,
+                GoodId::new(non_zero_id("recipe output good", recipe.output_good_id)?),
+                QuantityMilli::new(recipe.output_per_batch_milli),
+                recipe.labor_milli_worker_months,
+                inputs,
+            )
+            .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_firms(raw: Vec<RawFirm>) -> Result<Vec<Firm>, ContentError> {
+    raw.into_iter()
+        .map(|firm| {
+            let inventories = firm
+                .inventories
+                .into_iter()
+                .map(|row| {
+                    Ok((
+                        GoodId::new(non_zero_id("firm inventory good", row.good_id)?),
+                        QuantityMilli::new(row.quantity_milli),
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>, ContentError>>()?;
+            Firm::new(
+                FirmId::new(non_zero_id("firm", firm.id)?),
+                firm.name,
+                RegionId::new(non_zero_id("firm region", firm.region_id)?),
+                RecipeId::new(non_zero_id("firm recipe", firm.recipe_id)?),
+                firm.workers,
+                firm.capacity_batches,
+                Money::from_minor_units(firm.cash_minor),
+                inventories,
+            )
+            .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_employment_agreements(
+    raw: Vec<RawEmploymentAgreement>,
+) -> Result<Vec<EmploymentAgreement>, ContentError> {
+    raw.into_iter()
+        .map(|row| {
+            EmploymentAgreement::new(
+                FirmId::new(non_zero_id("employment firm", row.firm_id)?),
+                CohortId::new(non_zero_id("employment cohort", row.cohort_id)?),
+                row.workers,
+                Money::from_minor_units(row.monthly_wage_per_worker_minor),
+            )
+            .map_err(ContentError::Domain)
+        })
+        .collect()
+}
+
+fn parse_ownership_stakes(
+    raw: Vec<RawOwnershipStake>,
+) -> Result<Vec<OwnershipStake>, ContentError> {
+    raw.into_iter()
+        .map(|row| {
+            Ok(OwnershipStake::new(
+                FirmId::new(non_zero_id("ownership firm", row.firm_id)?),
+                ActorId::new(non_zero_id("ownership actor", row.actor_id)?),
+                BasisPoints::new(row.economic_rights_bps).map_err(ContentError::Value)?,
+                BasisPoints::new(row.voting_rights_bps).map_err(ContentError::Value)?,
+            ))
+        })
+        .collect()
+}
+
+fn parse_firm_appointments(
+    raw: Vec<RawFirmAppointment>,
+) -> Result<Vec<FirmAppointment>, ContentError> {
+    raw.into_iter()
+        .map(|row| {
+            Ok(FirmAppointment::new(
+                FirmId::new(non_zero_id("appointment firm", row.firm_id)?),
+                ActorId::new(non_zero_id("appointment actor", row.actor_id)?),
+                row.role.into(),
+            ))
+        })
+        .collect()
+}
+
+fn parse_firm_policies(
+    raw: Vec<RawFirmPolicy>,
+) -> Result<Vec<(ActorId, FirmId, FirmPolicy)>, ContentError> {
+    raw.into_iter()
+        .map(|row| {
+            let policy = FirmPolicy::new(
+                row.inventory_buffer_days,
+                BasisPoints::new(row.price_markup_bps).map_err(ContentError::Value)?,
+                BasisPoints::new(row.marketing_budget_bps).map_err(ContentError::Value)?,
+                BasisPoints::new(row.reinvestment_bps).map_err(ContentError::Value)?,
+                BasisPoints::new(row.dividend_bps).map_err(ContentError::Value)?,
+            )
+            .map_err(ContentError::Domain)?;
+            Ok((
+                ActorId::new(non_zero_id("policy actor", row.actor_id)?),
+                FirmId::new(non_zero_id("policy firm", row.firm_id)?),
+                policy,
+            ))
+        })
+        .collect()
+}
+
+fn parse_production_targets(
+    raw: Vec<RawProductionTarget>,
+) -> Result<Vec<(ActorId, FirmId, u64)>, ContentError> {
+    raw.into_iter()
+        .map(|row| {
+            Ok((
+                ActorId::new(non_zero_id("target actor", row.actor_id)?),
+                FirmId::new(non_zero_id("target firm", row.firm_id)?),
+                row.batches,
+            ))
+        })
+        .collect()
+}
+
 fn parse_actors(raw: Vec<RawActor>, start_year: i32) -> Result<Vec<Actor>, ContentError> {
     raw.into_iter()
         .map(|actor| {
@@ -480,6 +669,20 @@ struct RawWorld {
     countries: Vec<RawCountry>,
     #[serde(default)]
     goods: Vec<RawGood>,
+    #[serde(default)]
+    production_recipes: Vec<RawProductionRecipe>,
+    #[serde(default)]
+    firms: Vec<RawFirm>,
+    #[serde(default)]
+    employment_agreements: Vec<RawEmploymentAgreement>,
+    #[serde(default)]
+    ownership_stakes: Vec<RawOwnershipStake>,
+    #[serde(default)]
+    firm_appointments: Vec<RawFirmAppointment>,
+    #[serde(default)]
+    firm_policies: Vec<RawFirmPolicy>,
+    #[serde(default)]
+    production_targets: Vec<RawProductionTarget>,
     #[serde(default)]
     consumption_profiles: Vec<RawConsumptionProfile>,
     #[serde(default)]
@@ -684,6 +887,111 @@ struct RawCohort {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawProductionInput {
+    good_id: u32,
+    quantity_per_batch_milli: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProductionRecipe {
+    id: u32,
+    name: String,
+    output_good_id: u32,
+    output_per_batch_milli: u64,
+    labor_milli_worker_months: u64,
+    #[serde(default)]
+    inputs: Vec<RawProductionInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFirmInventory {
+    good_id: u32,
+    quantity_milli: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFirm {
+    id: u32,
+    name: String,
+    region_id: u32,
+    recipe_id: u32,
+    workers: u64,
+    capacity_batches: u64,
+    cash_minor: i64,
+    #[serde(default)]
+    inventories: Vec<RawFirmInventory>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEmploymentAgreement {
+    firm_id: u32,
+    cohort_id: u32,
+    workers: u64,
+    monthly_wage_per_worker_minor: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOwnershipStake {
+    firm_id: u32,
+    actor_id: u32,
+    economic_rights_bps: u16,
+    voting_rights_bps: u16,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawCorporateRole {
+    BoardDirector,
+    ChiefExecutive,
+    OperationsManager,
+    MarketingManager,
+}
+impl From<RawCorporateRole> for CorporateRole {
+    fn from(value: RawCorporateRole) -> Self {
+        match value {
+            RawCorporateRole::BoardDirector => Self::BoardDirector,
+            RawCorporateRole::ChiefExecutive => Self::ChiefExecutive,
+            RawCorporateRole::OperationsManager => Self::OperationsManager,
+            RawCorporateRole::MarketingManager => Self::MarketingManager,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFirmAppointment {
+    firm_id: u32,
+    actor_id: u32,
+    role: RawCorporateRole,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFirmPolicy {
+    firm_id: u32,
+    actor_id: u32,
+    inventory_buffer_days: u16,
+    price_markup_bps: u16,
+    marketing_budget_bps: u16,
+    reinvestment_bps: u16,
+    dividend_bps: u16,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProductionTarget {
+    firm_id: u32,
+    actor_id: u32,
+    batches: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawActor {
     id: u32,
     name: String,
@@ -736,7 +1044,7 @@ mod tests {
     use super::*;
 
     const VALID: &str = r#"
-schema_version = 4
+schema_version = 5
 world_name = "Test World"
 start_year = 2025
 
@@ -822,14 +1130,87 @@ weight_bps = 8000
     }
 
     #[test]
+    fn production_content_builds_authorized_supply_chain() {
+        let source = format!(
+            "{}{}",
+            VALID,
+            r#"
+
+[[production_recipes]]
+id = 1
+name = "Food production"
+output_good_id = 1
+output_per_batch_milli = 1000
+labor_milli_worker_months = 1000
+
+[[firms]]
+id = 1
+name = "Aster Foods"
+region_id = 10
+recipe_id = 1
+workers = 1
+capacity_batches = 1
+cash_minor = 1000
+
+[[employment_agreements]]
+firm_id = 1
+cohort_id = 10000
+workers = 1
+monthly_wage_per_worker_minor = 1
+
+[[ownership_stakes]]
+firm_id = 1
+actor_id = 100
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 1
+actor_id = 100
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 1
+actor_id = 100
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 1
+actor_id = 100
+batches = 1
+"#
+        );
+        let blueprint = WorldBlueprint::parse_toml(&source).expect("production content");
+        let world = blueprint
+            .build_world(WorldSeed::new(47))
+            .expect("producing world");
+
+        assert_eq!(world.production_recipes().len(), 1);
+        assert_eq!(world.firms().len(), 1);
+        assert_eq!(world.employment_agreements().len(), 1);
+        assert_eq!(world.ownership_stakes().len(), 1);
+        assert_eq!(world.firm_appointments().len(), 1);
+        assert_eq!(world.firm_policies().len(), 1);
+        assert_eq!(world.firm_production_targets()[&FirmId::new(1)], 1);
+        assert_eq!(
+            world.plan_monthly_production().expect("production plan")[0].batches(),
+            1
+        );
+    }
+
+    #[test]
     fn unsupported_schema_is_explicit() {
-        let source = VALID.replace("schema_version = 4", "schema_version = 5");
+        let source = VALID.replace("schema_version = 5", "schema_version = 6");
         let error = WorldBlueprint::parse_toml(&source).expect_err("schema must fail");
         assert!(matches!(
             error,
             ContentError::UnsupportedSchema {
-                expected: 4,
-                actual: 5
+                expected: 5,
+                actual: 6
             }
         ));
     }

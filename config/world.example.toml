@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 5
 world_name = "Parallel Twenty-First Century"
 start_year = 2025
 
@@ -259,7 +259,7 @@ age_band = "child"
 household_type = "family_with_children"
 education = "basic"
 employment = "dependent"
-annual_income_minor = 0
+annual_income_minor = 720000000000
 liquid_wealth_minor = 120000000000
 debt_minor = 0
 
@@ -329,7 +329,7 @@ age_band = "child"
 household_type = "family_with_children"
 education = "basic"
 employment = "dependent"
-annual_income_minor = 0
+annual_income_minor = 750000000000
 liquid_wealth_minor = 150000000000
 debt_minor = 0
 
@@ -399,7 +399,7 @@ age_band = "child"
 household_type = "family_with_children"
 education = "basic"
 employment = "dependent"
-annual_income_minor = 0
+annual_income_minor = 800000000000
 liquid_wealth_minor = 110000000000
 debt_minor = 0
 
@@ -559,3 +559,513 @@ weight_bps = 7900
 actor_id = 3001
 node_id = 30002
 weight_bps = 6700
+
+## Minimal producing economy: real firms, labor, authority, policy, and targets.
+
+[[production_recipes]]
+id = 1001
+name = "Staple food production"
+output_good_id = 1
+output_per_batch_milli = 1000000
+labor_milli_worker_months = 1000
+
+[[production_recipes]]
+id = 1002
+name = "Housing service provision"
+output_good_id = 2
+output_per_batch_milli = 1000000
+labor_milli_worker_months = 1000
+
+[[production_recipes]]
+id = 1003
+name = "Household energy supply"
+output_good_id = 3
+output_per_batch_milli = 1000000
+labor_milli_worker_months = 1000
+
+[[production_recipes]]
+id = 1005
+name = "Healthcare service provision"
+output_good_id = 5
+output_per_batch_milli = 1000000
+labor_milli_worker_months = 1000
+
+[[firms]]
+id = 1101
+name = "Aster Foods"
+region_id = 101
+recipe_id = 1001
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 1101
+cohort_id = 10103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 1101
+actor_id = 1002
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 1101
+actor_id = 1002
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 1101
+actor_id = 1002
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 1101
+actor_id = 1002
+batches = 20000
+
+[[firms]]
+id = 1102
+name = "Aster Housing"
+region_id = 101
+recipe_id = 1002
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 1102
+cohort_id = 10103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 1102
+actor_id = 1002
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 1102
+actor_id = 1002
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 1102
+actor_id = 1002
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 1102
+actor_id = 1002
+batches = 20000
+
+[[firms]]
+id = 1103
+name = "Aster Energy"
+region_id = 101
+recipe_id = 1003
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 1103
+cohort_id = 10103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 1103
+actor_id = 1002
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 1103
+actor_id = 1002
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 1103
+actor_id = 1002
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 1103
+actor_id = 1002
+batches = 20000
+
+[[firms]]
+id = 1104
+name = "Aster Health"
+region_id = 101
+recipe_id = 1005
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 1104
+cohort_id = 10103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 1104
+actor_id = 1002
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 1104
+actor_id = 1002
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 1104
+actor_id = 1002
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 1104
+actor_id = 1002
+batches = 20000
+
+[[firms]]
+id = 2101
+name = "Boreal Foods"
+region_id = 201
+recipe_id = 1001
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 2101
+cohort_id = 20103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 2101
+actor_id = 2001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 2101
+actor_id = 2001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 2101
+actor_id = 2001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 2101
+actor_id = 2001
+batches = 20000
+
+[[firms]]
+id = 2102
+name = "Boreal Housing"
+region_id = 201
+recipe_id = 1002
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 2102
+cohort_id = 20103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 2102
+actor_id = 2001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 2102
+actor_id = 2001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 2102
+actor_id = 2001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 2102
+actor_id = 2001
+batches = 20000
+
+[[firms]]
+id = 2103
+name = "Boreal Energy"
+region_id = 201
+recipe_id = 1003
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 2103
+cohort_id = 20103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 2103
+actor_id = 2001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 2103
+actor_id = 2001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 2103
+actor_id = 2001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 2103
+actor_id = 2001
+batches = 20000
+
+[[firms]]
+id = 2104
+name = "Boreal Health"
+region_id = 201
+recipe_id = 1005
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 2104
+cohort_id = 20103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 2104
+actor_id = 2001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 2104
+actor_id = 2001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 2104
+actor_id = 2001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 2104
+actor_id = 2001
+batches = 20000
+
+[[firms]]
+id = 3101
+name = "Cyrene Foods"
+region_id = 301
+recipe_id = 1001
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 3101
+cohort_id = 30103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 3101
+actor_id = 3001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 3101
+actor_id = 3001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 3101
+actor_id = 3001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 3101
+actor_id = 3001
+batches = 20000
+
+[[firms]]
+id = 3102
+name = "Cyrene Housing"
+region_id = 301
+recipe_id = 1002
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 3102
+cohort_id = 30103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 3102
+actor_id = 3001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 3102
+actor_id = 3001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 3102
+actor_id = 3001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 3102
+actor_id = 3001
+batches = 20000
+
+[[firms]]
+id = 3103
+name = "Cyrene Energy"
+region_id = 301
+recipe_id = 1003
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 3103
+cohort_id = 30103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 3103
+actor_id = 3001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 3103
+actor_id = 3001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 3103
+actor_id = 3001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 3103
+actor_id = 3001
+batches = 20000
+
+[[firms]]
+id = 3104
+name = "Cyrene Health"
+region_id = 301
+recipe_id = 1005
+workers = 20000
+capacity_batches = 20000
+cash_minor = 1000000000000
+
+[[employment_agreements]]
+firm_id = 3104
+cohort_id = 30103
+workers = 20000
+monthly_wage_per_worker_minor = 1000
+
+[[ownership_stakes]]
+firm_id = 3104
+actor_id = 3001
+economic_rights_bps = 10000
+voting_rights_bps = 10000
+
+[[firm_appointments]]
+firm_id = 3104
+actor_id = 3001
+role = "operations_manager"
+
+[[firm_policies]]
+firm_id = 3104
+actor_id = 3001
+inventory_buffer_days = 0
+price_markup_bps = 0
+marketing_budget_bps = 0
+reinvestment_bps = 5000
+dividend_bps = 0
+
+[[production_targets]]
+firm_id = 3104
+actor_id = 3001
+batches = 20000

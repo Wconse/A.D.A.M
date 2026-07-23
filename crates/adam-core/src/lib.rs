@@ -91,4 +91,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 22;
+pub const SIMULATION_VERSION: u32 = 23;
