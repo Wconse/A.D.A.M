@@ -140,6 +140,12 @@ impl World {
     /// # Errors
     /// Returns an error if a duration counter overflows.
     pub fn update_monthly_cohort_experience(&mut self) -> Result<(), WorldError> {
+        if self.last_cohort_experience_date == Some(self.date) {
+            return Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "cohort experience",
+                date: self.date,
+            });
+        }
         let mut next = self.cohort_experience.clone();
         for (id, cohort) in &self.cohorts {
             let row = next.entry(*id).or_default();
@@ -174,6 +180,7 @@ impl World {
             };
         }
         self.cohort_experience = next;
+        self.last_cohort_experience_date = Some(self.date);
         for (cohort, row) in &self.cohort_experience {
             self.events.append(
                 self.date,

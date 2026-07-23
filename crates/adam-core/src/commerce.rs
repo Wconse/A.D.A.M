@@ -1,6 +1,6 @@
 use crate::{
-    DemandIntent, FirmMarketOfferPlan, MarketClearing, MarketOrder, ProductionPlan, World,
-    WorldError, clear_local_market,
+    DemandIntent, FirmMarketOfferPlan, HouseholdCashflow, MarketClearing, MarketOrder,
+    PayrollRecord, ProductionPlan, SimDate, World, WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,6 +9,15 @@ pub struct MonthlyCommercialCycleResult {
     pub offer_plans: Vec<FirmMarketOfferPlan>,
     pub demand_intents: Vec<DemandIntent>,
     pub clearing: MarketClearing,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MonthlyEconomicCycleResult {
+    pub completed_date: SimDate,
+    pub next_date: SimDate,
+    pub payroll: Vec<PayrollRecord>,
+    pub household_cashflows: Vec<HouseholdCashflow>,
+    pub commercial: MonthlyCommercialCycleResult,
 }
 
 impl World {
@@ -74,6 +83,57 @@ impl World {
             offer_plans,
             demand_intents,
             clearing,
+        };
+        *self = next;
+        Ok(result)
+    }
+}
+
+impl World {
+    /// Advances the simplified calendar by one month without running economic stages.
+    /// # Errors
+    /// Returns an error if crossing the calendar boundary overflows the year.
+    pub fn advance_month(&mut self) -> Result<(), WorldError> {
+        self.date.advance_one_month()?;
+        self.events.append(
+            self.date,
+            crate::DomainEvent::MonthAdvanced { date: self.date },
+        );
+        Ok(())
+    }
+
+    /// Atomically executes payroll, household cashflows, commerce, social observation, and time.
+    /// # Errors
+    /// Returns the first stage error without changing authoritative state.
+    pub fn execute_monthly_economic_cycle(
+        &mut self,
+    ) -> Result<MonthlyEconomicCycleResult, WorldError> {
+        let mut next = self.clone();
+        let completed_date = next.date;
+        let payroll = next.execute_monthly_payroll()?;
+        let household_cashflows = next.execute_monthly_household_cashflows()?;
+        let commercial = next.execute_monthly_commercial_cycle()?;
+        next.update_monthly_cohort_experience()?;
+        next.derive_monthly_social_stress()?;
+        next.accumulate_monthly_social_stress()?;
+        next.events.append(
+            completed_date,
+            crate::DomainEvent::MonthlyEconomicCycleCompleted {
+                payroll_records: u64::try_from(payroll.len())
+                    .map_err(|_| WorldError::ArithmeticOverflow("monthly payroll records"))?,
+                household_cashflows: u64::try_from(household_cashflows.len())
+                    .map_err(|_| WorldError::ArithmeticOverflow("monthly household cashflows"))?,
+                market_fills: u64::try_from(commercial.clearing.fills.len())
+                    .map_err(|_| WorldError::ArithmeticOverflow("monthly market fills"))?,
+            },
+        );
+        next.advance_month()?;
+        let result = MonthlyEconomicCycleResult {
+            completed_date,
+            next_date: next.date,
+            payroll,
+            household_cashflows,
+            commercial,
         };
         *self = next;
         Ok(result)
@@ -247,6 +307,49 @@ mod tests {
         assert!(direct.monthly_firm_market_outcomes().is_empty());
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn economic_cycle_is_replayable_and_advances_exactly_one_month() {
+        let mut direct = commercial_world(true);
+        let mut replayed = direct.clone();
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic cycle");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed economic cycle");
+
+        assert_eq!(result.completed_date, SimDate::new(2025, 1).expect("date"));
+        assert_eq!(result.next_date, SimDate::new(2025, 32).expect("date"));
+        assert_eq!(result.household_cashflows.len(), 1);
+        assert_eq!(result.commercial.clearing.fills.len(), 1);
+        assert_eq!(direct.date(), SimDate::new(2025, 32).expect("date"));
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn repeated_monthly_stage_is_rejected_without_mutation() {
+        let mut world = commercial_world(true);
+        world.execute_monthly_payroll().expect("first payroll");
+        let after_first = world.clone();
+        assert!(matches!(
+            world.execute_monthly_payroll(),
+            Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "payroll",
+                ..
+            })
+        ));
+        assert_eq!(world, after_first);
+        assert!(matches!(
+            world.execute_monthly_economic_cycle(),
+            Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "payroll",
+                ..
+            })
+        ));
+        assert_eq!(world, after_first);
     }
 
     #[test]

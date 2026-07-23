@@ -308,9 +308,7 @@ impl World {
                 .consumption_profiles
                 .get(&cohort.need_profile())
                 .ok_or(WorldError::UnknownNeedProfile(cohort.need_profile()))?;
-            let income = i128::from(cohort.annual_income().minor_units()) / 12;
-            let debt_service = i128::from(cohort.debt().minor_units()) / 120;
-            let mut remaining = (income - debt_service).max(0);
+            let mut remaining = i128::from(cohort.liquid_wealth().minor_units()).max(0);
             for tier in [
                 NeedTier::Survival,
                 NeedTier::Participation,
@@ -515,6 +513,9 @@ mod tests {
                 .expect("cohort"),
             )
             .expect("cohort");
+        world
+            .execute_monthly_household_cashflows()
+            .expect("monthly cashflow");
         world
     }
 

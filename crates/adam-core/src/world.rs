@@ -385,6 +385,10 @@ pub enum WorldError {
     InvalidPrice,
     InvalidMarketClearing(&'static str),
     CommercialCycleAlreadyExecuted(SimDate),
+    MonthlyStageAlreadyExecuted {
+        stage: &'static str,
+        date: SimDate,
+    },
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
@@ -504,6 +508,12 @@ impl fmt::Display for WorldError {
             }
             Self::CommercialCycleAlreadyExecuted(date) => {
                 write!(formatter, "commercial cycle already executed for {date}")
+            }
+            Self::MonthlyStageAlreadyExecuted { stage, date } => {
+                write!(
+                    formatter,
+                    "monthly stage {stage} already executed for {date}"
+                )
             }
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidFirmExpectations(reason) => {
@@ -627,6 +637,9 @@ pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
+    pub(crate) last_payroll_date: Option<SimDate>,
+    pub(crate) last_household_cashflow_date: Option<SimDate>,
+    pub(crate) last_cohort_experience_date: Option<SimDate>,
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
@@ -679,6 +692,9 @@ impl World {
             seed,
             date: start_date,
             last_commercial_cycle_date: None,
+            last_payroll_date: None,
+            last_household_cashflow_date: None,
+            last_cohort_experience_date: None,
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
@@ -956,12 +972,19 @@ impl World {
     }
 
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
-        match self.last_commercial_cycle_date {
-            None => hash.write_u8(0),
-            Some(date) => {
-                hash.write_u8(1);
-                hash.write_i32(date.year());
-                hash.write_u16(date.day_of_year());
+        for date in [
+            self.last_commercial_cycle_date,
+            self.last_payroll_date,
+            self.last_household_cashflow_date,
+            self.last_cohort_experience_date,
+        ] {
+            match date {
+                None => hash.write_u8(0),
+                Some(date) => {
+                    hash.write_u8(1);
+                    hash.write_i32(date.year());
+                    hash.write_u16(date.day_of_year());
+                }
             }
         }
         hash.write_u64(self.firm_expectations.len() as u64);

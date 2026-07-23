@@ -5,6 +5,8 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    AdvanceMonth,
+    ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
     SetFirmProductionTarget {
         actor: ActorId,
@@ -91,6 +93,8 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::AdvanceMonth => world.advance_month(),
+            Self::ExecuteMonthlyEconomicCycle => world.execute_monthly_economic_cycle().map(|_| ()),
             Self::ExecuteMonthlyCommercialCycle => {
                 world.execute_monthly_commercial_cycle().map(|_| ())
             }

@@ -392,6 +392,12 @@ impl World {
     pub fn execute_monthly_household_cashflows(
         &mut self,
     ) -> Result<Vec<HouseholdCashflow>, WorldError> {
+        if self.last_household_cashflow_date == Some(self.date) {
+            return Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "household cashflow",
+                date: self.date,
+            });
+        }
         let mut updated = self.cohorts.clone();
         let mut rows = Vec::new();
         for cohort in updated.values_mut() {
@@ -407,6 +413,7 @@ impl World {
             rows.push(cohort.apply_monthly_cashflow(fallback)?);
         }
         self.cohorts = updated;
+        self.last_household_cashflow_date = Some(self.date);
         for row in &rows {
             self.events.append(
                 self.date,

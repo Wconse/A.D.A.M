@@ -34,7 +34,7 @@ pub use cohort::{
     AgeBand, EducationLevel, EmploymentStatus, HouseholdCashflow, HouseholdCohort, HouseholdType,
 };
 pub use command::{WorldCommand, replay_commands};
-pub use commerce::MonthlyCommercialCycleResult;
+pub use commerce::{MonthlyCommercialCycleResult, MonthlyEconomicCycleResult};
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
@@ -75,4 +75,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 14;
+pub const SIMULATION_VERSION: u32 = 15;

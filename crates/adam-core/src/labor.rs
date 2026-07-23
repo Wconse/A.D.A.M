@@ -179,6 +179,12 @@ impl World {
     /// # Errors
     /// Returns an error on arithmetic overflow.
     pub fn execute_monthly_payroll(&mut self) -> Result<Vec<PayrollRecord>, WorldError> {
+        if self.last_payroll_date == Some(self.date) {
+            return Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "payroll",
+                date: self.date,
+            });
+        }
         let mut firms = self.firms.clone();
         let mut cohorts = self.cohorts.clone();
         let mut agreements = self.employment_agreements.clone();
@@ -215,6 +221,7 @@ impl World {
         for row in &records {
             self.record_firm_payroll(row.firm, row.owed, row.paid, row.arrears)?;
         }
+        self.last_payroll_date = Some(self.date);
         for row in &records {
             self.events.append(
                 self.date,
