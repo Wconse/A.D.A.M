@@ -190,8 +190,9 @@ impl World {
 mod tests {
     use super::*;
     use crate::{
-        Country, CountryId, Firm, Good, GoodId, MarketOfferOutcome, Population, ProductionRecipe,
-        QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        Country, CountryId, Firm, FirmExpectationSource, FirmExpectations, Good, GoodId,
+        MarketOfferOutcome, Population, ProductionRecipe, QuantityMilli, RecipeId, Region,
+        RegionId, SimDate, WorldCommand, WorldSeed,
     };
 
     fn world() -> World {
@@ -234,8 +235,8 @@ mod tests {
                     "Firm",
                     RegionId::new(1),
                     RecipeId::new(1),
-                    1,
-                    1,
+                    3,
+                    3,
                     Money::from_minor_units(1_000),
                     BTreeMap::new(),
                 )
@@ -243,6 +244,58 @@ mod tests {
             )
             .expect("firm");
         world
+    }
+
+    #[test]
+    fn stockout_history_produces_bounded_expansion_advice() {
+        let mut world = world();
+        world
+            .record_firm_production(FirmId::new(1), 1)
+            .expect("production record");
+        world.monthly_firm_market_outcomes.insert(
+            FirmId::new(1),
+            vec![MarketOfferOutcome {
+                seller: FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                unit_price: Money::from_minor_units(10),
+                offered: QuantityMilli::new(1_000),
+                sold: QuantityMilli::new(1_000),
+                unsold: QuantityMilli::default(),
+                unmet_market_demand: QuantityMilli::new(2_000),
+            }],
+        );
+        world
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("capture");
+        world
+            .update_firm_expectations(
+                FirmId::new(1),
+                FirmExpectations::new(
+                    Money::from_minor_units(100),
+                    Money::default(),
+                    Money::default(),
+                    1,
+                    FirmExpectationSource::ObservedHistory,
+                )
+                .expect("expectations"),
+            )
+            .expect("expectation update");
+
+        let proposals = world
+            .plan_observed_production_adjustments()
+            .expect("production advice");
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].average_produced_batches, 1);
+        assert_eq!(proposals[0].sales_supported_batches, 1);
+        assert_eq!(proposals[0].market_demand_ceiling_batches, 3);
+        assert_eq!(proposals[0].physically_feasible_batches, 3);
+        assert_eq!(proposals[0].advisory_batches, 3);
+        assert_eq!(proposals[0].stockout_observations, 1);
+        assert_eq!(
+            proposals[0].expected_operating_cash_margin,
+            Some(Money::from_minor_units(100))
+        );
     }
 
     #[test]

@@ -280,6 +280,22 @@ impl ProductionPlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProductionAdjustmentProposal {
+    pub firm: FirmId,
+    pub average_produced_batches: u64,
+    pub sales_supported_batches: u64,
+    pub market_demand_ceiling_batches: u64,
+    pub physically_feasible_batches: u64,
+    pub advisory_batches: u64,
+    pub stockout_observations: u16,
+    pub unsold_observations: u16,
+    pub average_sold: QuantityMilli,
+    pub average_unsold: QuantityMilli,
+    pub average_unmet_market_demand: QuantityMilli,
+    pub expected_operating_cash_margin: Option<Money>,
+}
+
 impl World {
     /// Registers and validates a production recipe.
     /// # Errors
@@ -393,6 +409,193 @@ impl World {
             })
             .collect()
     }
+}
+
+impl World {
+    /// Builds non-binding production advice from bounded operating and market observations.
+    /// # Errors
+    /// Returns an error on fixed-point overflow or inconsistent authoritative references.
+    pub fn plan_observed_production_adjustments(
+        &self,
+    ) -> Result<Vec<ProductionAdjustmentProposal>, WorldError> {
+        let physical: BTreeMap<FirmId, u64> = self
+            .plan_monthly_production()?
+            .into_iter()
+            .map(|plan| (plan.firm(), plan.batches()))
+            .collect();
+        let mut proposals = Vec::new();
+        for (firm_id, history) in &self.firm_operating_history {
+            let firm = self
+                .firms
+                .get(firm_id)
+                .ok_or(WorldError::UnknownFirm(*firm_id))?;
+            let recipe = self
+                .production_recipes
+                .get(&firm.recipe())
+                .ok_or(WorldError::UnknownRecipe(firm.recipe()))?;
+            let Some(evidence) = summarize_market_evidence(history, recipe.output_good())? else {
+                continue;
+            };
+            let output_per_batch = recipe.output_per_batch().get();
+            let sales_supported = evidence.average_sold.get().div_ceil(output_per_batch);
+            let demand_ceiling = evidence
+                .average_sold
+                .get()
+                .checked_add(evidence.average_unmet.get())
+                .ok_or(WorldError::ArithmeticOverflow("market demand ceiling"))?
+                .div_ceil(output_per_batch)
+                .min(physical[firm_id]);
+            let average_produced = history.iter().try_fold(0_u128, |sum, observation| {
+                sum.checked_add(u128::from(observation.produced_batches()))
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "average observed production",
+                    ))
+            })? / u128::try_from(history.len())
+                .map_err(|_| WorldError::ArithmeticOverflow("firm observation count"))?;
+            let average_produced = u64::try_from(average_produced)
+                .map_err(|_| WorldError::ArithmeticOverflow("average observed production"))?;
+            let margin = self.expected_operating_cash_margin(*firm_id)?;
+            let advisory = if evidence.stockouts > evidence.unsold_observations
+                && margin.is_some_and(|value| value.minor_units() > 0)
+            {
+                demand_ceiling
+            } else if evidence.unsold_observations > evidence.stockouts
+                || margin.is_some_and(|value| value.minor_units() <= 0)
+            {
+                sales_supported.min(physical[firm_id])
+            } else {
+                average_produced.min(physical[firm_id])
+            };
+            proposals.push(ProductionAdjustmentProposal {
+                firm: *firm_id,
+                average_produced_batches: average_produced,
+                sales_supported_batches: sales_supported,
+                market_demand_ceiling_batches: demand_ceiling,
+                physically_feasible_batches: physical[firm_id],
+                advisory_batches: advisory,
+                stockout_observations: evidence.stockouts,
+                unsold_observations: evidence.unsold_observations,
+                average_sold: evidence.average_sold,
+                average_unsold: evidence.average_unsold,
+                average_unmet_market_demand: evidence.average_unmet,
+                expected_operating_cash_margin: margin,
+            });
+        }
+        Ok(proposals)
+    }
+
+    fn expected_operating_cash_margin(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+        let Some(expectations) = self.firm_expectations.get(&firm) else {
+            return Ok(None);
+        };
+        let horizon = i128::from(expectations.horizon_months());
+        let payroll = self
+            .employment_agreements
+            .values()
+            .filter(|agreement| agreement.firm() == firm)
+            .try_fold(0_i128, |sum, agreement| {
+                let current = i128::from(agreement.wage().minor_units())
+                    .checked_mul(i128::from(agreement.workers()))
+                    .and_then(|value| value.checked_mul(horizon))
+                    .ok_or(WorldError::ArithmeticOverflow("expected payroll margin"))?;
+                sum.checked_add(current)
+                    .and_then(|value| {
+                        value.checked_add(i128::from(agreement.arrears().minor_units()))
+                    })
+                    .ok_or(WorldError::ArithmeticOverflow("expected payroll margin"))
+            })?;
+        let margin = i128::from(expectations.expected_sales_revenue().minor_units())
+            .checked_sub(i128::from(
+                expectations.expected_input_costs().minor_units(),
+            ))
+            .and_then(|value| value.checked_sub(payroll))
+            .ok_or(WorldError::ArithmeticOverflow(
+                "expected operating cash margin",
+            ))?;
+        Ok(Some(Money::from_minor_units(
+            i64::try_from(margin)
+                .map_err(|_| WorldError::ArithmeticOverflow("expected operating cash margin"))?,
+        )))
+    }
+}
+
+struct MarketEvidenceSummary {
+    average_sold: QuantityMilli,
+    average_unsold: QuantityMilli,
+    average_unmet: QuantityMilli,
+    stockouts: u16,
+    unsold_observations: u16,
+}
+
+fn summarize_market_evidence(
+    history: &[crate::FirmOperatingObservation],
+    output_good: GoodId,
+) -> Result<Option<MarketEvidenceSummary>, WorldError> {
+    let mut periods = 0_u128;
+    let mut sold_total = 0_u128;
+    let mut unsold_total = 0_u128;
+    let mut unmet_total = 0_u128;
+    let mut stockouts = 0_u16;
+    let mut unsold_observations = 0_u16;
+    for observation in history {
+        let outcomes: Vec<_> = observation
+            .market_outcomes()
+            .iter()
+            .filter(|outcome| outcome.good == output_good)
+            .collect();
+        if outcomes.is_empty() {
+            continue;
+        }
+        periods += 1;
+        let sold = outcomes.iter().try_fold(0_u128, |sum, outcome| {
+            sum.checked_add(u128::from(outcome.sold.get()))
+                .ok_or(WorldError::ArithmeticOverflow("observed sold quantity"))
+        })?;
+        let unsold = outcomes.iter().try_fold(0_u128, |sum, outcome| {
+            sum.checked_add(u128::from(outcome.unsold.get()))
+                .ok_or(WorldError::ArithmeticOverflow("observed unsold quantity"))
+        })?;
+        let unmet = outcomes
+            .iter()
+            .map(|outcome| u128::from(outcome.unmet_market_demand.get()))
+            .max()
+            .unwrap_or_default();
+        sold_total = sold_total
+            .checked_add(sold)
+            .ok_or(WorldError::ArithmeticOverflow("observed sold history"))?;
+        unsold_total = unsold_total
+            .checked_add(unsold)
+            .ok_or(WorldError::ArithmeticOverflow("observed unsold history"))?;
+        unmet_total = unmet_total
+            .checked_add(unmet)
+            .ok_or(WorldError::ArithmeticOverflow("observed unmet history"))?;
+        if outcomes
+            .iter()
+            .any(|outcome| outcome.sold_out_while_demand_remained())
+        {
+            stockouts = stockouts
+                .checked_add(1)
+                .ok_or(WorldError::ArithmeticOverflow("stockout observations"))?;
+        }
+        if unsold > 0 {
+            unsold_observations = unsold_observations
+                .checked_add(1)
+                .ok_or(WorldError::ArithmeticOverflow("unsold observations"))?;
+        }
+    }
+    if periods == 0 {
+        return Ok(None);
+    }
+    let average = |value: u128, label| {
+        u64::try_from(value / periods).map_err(|_| WorldError::ArithmeticOverflow(label))
+    };
+    Ok(Some(MarketEvidenceSummary {
+        average_sold: QuantityMilli::new(average(sold_total, "average sold quantity")?),
+        average_unsold: QuantityMilli::new(average(unsold_total, "average unsold quantity")?),
+        average_unmet: QuantityMilli::new(average(unmet_total, "average unmet demand")?),
+        stockouts,
+        unsold_observations,
+    }))
 }
 
 impl World {
