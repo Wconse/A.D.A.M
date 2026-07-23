@@ -40,9 +40,9 @@ mod tests {
     use super::*;
     use crate::save_compat::SavedModReference;
     use adam_core::{
-        Country, CountryId, Firm, FirmExpectationSource, FirmExpectations, FirmId, Good, GoodId,
-        Money, Population, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate,
-        WorldSeed,
+        Actor, ActorId, CorporateRole, Country, CountryId, Firm, FirmAppointment,
+        FirmExpectationSource, FirmExpectations, FirmId, Good, GoodId, Money, Population,
+        ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldSeed,
     };
     use std::collections::BTreeMap;
     fn metadata() -> SaveCompatibilityMetadata {
@@ -86,6 +86,11 @@ mod tests {
             )
             .expect("region");
         world
+            .register_actor(
+                Actor::new(ActorId::new(1), "Operations", RegionId::new(1), 1980).expect("actor"),
+            )
+            .expect("actor");
+        world
             .register_production_recipe(
                 ProductionRecipe::new(
                     RecipeId::new(1),
@@ -105,14 +110,24 @@ mod tests {
                     "Firm",
                     RegionId::new(1),
                     RecipeId::new(1),
-                    1,
-                    1,
+                    3,
+                    3,
                     Money::from_minor_units(5_000),
                     BTreeMap::new(),
                 )
                 .expect("firm"),
             )
             .expect("firm");
+        world
+            .register_firm_appointment(FirmAppointment::new(
+                FirmId::new(1),
+                ActorId::new(1),
+                CorporateRole::OperationsManager,
+            ))
+            .expect("appointment");
+        world
+            .set_firm_production_target(ActorId::new(1), FirmId::new(1), 2)
+            .expect("production target");
         world
             .capture_monthly_firm_observation(FirmId::new(1))
             .expect("observation capture");
@@ -157,6 +172,11 @@ mod tests {
             2
         );
         assert_eq!(loaded.firm_operating_history()[&FirmId::new(1)].len(), 1);
+        assert_eq!(loaded.firm_production_targets()[&FirmId::new(1)], 2);
+        assert_eq!(
+            loaded.plan_monthly_production().expect("loaded plan")[0].batches(),
+            2
+        );
     }
     #[test]
     fn incompatible_mod_content_blocks_world_decode() {

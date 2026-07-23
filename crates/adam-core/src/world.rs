@@ -387,6 +387,11 @@ pub enum WorldError {
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
+    InvalidProductionTarget {
+        firm: FirmId,
+        target: u64,
+        capacity: u64,
+    },
     InvalidEmployment(&'static str),
     InvalidFirmExpectations(&'static str),
     InvalidBusinessPolicy(&'static str),
@@ -503,6 +508,14 @@ impl fmt::Display for WorldError {
             Self::InvalidProduction(reason) => {
                 write!(formatter, "invalid production model: {reason}")
             }
+            Self::InvalidProductionTarget {
+                firm,
+                target,
+                capacity,
+            } => write!(
+                formatter,
+                "firm {firm} production target {target} exceeds capacity {capacity}"
+            ),
             Self::InvalidBusinessPolicy(reason) => {
                 write!(formatter, "invalid business policy: {reason}")
             }
@@ -612,6 +625,7 @@ pub struct World {
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
+    pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
@@ -662,6 +676,7 @@ impl World {
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
+            firm_production_targets: BTreeMap::new(),
             firm_monthly_accounts: BTreeMap::new(),
             firm_expectations: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
@@ -1141,11 +1156,12 @@ impl World {
             hash.write_u8(match resolution.action() {
                 CorporateAction::SetOverallPolicy => 1,
                 CorporateAction::SetOperationsPolicy => 2,
-                CorporateAction::SetMarketingPolicy => 3,
-                CorporateAction::ProposeMajorInvestment => 4,
-                CorporateAction::ApproveMajorInvestment => 5,
-                CorporateAction::DeclareDividend => 6,
-                CorporateAction::AppointExecutive => 7,
+                CorporateAction::SetProductionTarget => 3,
+                CorporateAction::SetMarketingPolicy => 4,
+                CorporateAction::ProposeMajorInvestment => 5,
+                CorporateAction::ApproveMajorInvestment => 6,
+                CorporateAction::DeclareDividend => 7,
+                CorporateAction::AppointExecutive => 8,
             });
             hash.write_u8(match resolution.status() {
                 ResolutionStatus::Open => 1,
@@ -1227,6 +1243,11 @@ impl World {
     }
 
     fn write_production_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.firm_production_targets.len() as u64);
+        for (firm, batches) in &self.firm_production_targets {
+            hash.write_u32(firm.get());
+            hash.write_u64(*batches);
+        }
         hash.write_u64(self.production_recipes.len() as u64);
         for (id, recipe) in &self.production_recipes {
             hash.write_u32(id.get());

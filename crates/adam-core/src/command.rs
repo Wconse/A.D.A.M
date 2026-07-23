@@ -5,6 +5,11 @@ use crate::{
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
+    SetFirmProductionTarget {
+        actor: ActorId,
+        firm: FirmId,
+        batches: u64,
+    },
     CaptureMonthlyFirmObservation {
         firm: FirmId,
     },
@@ -85,6 +90,11 @@ impl WorldCommand {
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
+            Self::SetFirmProductionTarget {
+                actor,
+                firm,
+                batches,
+            } => world.set_firm_production_target(*actor, *firm, *batches),
             Self::CaptureMonthlyFirmObservation { firm } => {
                 world.capture_monthly_firm_observation(*firm).map(|_| ())
             }

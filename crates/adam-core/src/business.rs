@@ -128,6 +128,7 @@ pub enum CorporateRole {
 pub enum CorporateAction {
     SetOverallPolicy,
     SetOperationsPolicy,
+    SetProductionTarget,
     SetMarketingPolicy,
     ProposeMajorInvestment,
     ApproveMajorInvestment,
@@ -249,7 +250,7 @@ impl World {
                 CorporateAction::SetOverallPolicy | CorporateAction::ProposeMajorInvestment => {
                     has(CorporateRole::ChiefExecutive)
                 }
-                CorporateAction::SetOperationsPolicy => {
+                CorporateAction::SetOperationsPolicy | CorporateAction::SetProductionTarget => {
                     has(CorporateRole::ChiefExecutive) || has(CorporateRole::OperationsManager)
                 }
                 CorporateAction::SetMarketingPolicy => {

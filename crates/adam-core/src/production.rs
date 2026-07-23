@@ -348,10 +348,66 @@ impl World {
         &self.firms
     }
 
+    #[must_use]
+    pub fn firm_production_targets(&self) -> &BTreeMap<FirmId, u64> {
+        &self.firm_production_targets
+    }
+
+    /// Records an authorized monthly batch target without executing production.
+    /// # Errors
+    /// Returns an unknown-reference, authority, or installed-capacity error without mutation.
+    pub fn set_firm_production_target(
+        &mut self,
+        actor: crate::ActorId,
+        firm: FirmId,
+        batches: u64,
+    ) -> Result<(), WorldError> {
+        if !self.actors().contains_key(&actor) {
+            return Err(WorldError::UnknownActor(actor));
+        }
+        let capacity = self
+            .firms
+            .get(&firm)
+            .ok_or(WorldError::UnknownFirm(firm))?
+            .capacity_batches();
+        if !self.can_perform_corporate_action(
+            actor,
+            firm,
+            crate::CorporateAction::SetProductionTarget,
+        ) {
+            return Err(WorldError::UnauthorizedFirmControl { actor, firm });
+        }
+        if batches > capacity {
+            return Err(WorldError::InvalidProductionTarget {
+                firm,
+                target: batches,
+                capacity,
+            });
+        }
+        let previous_batches = self.firm_production_targets.insert(firm, batches);
+        self.events.append(
+            self.date,
+            crate::DomainEvent::FirmProductionTargetSet {
+                actor,
+                firm,
+                previous_batches,
+                target_batches: batches,
+            },
+        );
+        Ok(())
+    }
+
     /// Plans one physical production month without mutating inventories.
     /// # Errors
     /// Returns [`WorldError`] on fixed-point overflow.
     pub fn plan_monthly_production(&self) -> Result<Vec<ProductionPlan>, WorldError> {
+        self.plan_monthly_production_internal(true)
+    }
+
+    fn plan_monthly_production_internal(
+        &self,
+        honor_management_targets: bool,
+    ) -> Result<Vec<ProductionPlan>, WorldError> {
         self.firms
             .values()
             .map(|firm| {
@@ -375,12 +431,24 @@ impl World {
                     .checked_mul(1_000)
                     .ok_or(WorldError::ArithmeticOverflow("firm labor capacity"))?
                     / recipe.labor_milli_worker_months();
-                let mut batches = firm.capacity_batches().min(labor_batches);
-                let mut limiting = if labor_batches < firm.capacity_batches() {
-                    "labor"
+                let target_batches = if honor_management_targets {
+                    self.firm_production_targets
+                        .get(&firm.id())
+                        .copied()
+                        .unwrap_or(firm.capacity_batches())
                 } else {
-                    "capital capacity"
+                    firm.capacity_batches()
                 };
+                let mut batches = firm.capacity_batches();
+                let mut limiting = "capital capacity";
+                if labor_batches < batches {
+                    batches = labor_batches;
+                    limiting = "labor";
+                }
+                if target_batches < batches {
+                    batches = target_batches;
+                    limiting = "management target";
+                }
                 for input in recipe.inputs() {
                     let available = firm
                         .inventories()
@@ -419,7 +487,7 @@ impl World {
         &self,
     ) -> Result<Vec<ProductionAdjustmentProposal>, WorldError> {
         let physical: BTreeMap<FirmId, u64> = self
-            .plan_monthly_production()?
+            .plan_monthly_production_internal(false)?
             .into_iter()
             .map(|plan| (plan.firm(), plan.batches()))
             .collect();
@@ -640,7 +708,10 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Country, CountryId, Good, Population, Region, SimDate, WorldSeed};
+    use crate::{
+        Actor, ActorId, CorporateRole, Country, CountryId, FirmAppointment, Good, Population,
+        Region, SimDate, WorldCommand, WorldSeed,
+    };
     fn world(energy_inventory: u64, workers: u64) -> World {
         let mut w = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
         w.register_country(Country::new(CountryId::new(1), "A").expect("country"))
@@ -660,6 +731,14 @@ mod tests {
             .expect("region"),
         )
         .expect("region");
+        w.register_actor(
+            Actor::new(ActorId::new(1), "Operations", RegionId::new(1), 1980).expect("actor"),
+        )
+        .expect("actor");
+        w.register_actor(
+            Actor::new(ActorId::new(2), "Observer", RegionId::new(1), 1980).expect("actor"),
+        )
+        .expect("actor");
         w.register_production_recipe(
             ProductionRecipe::new(
                 RecipeId::new(1),
@@ -690,6 +769,12 @@ mod tests {
             .expect("firm"),
         )
         .expect("firm");
+        w.register_firm_appointment(FirmAppointment::new(
+            FirmId::new(1),
+            ActorId::new(1),
+            CorporateRole::OperationsManager,
+        ))
+        .expect("appointment");
         w
     }
     #[test]
@@ -704,6 +789,48 @@ mod tests {
         assert_eq!(plan[0].batches(), 2);
         assert_eq!(plan[0].limiting_factor(), "labor");
     }
+    #[test]
+    fn authorized_target_is_replayable_and_binds_execution() {
+        let mut direct = world(20_000, 100);
+        let mut replayed = direct.clone();
+        direct
+            .set_firm_production_target(ActorId::new(1), FirmId::new(1), 2)
+            .expect("authorized target");
+        WorldCommand::SetFirmProductionTarget {
+            actor: ActorId::new(1),
+            firm: FirmId::new(1),
+            batches: 2,
+        }
+        .apply(&mut replayed)
+        .expect("replay target");
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        let plan = direct.plan_monthly_production().expect("plan");
+        assert_eq!(plan[0].batches(), 2);
+        assert_eq!(plan[0].limiting_factor(), "management target");
+        direct.execute_monthly_production().expect("execute");
+        assert_eq!(
+            direct.firms()[&FirmId::new(1)].inventories()[&GoodId::new(1)].get(),
+            20_000
+        );
+    }
+
+    #[test]
+    fn unauthorized_or_impossible_target_is_atomic() {
+        let mut world = world(20_000, 100);
+        let before = world.clone();
+        assert!(matches!(
+            world.set_firm_production_target(ActorId::new(2), FirmId::new(1), 2),
+            Err(WorldError::UnauthorizedFirmControl { .. })
+        ));
+        assert_eq!(world, before);
+        assert!(matches!(
+            world.set_firm_production_target(ActorId::new(1), FirmId::new(1), 101),
+            Err(WorldError::InvalidProductionTarget { .. })
+        ));
+        assert_eq!(world, before);
+    }
+
     #[test]
     fn execution_consumes_inputs_and_credits_output() {
         let mut w = world(6_000, 100);

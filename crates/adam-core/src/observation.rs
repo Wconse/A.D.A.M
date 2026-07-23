@@ -282,6 +282,7 @@ mod tests {
             )
             .expect("expectation update");
 
+        world.firm_production_targets.insert(FirmId::new(1), 1);
         let proposals = world
             .plan_observed_production_adjustments()
             .expect("production advice");
