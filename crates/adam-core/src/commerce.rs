@@ -1,6 +1,7 @@
 use crate::{
-    DemandIntent, FirmManagementDecision, FirmMarketOfferPlan, HouseholdCashflow, MarketClearing,
-    MarketOrder, PayrollRecord, ProductionPlan, SimDate, World, WorldError, clear_local_market,
+    DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
+    HouseholdCashflow, MarketClearing, MarketOrder, PayrollRecord, ProductionPlan, SimDate, World,
+    WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +20,7 @@ pub struct MonthlyEconomicCycleResult {
     pub household_cashflows: Vec<HouseholdCashflow>,
     pub commercial: MonthlyCommercialCycleResult,
     pub management_decisions: Vec<FirmManagementDecision>,
+    pub emergency_relief: Vec<EmergencyReliefPayment>,
 }
 
 impl World {
@@ -54,6 +56,7 @@ impl World {
             })
             .collect();
         let clearing = clear_local_market(&orders, &offers)?;
+        next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
         let firms: Vec<_> = next.firms.keys().copied().collect();
         for firm in firms {
@@ -119,6 +122,7 @@ impl World {
         next.update_monthly_cohort_health()?;
         next.update_monthly_cohort_experience()?;
         next.accumulate_monthly_social_stress()?;
+        let emergency_relief = next.execute_observed_emergency_relief()?;
         next.events.append(
             completed_date,
             crate::DomainEvent::MonthlyEconomicCycleCompleted {
@@ -138,6 +142,7 @@ impl World {
             household_cashflows,
             commercial,
             management_decisions,
+            emergency_relief,
         };
         *self = next;
         Ok(result)
@@ -149,10 +154,11 @@ mod tests {
     use super::*;
     use crate::{
         Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget,
-        CorporateRole, Country, CountryId, DemandBasis, EducationLevel, EmploymentStatus, Firm,
-        FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort, HouseholdType, Money,
-        NeedProfileId, NeedTier, OwnershipStake, Population, ProductionRecipe, QuantityMilli,
-        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        CorporateRole, Country, CountryId, CountryIndicators, DemandBasis, EducationLevel,
+        EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort,
+        HouseholdType, Money, NeedProfileId, NeedTier, OwnershipStake, Population, PowerNode,
+        PowerNodeId, PowerNodeKind, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId,
+        SimDate, WorldCommand, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -389,6 +395,114 @@ mod tests {
             .count();
         assert_eq!(monthly_cycles, 600);
         assert_eq!(annual_closures, 50);
+    }
+
+    fn relief_world(with_supply: bool) -> World {
+        let mut world = commercial_world(true);
+        world.countries.insert(
+            CountryId::new(1),
+            Country::new(CountryId::new(1), "A")
+                .expect("country")
+                .with_indicators(CountryIndicators::new(
+                    Money::from_minor_units(100),
+                    Money::default(),
+                    BasisPoints::HALF,
+                    BasisPoints::HALF,
+                )),
+        );
+        world.cohorts.insert(
+            CohortId::new(1),
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(1),
+                1,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Unemployed,
+                Money::default(),
+                Money::default(),
+                Money::default(),
+            )
+            .expect("cohort"),
+        );
+        world
+            .register_power_node(
+                PowerNode::new(
+                    PowerNodeId::new(1),
+                    CountryId::new(1),
+                    "Emergency cabinet",
+                    PowerNodeKind::PoliticalOffice,
+                    Some(ActorId::new(1)),
+                )
+                .expect("office"),
+            )
+            .expect("office registration");
+        if !with_supply {
+            world
+                .set_firm_production_target(ActorId::new(1), FirmId::new(1), 0)
+                .expect("zero target");
+        }
+        world
+    }
+
+    #[test]
+    fn political_office_funds_available_survival_goods_for_next_month() {
+        let mut direct = relief_world(true);
+        let mut replayed = direct.clone();
+        let first = direct
+            .execute_monthly_economic_cycle()
+            .expect("first month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed month");
+
+        assert_eq!(first.emergency_relief.len(), 1);
+        assert_eq!(
+            first.emergency_relief[0].amount,
+            Money::from_minor_units(10)
+        );
+        assert_eq!(
+            direct.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(10)
+        );
+        assert_eq!(
+            direct.countries()[&CountryId::new(1)]
+                .indicators()
+                .treasury(),
+            Money::from_minor_units(90)
+        );
+        assert_eq!(direct, replayed);
+
+        let second = direct
+            .execute_monthly_economic_cycle()
+            .expect("second month");
+        assert_eq!(second.commercial.clearing.fills.len(), 1);
+        assert!(second.emergency_relief.is_empty());
+        assert_eq!(
+            direct.cohort_health()[&CohortId::new(1)]
+                .survival_fulfillment()
+                .get(),
+            BasisPoints::MAX
+        );
+    }
+
+    #[test]
+    fn relief_does_not_transfer_cash_when_no_survival_supply_exists() {
+        let mut world = relief_world(false);
+        let result = world
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        assert!(result.emergency_relief.is_empty());
+        assert!(world.monthly_affordability_gaps().is_empty());
+        assert_eq!(
+            world.countries()[&CountryId::new(1)]
+                .indicators()
+                .treasury(),
+            Money::from_minor_units(100)
+        );
     }
 
     #[test]

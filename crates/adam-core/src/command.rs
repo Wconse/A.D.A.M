@@ -10,6 +10,12 @@ pub enum WorldCommand {
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
     ExecuteObservedFirmManagement,
+    ExecuteObservedEmergencyRelief,
+    FundEmergencyRelief {
+        actor: ActorId,
+        cohort: crate::CohortId,
+        amount: crate::Money,
+    },
     SetFirmProductionTarget {
         actor: ActorId,
         firm: FirmId,
@@ -94,6 +100,7 @@ impl WorldCommand {
     /// Applies the same deterministic command regardless of player or AI origin.
     /// # Errors
     /// Returns [`WorldError`] if the authoritative transition cannot complete.
+    #[allow(clippy::too_many_lines)]
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
             Self::AdvanceEconomicYear => world.advance_economic_year().map(|_| ()),
@@ -105,6 +112,14 @@ impl WorldCommand {
             Self::ExecuteObservedFirmManagement => {
                 world.execute_observed_firm_management().map(|_| ())
             }
+            Self::ExecuteObservedEmergencyRelief => {
+                world.execute_observed_emergency_relief().map(|_| ())
+            }
+            Self::FundEmergencyRelief {
+                actor,
+                cohort,
+                amount,
+            } => world.fund_emergency_relief(*actor, *cohort, *amount),
             Self::SetFirmProductionTarget {
                 actor,
                 firm,

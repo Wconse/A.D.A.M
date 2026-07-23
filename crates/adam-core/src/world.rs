@@ -391,6 +391,12 @@ pub enum WorldError {
     },
     AnnualClosureAlreadyExecuted(i32),
     InsufficientHouseholdCash(CohortId),
+    InsufficientTreasury(CountryId),
+    InvalidEmergencyRelief(&'static str),
+    UnauthorizedGovernmentAction {
+        actor: ActorId,
+        country: CountryId,
+    },
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
     InvalidProductionTarget {
@@ -502,6 +508,18 @@ impl fmt::Display for WorldError {
             Self::UnknownCohort(id) => write!(formatter, "unknown cohort {id}"),
             Self::InsufficientHouseholdCash(id) => {
                 write!(formatter, "cohort {id} has insufficient cash")
+            }
+            Self::InsufficientTreasury(id) => {
+                write!(formatter, "country {id} has insufficient treasury cash")
+            }
+            Self::InvalidEmergencyRelief(reason) => {
+                write!(formatter, "invalid emergency relief: {reason}")
+            }
+            Self::UnauthorizedGovernmentAction { actor, country } => {
+                write!(
+                    formatter,
+                    "actor {actor} cannot authorize relief in country {country}"
+                )
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
             Self::InvalidMarketClearing(reason) => {
@@ -642,6 +660,7 @@ pub struct World {
     pub(crate) date: SimDate,
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
     pub(crate) last_firm_management_date: Option<SimDate>,
+    pub(crate) last_emergency_relief_date: Option<SimDate>,
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
     pub(crate) last_cohort_health_date: Option<SimDate>,
@@ -676,6 +695,7 @@ pub struct World {
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
+    pub(crate) monthly_affordability_gaps: BTreeMap<CohortId, Money>,
     pub(crate) deprivation_pressure: BTreeMap<CohortId, BasisPoints>,
     pub(crate) social_stress: BTreeMap<CohortId, crate::SocialStress>,
     pub(crate) social_stress_memory: BTreeMap<CohortId, crate::SocialStressMemory>,
@@ -701,6 +721,7 @@ impl World {
             date: start_date,
             last_commercial_cycle_date: None,
             last_firm_management_date: None,
+            last_emergency_relief_date: None,
             last_payroll_date: None,
             last_household_cashflow_date: None,
             last_cohort_health_date: None,
@@ -735,6 +756,7 @@ impl World {
             regional_prices: BTreeMap::new(),
             monthly_consumption: BTreeMap::new(),
             unmet_demand: BTreeMap::new(),
+            monthly_affordability_gaps: BTreeMap::new(),
             deprivation_pressure: BTreeMap::new(),
             social_stress: BTreeMap::new(),
             social_stress_memory: BTreeMap::new(),
@@ -943,6 +965,11 @@ impl World {
             });
             hash.write_u64(q.get());
         }
+        hash.write_u64(self.monthly_affordability_gaps.len() as u64);
+        for (cohort, amount) in &self.monthly_affordability_gaps {
+            hash.write_u32(cohort.get());
+            hash.write_i64(amount.minor_units());
+        }
         hash.write_u64(self.deprivation_pressure.len() as u64);
         for (cohort, value) in &self.deprivation_pressure {
             hash.write_u32(cohort.get());
@@ -994,6 +1021,7 @@ impl World {
         for date in [
             self.last_commercial_cycle_date,
             self.last_firm_management_date,
+            self.last_emergency_relief_date,
             self.last_payroll_date,
             self.last_household_cashflow_date,
             self.last_cohort_health_date,
