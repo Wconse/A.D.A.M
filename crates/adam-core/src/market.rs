@@ -25,10 +25,28 @@ pub struct MarketFill {
     pub quantity: QuantityMilli,
     pub spend: Money,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MarketOfferOutcome {
+    pub seller: FirmId,
+    pub region: RegionId,
+    pub good: GoodId,
+    pub unit_price: Money,
+    pub offered: QuantityMilli,
+    pub sold: QuantityMilli,
+    pub unsold: QuantityMilli,
+    pub unmet_market_demand: QuantityMilli,
+}
+impl MarketOfferOutcome {
+    #[must_use]
+    pub const fn sold_out_while_demand_remained(self) -> bool {
+        self.offered.get() > 0 && self.unsold.get() == 0 && self.unmet_market_demand.get() > 0
+    }
+}
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketClearing {
     pub fills: Vec<MarketFill>,
     pub unmet: BTreeUnmet,
+    pub offer_outcomes: Vec<MarketOfferOutcome>,
 }
 pub type BTreeUnmet = std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>;
 /// Clears local goods markets deterministically by region/good, then order ID, price, and seller ID.
@@ -42,9 +60,17 @@ pub fn clear_local_market(
     orders.sort_by_key(|o| (o.region, o.good, o.tier, o.buyer));
     let mut supply = offers.to_vec();
     supply.sort_by_key(|o| (o.region, o.good, o.unit_price.minor_units(), o.seller));
+    if supply
+        .iter()
+        .any(|offer| offer.unit_price.minor_units() <= 0)
+    {
+        return Err(WorldError::InvalidPrice);
+    }
     let mut remaining: Vec<u64> = supply.iter().map(|o| o.quantity.get()).collect();
     let mut fills = Vec::new();
     let mut unmet = BTreeUnmet::new();
+    let mut unmet_by_market: std::collections::BTreeMap<(RegionId, GoodId), u64> =
+        std::collections::BTreeMap::new();
     for order in orders {
         let mut need = order.quantity.get();
         let mut budget = order.max_spend.minor_units();
@@ -56,9 +82,6 @@ pub fn clear_local_market(
                 continue;
             }
             let price = offer.unit_price.minor_units();
-            if price <= 0 {
-                return Err(WorldError::InvalidPrice);
-            }
             let affordable = u64::try_from(
                 (i128::from(budget) * i128::from(QuantityMilli::SCALE) / i128::from(price)).max(0),
             )
@@ -88,15 +111,135 @@ pub fn clear_local_market(
                 (order.buyer, order.good, order.tier),
                 QuantityMilli::new(need),
             );
+            let market = unmet_by_market
+                .entry((order.region, order.good))
+                .or_default();
+            *market = market
+                .checked_add(need)
+                .ok_or(WorldError::ArithmeticOverflow("market unmet demand"))?;
         }
     }
-    Ok(MarketClearing { fills, unmet })
+    let offer_outcomes = supply
+        .iter()
+        .zip(remaining)
+        .map(|(offer, unsold)| MarketOfferOutcome {
+            seller: offer.seller,
+            region: offer.region,
+            good: offer.good,
+            unit_price: offer.unit_price,
+            offered: offer.quantity,
+            sold: QuantityMilli::new(offer.quantity.get() - unsold),
+            unsold: QuantityMilli::new(unsold),
+            unmet_market_demand: QuantityMilli::new(
+                unmet_by_market
+                    .get(&(offer.region, offer.good))
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+        })
+        .collect();
+    Ok(MarketClearing {
+        fills,
+        unmet,
+        offer_outcomes,
+    })
 }
+fn record_market_settlement_evidence(
+    world: &mut crate::World,
+    clearing: &MarketClearing,
+) -> Result<(), WorldError> {
+    for outcome in &clearing.offer_outcomes {
+        world
+            .monthly_firm_market_outcomes
+            .entry(outcome.seller)
+            .or_default()
+            .push(*outcome);
+    }
+    let mut revenues: std::collections::BTreeMap<FirmId, Money> = std::collections::BTreeMap::new();
+    for fill in &clearing.fills {
+        let current = revenues.get(&fill.seller).copied().unwrap_or_default();
+        revenues.insert(
+            fill.seller,
+            Money::from_minor_units(
+                current
+                    .minor_units()
+                    .checked_add(fill.spend.minor_units())
+                    .ok_or(WorldError::ArithmeticOverflow("seller revenue aggregation"))?,
+            ),
+        );
+    }
+    for (firm, revenue) in revenues {
+        world.record_firm_sale(firm, revenue)?;
+    }
+    for fill in &clearing.fills {
+        world.events.append(
+            world.date,
+            crate::DomainEvent::MarketTrade {
+                buyer: fill.buyer,
+                seller: fill.seller,
+                good: fill.good,
+                quantity: fill.quantity,
+                spend: fill.spend,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn validate_market_clearing(
+    world: &crate::World,
+    clearing: &MarketClearing,
+) -> Result<(), WorldError> {
+    let mut outcome_sales: std::collections::BTreeMap<(FirmId, GoodId), u64> =
+        std::collections::BTreeMap::new();
+    for outcome in &clearing.offer_outcomes {
+        let definition = world
+            .firms
+            .get(&outcome.seller)
+            .ok_or(WorldError::UnknownFirm(outcome.seller))?;
+        if definition.region() != outcome.region
+            || outcome.offered.get()
+                != outcome
+                    .sold
+                    .get()
+                    .checked_add(outcome.unsold.get())
+                    .ok_or(WorldError::ArithmeticOverflow("market offer outcome"))?
+        {
+            return Err(WorldError::InvalidMarketClearing(
+                "offer outcomes must conserve quantity in the seller region",
+            ));
+        }
+        if outcome.sold.get() > 0 {
+            let sold = outcome_sales
+                .entry((outcome.seller, outcome.good))
+                .or_default();
+            *sold = sold
+                .checked_add(outcome.sold.get())
+                .ok_or(WorldError::ArithmeticOverflow("market outcome sales"))?;
+        }
+    }
+    let mut fill_sales: std::collections::BTreeMap<(FirmId, GoodId), u64> =
+        std::collections::BTreeMap::new();
+    for fill in &clearing.fills {
+        let sold = fill_sales.entry((fill.seller, fill.good)).or_default();
+        *sold = sold
+            .checked_add(fill.quantity.get())
+            .ok_or(WorldError::ArithmeticOverflow("market fill sales"))?;
+    }
+    if outcome_sales != fill_sales {
+        return Err(WorldError::InvalidMarketClearing(
+            "offer outcomes must match settled fills",
+        ));
+    }
+    Ok(())
+}
+
 impl crate::World {
     /// Atomically settles pre-cleared market fills against household wealth and firm inventories.
     /// # Errors
     /// Returns an error without mutation for insufficient cash, stock, or arithmetic overflow.
     pub fn settle_local_market(&mut self, clearing: &MarketClearing) -> Result<(), WorldError> {
+        validate_market_clearing(self, clearing)?;
         let mut cohorts = self.cohorts.clone();
         let mut firms = self.firms.clone();
         for fill in &clearing.fills {
@@ -167,35 +310,7 @@ impl crate::World {
         self.monthly_consumption = consumption;
         self.unmet_demand = clearing.unmet.clone();
         self.deprivation_pressure = pressure;
-        let mut revenues: std::collections::BTreeMap<FirmId, Money> =
-            std::collections::BTreeMap::new();
-        for fill in &clearing.fills {
-            let current = revenues.get(&fill.seller).copied().unwrap_or_default();
-            revenues.insert(
-                fill.seller,
-                Money::from_minor_units(
-                    current
-                        .minor_units()
-                        .checked_add(fill.spend.minor_units())
-                        .ok_or(WorldError::ArithmeticOverflow("seller revenue aggregation"))?,
-                ),
-            );
-        }
-        for (firm, revenue) in revenues {
-            self.record_firm_sale(firm, revenue)?;
-        }
-        for fill in &clearing.fills {
-            self.events.append(
-                self.date,
-                crate::DomainEvent::MarketTrade {
-                    buyer: fill.buyer,
-                    seller: fill.seller,
-                    good: fill.good,
-                    quantity: fill.quantity,
-                    spend: fill.spend,
-                },
-            );
-        }
+        record_market_settlement_evidence(self, clearing)?;
         Ok(())
     }
 }
@@ -222,6 +337,98 @@ impl crate::World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AgeBand, ConsumptionProfile, ConsumptionTarget, Country, CountryId, DemandBasis,
+        EducationLevel, EmploymentStatus, Firm, Good, HouseholdCohort, HouseholdType,
+        NeedProfileId, Population, ProductionRecipe, RecipeId, Region, SimDate, World, WorldSeed,
+    };
+    use std::collections::BTreeMap;
+
+    fn settlement_world() -> World {
+        let mut world = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country");
+        world
+            .register_good(Good::new(GoodId::new(1), "Food").expect("good"))
+            .expect("good");
+        world
+            .register_consumption_profile(
+                ConsumptionProfile::new(
+                    NeedProfileId::new(1),
+                    "Households",
+                    vec![ConsumptionTarget::new(
+                        GoodId::new(1),
+                        NeedTier::Survival,
+                        DemandBasis::PerPerson,
+                        QuantityMilli::new(1_000),
+                    )],
+                )
+                .expect("profile"),
+            )
+            .expect("profile");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(1),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Food recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(1),
+                    "Farm",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::default(),
+                    BTreeMap::from([(GoodId::new(1), QuantityMilli::new(1_000))]),
+                )
+                .expect("firm"),
+            )
+            .expect("firm");
+        world
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    CohortId::new(1),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(1),
+                    1,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::default(),
+                    Money::from_minor_units(100),
+                    Money::default(),
+                )
+                .expect("cohort"),
+            )
+            .expect("cohort");
+        world
+    }
+
     #[test]
     fn scarce_supply_fills_buyers_in_canonical_order() {
         let orders = [
@@ -254,6 +461,45 @@ mod tests {
         assert_eq!(
             result.unmet[&(CohortId::new(2), GoodId::new(1), NeedTier::Survival)].get(),
             400
+        );
+        assert_eq!(result.offer_outcomes.len(), 1);
+        assert_eq!(result.offer_outcomes[0].sold.get(), 1_000);
+        assert_eq!(result.offer_outcomes[0].unsold.get(), 0);
+        assert_eq!(result.offer_outcomes[0].unmet_market_demand.get(), 400);
+        assert!(result.offer_outcomes[0].sold_out_while_demand_remained());
+    }
+    #[test]
+    fn settlement_carries_offer_outcome_into_firm_history() {
+        let mut world = settlement_world();
+        let clearing = clear_local_market(
+            &[MarketOrder {
+                buyer: CohortId::new(1),
+                tier: NeedTier::Survival,
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1_400),
+                max_spend: Money::from_minor_units(100),
+            }],
+            &[MarketOffer {
+                seller: FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1_000),
+                unit_price: Money::from_minor_units(10),
+            }],
+        )
+        .expect("clearing");
+        world.settle_local_market(&clearing).expect("settlement");
+        assert!(
+            world.monthly_firm_market_outcomes()[&FirmId::new(1)][0]
+                .sold_out_while_demand_remained()
+        );
+        world
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("capture");
+        assert!(
+            world.firm_operating_history()[&FirmId::new(1)][0].market_outcomes()[0]
+                .sold_out_while_demand_remained()
         );
     }
 }

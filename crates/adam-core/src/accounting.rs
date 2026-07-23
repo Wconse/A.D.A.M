@@ -190,6 +190,7 @@ impl World {
     }
     pub fn reset_monthly_firm_accounts(&mut self) {
         self.firm_monthly_accounts.clear();
+        self.monthly_firm_market_outcomes.clear();
     }
     /// Replaces the firm's explicit management forecast without changing physical or monetary state.
     /// # Errors

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{FirmId, GoodId, Money, SimDate, World, WorldError};
+use crate::{FirmId, GoodId, MarketOfferOutcome, Money, SimDate, World, WorldError};
 
 pub const FIRM_OBSERVATION_HISTORY_LIMIT: usize = 12;
 
@@ -10,6 +10,7 @@ pub struct FirmOperatingObservation {
     sales_revenue: Money,
     produced_batches: u64,
     input_prices: BTreeMap<GoodId, Money>,
+    market_outcomes: Vec<MarketOfferOutcome>,
 }
 impl FirmOperatingObservation {
     #[must_use]
@@ -27,6 +28,10 @@ impl FirmOperatingObservation {
     #[must_use]
     pub const fn input_prices(&self) -> &BTreeMap<GoodId, Money> {
         &self.input_prices
+    }
+    #[must_use]
+    pub fn market_outcomes(&self) -> &[MarketOfferOutcome] {
+        &self.market_outcomes
     }
 }
 
@@ -66,11 +71,26 @@ impl World {
             .get(&firm)
             .copied()
             .unwrap_or_default();
+        let mut market_outcomes = self
+            .monthly_firm_market_outcomes
+            .get(&firm)
+            .cloned()
+            .unwrap_or_default();
+        market_outcomes.sort_by_key(|outcome| {
+            (
+                outcome.region,
+                outcome.good,
+                outcome.unit_price,
+                outcome.seller,
+                outcome.offered,
+            )
+        });
         let observation = FirmOperatingObservation {
             date: self.date,
             sales_revenue: accounts.sales_revenue(),
             produced_batches: accounts.produced_batches(),
             input_prices,
+            market_outcomes,
         };
         let history = self.firm_operating_history.entry(firm).or_default();
         if history.len() == FIRM_OBSERVATION_HISTORY_LIMIT {
@@ -88,6 +108,7 @@ impl World {
                     .iter()
                     .map(|(good, price)| (*good, *price))
                     .collect(),
+                market_outcomes: observation.market_outcomes().to_vec(),
             },
         );
         Ok(observation)
@@ -159,14 +180,18 @@ impl World {
     pub fn firm_operating_history(&self) -> &BTreeMap<FirmId, Vec<FirmOperatingObservation>> {
         &self.firm_operating_history
     }
+    #[must_use]
+    pub fn monthly_firm_market_outcomes(&self) -> &BTreeMap<FirmId, Vec<MarketOfferOutcome>> {
+        &self.monthly_firm_market_outcomes
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        Country, CountryId, Firm, Good, GoodId, Population, ProductionRecipe, QuantityMilli,
-        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        Country, CountryId, Firm, Good, GoodId, MarketOfferOutcome, Population, ProductionRecipe,
+        QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
     };
 
     fn world() -> World {
@@ -223,6 +248,19 @@ mod tests {
     #[test]
     fn history_is_bounded_and_capture_is_replayable() {
         let mut direct = world();
+        direct.monthly_firm_market_outcomes.insert(
+            FirmId::new(1),
+            vec![MarketOfferOutcome {
+                seller: FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                unit_price: Money::from_minor_units(10),
+                offered: QuantityMilli::new(1_000),
+                sold: QuantityMilli::new(1_000),
+                unsold: QuantityMilli::default(),
+                unmet_market_demand: QuantityMilli::new(400),
+            }],
+        );
         for _ in 0..FIRM_OBSERVATION_HISTORY_LIMIT {
             direct
                 .capture_monthly_firm_observation(FirmId::new(1))
@@ -240,6 +278,10 @@ mod tests {
         assert_eq!(
             direct.firm_operating_history()[&FirmId::new(1)].len(),
             FIRM_OBSERVATION_HISTORY_LIMIT
+        );
+        assert!(
+            direct.firm_operating_history()[&FirmId::new(1)][0].market_outcomes()[0]
+                .sold_out_while_demand_remained()
         );
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());

@@ -11,6 +11,7 @@ pub enum DomainEvent {
         sales_revenue: Money,
         produced_batches: u64,
         input_prices: Vec<(GoodId, Money)>,
+        market_outcomes: Vec<crate::MarketOfferOutcome>,
     },
     FirmExpectationsUpdated {
         firm: FirmId,

@@ -383,6 +383,7 @@ pub enum WorldError {
     InvalidCohort(&'static str),
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
+    InvalidMarketClearing(&'static str),
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
@@ -492,6 +493,9 @@ impl fmt::Display for WorldError {
                 write!(formatter, "cohort {id} has insufficient cash")
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
+            Self::InvalidMarketClearing(reason) => {
+                write!(formatter, "invalid market clearing: {reason}")
+            }
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidFirmExpectations(reason) => {
                 write!(formatter, "invalid firm expectations: {reason}")
@@ -611,6 +615,7 @@ pub struct World {
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
+    pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
@@ -660,6 +665,7 @@ impl World {
             firm_monthly_accounts: BTreeMap::new(),
             firm_expectations: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
+            monthly_firm_market_outcomes: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -914,6 +920,20 @@ impl World {
         }
     }
 
+    fn write_market_offer_outcome_fingerprint(
+        hash: &mut StableHasher,
+        outcome: crate::MarketOfferOutcome,
+    ) {
+        hash.write_u32(outcome.seller.get());
+        hash.write_u32(outcome.region.get());
+        hash.write_u32(outcome.good.get());
+        hash.write_i64(outcome.unit_price.minor_units());
+        hash.write_u64(outcome.offered.get());
+        hash.write_u64(outcome.sold.get());
+        hash.write_u64(outcome.unsold.get());
+        hash.write_u64(outcome.unmet_market_demand.get());
+    }
+
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.firm_expectations.len() as u64);
         for (firm, row) in &self.firm_expectations {
@@ -938,6 +958,18 @@ impl World {
                     hash.write_u32(good.get());
                     hash.write_i64(price.minor_units());
                 }
+                hash.write_u64(observation.market_outcomes().len() as u64);
+                for outcome in observation.market_outcomes() {
+                    Self::write_market_offer_outcome_fingerprint(hash, *outcome);
+                }
+            }
+        }
+        hash.write_u64(self.monthly_firm_market_outcomes.len() as u64);
+        for (firm, outcomes) in &self.monthly_firm_market_outcomes {
+            hash.write_u32(firm.get());
+            hash.write_u64(outcomes.len() as u64);
+            for outcome in outcomes {
+                Self::write_market_offer_outcome_fingerprint(hash, *outcome);
             }
         }
         hash.write_u64(self.firm_monthly_accounts.len() as u64);
