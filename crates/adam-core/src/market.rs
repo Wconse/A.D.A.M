@@ -8,6 +8,33 @@ pub struct MarketOffer {
     pub unit_price: Money,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FirmMarketOfferPlan {
+    pub seller: FirmId,
+    pub region: RegionId,
+    pub good: GoodId,
+    pub inventory: QuantityMilli,
+    pub average_monthly_sales: QuantityMilli,
+    pub retained_inventory: QuantityMilli,
+    pub offered: QuantityMilli,
+    pub unit_price: Money,
+}
+impl FirmMarketOfferPlan {
+    #[must_use]
+    pub const fn market_offer(self) -> Option<MarketOffer> {
+        if self.offered.get() == 0 {
+            None
+        } else {
+            Some(MarketOffer {
+                seller: self.seller,
+                region: self.region,
+                good: self.good,
+                quantity: self.offered,
+                unit_price: self.unit_price,
+            })
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MarketOrder {
     pub buyer: CohortId,
     pub tier: NeedTier,
@@ -49,6 +76,98 @@ pub struct MarketClearing {
     pub offer_outcomes: Vec<MarketOfferOutcome>,
 }
 pub type BTreeUnmet = std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>;
+impl crate::World {
+    /// Derives concrete seller offers from output inventory, observed sales, and firm policy.
+    /// # Errors
+    /// Returns an error for missing reference prices or fixed-point overflow.
+    pub fn plan_firm_market_offers(&self) -> Result<Vec<FirmMarketOfferPlan>, WorldError> {
+        self.firms
+            .values()
+            .filter_map(|firm| {
+                self.firm_policies
+                    .get(&firm.id())
+                    .map(|policy| (firm, policy))
+            })
+            .map(|(firm, policy)| {
+                let recipe = self
+                    .production_recipes
+                    .get(&firm.recipe())
+                    .ok_or(WorldError::UnknownRecipe(firm.recipe()))?;
+                let good = recipe.output_good();
+                let inventory = firm.inventories().get(&good).copied().unwrap_or_default();
+                let average_sales = average_observed_firm_sales(self, firm.id(), good)?;
+                let retained = u128::from(average_sales.get())
+                    .checked_mul(u128::from(policy.inventory_buffer_days()))
+                    .ok_or(WorldError::ArithmeticOverflow("inventory buffer target"))?
+                    .div_ceil(30);
+                let retained = u64::try_from(retained)
+                    .map_err(|_| WorldError::ArithmeticOverflow("inventory buffer target"))?
+                    .min(inventory.get());
+                let reference = self
+                    .regional_prices
+                    .get(&(firm.region(), good))
+                    .copied()
+                    .ok_or(WorldError::MissingRegionalPrice {
+                        region: firm.region(),
+                        good,
+                    })?;
+                let multiplier = 10_000_i128 + i128::from(policy.price_markup().get());
+                let unit_price = i64::try_from(
+                    i128::from(reference.minor_units())
+                        .checked_mul(multiplier)
+                        .ok_or(WorldError::ArithmeticOverflow("seller offer price"))?
+                        / 10_000,
+                )
+                .map_err(|_| WorldError::ArithmeticOverflow("seller offer price"))?;
+                Ok(FirmMarketOfferPlan {
+                    seller: firm.id(),
+                    region: firm.region(),
+                    good,
+                    inventory,
+                    average_monthly_sales: average_sales,
+                    retained_inventory: QuantityMilli::new(retained),
+                    offered: QuantityMilli::new(inventory.get() - retained),
+                    unit_price: Money::from_minor_units(unit_price),
+                })
+            })
+            .collect()
+    }
+}
+
+fn average_observed_firm_sales(
+    world: &crate::World,
+    firm: FirmId,
+    good: GoodId,
+) -> Result<QuantityMilli, WorldError> {
+    let Some(history) = world.firm_operating_history.get(&firm) else {
+        return Ok(QuantityMilli::default());
+    };
+    let mut periods = 0_u128;
+    let mut total = 0_u128;
+    for observation in history {
+        let outcomes: Vec<_> = observation
+            .market_outcomes()
+            .iter()
+            .filter(|outcome| outcome.good == good)
+            .collect();
+        if outcomes.is_empty() {
+            continue;
+        }
+        periods += 1;
+        for outcome in outcomes {
+            total = total
+                .checked_add(u128::from(outcome.sold.get()))
+                .ok_or(WorldError::ArithmeticOverflow("observed seller sales"))?;
+        }
+    }
+    if periods == 0 {
+        return Ok(QuantityMilli::default());
+    }
+    Ok(QuantityMilli::new(u64::try_from(total / periods).map_err(
+        |_| WorldError::ArithmeticOverflow("average seller sales"),
+    )?))
+}
+
 /// Clears local goods markets deterministically by region/good, then order ID, price, and seller ID.
 /// # Errors
 /// Returns an error for non-positive prices or arithmetic overflow.
@@ -338,9 +457,10 @@ impl crate::World {
 mod tests {
     use super::*;
     use crate::{
-        AgeBand, ConsumptionProfile, ConsumptionTarget, Country, CountryId, DemandBasis,
-        EducationLevel, EmploymentStatus, Firm, Good, HouseholdCohort, HouseholdType,
-        NeedProfileId, Population, ProductionRecipe, RecipeId, Region, SimDate, World, WorldSeed,
+        AgeBand, BasisPoints, ConsumptionProfile, ConsumptionTarget, Country, CountryId,
+        DemandBasis, EducationLevel, EmploymentStatus, Firm, FirmPolicy, Good, HouseholdCohort,
+        HouseholdType, NeedProfileId, Population, ProductionRecipe, RecipeId, Region, SimDate,
+        World, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -468,6 +588,53 @@ mod tests {
         assert_eq!(result.offer_outcomes[0].unmet_market_demand.get(), 400);
         assert!(result.offer_outcomes[0].sold_out_while_demand_remained());
     }
+    #[test]
+    fn inventory_policy_and_markup_form_a_concrete_offer() {
+        let mut world = settlement_world();
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(10),
+            )
+            .expect("price");
+        world.firm_policies.insert(
+            FirmId::new(1),
+            FirmPolicy::new(
+                30,
+                BasisPoints::new(1_000).expect("markup"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+            )
+            .expect("policy"),
+        );
+        world.monthly_firm_market_outcomes.insert(
+            FirmId::new(1),
+            vec![MarketOfferOutcome {
+                seller: FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                unit_price: Money::from_minor_units(10),
+                offered: QuantityMilli::new(400),
+                sold: QuantityMilli::new(400),
+                unsold: QuantityMilli::default(),
+                unmet_market_demand: QuantityMilli::default(),
+            }],
+        );
+        world
+            .capture_monthly_firm_observation(FirmId::new(1))
+            .expect("capture");
+
+        let plans = world.plan_firm_market_offers().expect("offer plans");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].average_monthly_sales, QuantityMilli::new(400));
+        assert_eq!(plans[0].retained_inventory, QuantityMilli::new(400));
+        assert_eq!(plans[0].offered, QuantityMilli::new(600));
+        assert_eq!(plans[0].unit_price, Money::from_minor_units(11));
+        assert_eq!(plans[0].market_offer().expect("offer").quantity.get(), 600);
+    }
+
     #[test]
     fn settlement_carries_offer_outcome_into_firm_history() {
         let mut world = settlement_world();

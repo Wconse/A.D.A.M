@@ -54,7 +54,8 @@ pub use logistics::{
     plan_multileg_shipment,
 };
 pub use market::{
-    MarketClearing, MarketFill, MarketOffer, MarketOfferOutcome, MarketOrder, clear_local_market,
+    FirmMarketOfferPlan, MarketClearing, MarketFill, MarketOffer, MarketOfferOutcome, MarketOrder,
+    clear_local_market,
 };
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use production::{
@@ -72,4 +73,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 12;
+pub const SIMULATION_VERSION: u32 = 13;
