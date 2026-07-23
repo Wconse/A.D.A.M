@@ -39,11 +39,13 @@ impl FirmMonthlyAccounts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FirmExpectationSource {
     Management,
+    ObservedOperations,
 }
 impl FirmExpectationSource {
     pub(crate) const fn fingerprint_tag(self) -> u8 {
         match self {
             Self::Management => 1,
+            Self::ObservedOperations => 2,
         }
     }
 }
@@ -196,6 +198,77 @@ impl World {
         );
         Ok(())
     }
+    /// Derives a forecast from realized sales, current input prices, and the current physical production plan.
+    /// No financing is assumed until concrete financing offers exist in the world model.
+    /// # Errors
+    /// Returns an error for an unknown firm, invalid horizon, missing input price, or arithmetic overflow.
+    pub fn derive_firm_expectations_from_observations(
+        &mut self,
+        firm: FirmId,
+        horizon_months: u16,
+    ) -> Result<FirmExpectations, WorldError> {
+        if horizon_months == 0 {
+            return Err(WorldError::InvalidFirmExpectations(
+                "forecast horizon must be positive",
+            ));
+        }
+        let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
+        let region = definition.region();
+        let recipe = self
+            .production_recipes
+            .get(&definition.recipe())
+            .ok_or(WorldError::UnknownRecipe(definition.recipe()))?;
+        let planned_batches = self
+            .plan_monthly_production()?
+            .into_iter()
+            .find(|plan| plan.firm() == firm)
+            .ok_or(WorldError::UnknownFirm(firm))?
+            .batches();
+        let monthly_sales = self
+            .firm_monthly_accounts
+            .get(&firm)
+            .map_or(0_i64, |accounts| accounts.sales_revenue().minor_units());
+        let expected_sales = i128::from(monthly_sales)
+            .checked_mul(i128::from(horizon_months))
+            .ok_or(WorldError::ArithmeticOverflow("expected sales revenue"))?;
+        let mut expected_inputs = 0_i128;
+        for input in recipe.inputs() {
+            let price = self
+                .regional_prices
+                .get(&(region, input.good()))
+                .ok_or(WorldError::MissingRegionalPrice {
+                    region,
+                    good: input.good(),
+                })?
+                .minor_units();
+            let quantity = i128::from(input.quantity_per_batch().get())
+                .checked_mul(i128::from(planned_batches))
+                .and_then(|value| value.checked_mul(i128::from(horizon_months)))
+                .ok_or(WorldError::ArithmeticOverflow("expected input quantity"))?;
+            let cost = i128::from(price)
+                .checked_mul(quantity)
+                .ok_or(WorldError::ArithmeticOverflow("expected input cost"))?
+                / i128::from(crate::QuantityMilli::SCALE);
+            expected_inputs = expected_inputs
+                .checked_add(cost)
+                .ok_or(WorldError::ArithmeticOverflow("expected input costs"))?;
+        }
+        let expectations = FirmExpectations::new(
+            Money::from_minor_units(
+                i64::try_from(expected_sales)
+                    .map_err(|_| WorldError::ArithmeticOverflow("expected sales revenue"))?,
+            ),
+            Money::from_minor_units(
+                i64::try_from(expected_inputs)
+                    .map_err(|_| WorldError::ArithmeticOverflow("expected input costs"))?,
+            ),
+            Money::default(),
+            horizon_months,
+            FirmExpectationSource::ObservedOperations,
+        )?;
+        self.update_firm_expectations(firm, expectations)?;
+        Ok(expectations)
+    }
     /// Produces advisory staffing proposals from realized payroll and, when present,
     /// management forecasts. It never fires workers or moves money automatically.
     #[must_use]
@@ -281,10 +354,11 @@ mod tests {
     use crate::{
         AgeBand, ConsumptionProfile, ConsumptionTarget, Country, CountryId, DemandBasis,
         EducationLevel, EmploymentAgreement, EmploymentStatus, Firm, Good, GoodId, HouseholdCohort,
-        HouseholdType, NeedProfileId, NeedTier, Population, ProductionRecipe, QuantityMilli,
-        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        HouseholdType, NeedProfileId, NeedTier, Population, ProductionInput, ProductionRecipe,
+        QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
     };
 
+    #[allow(clippy::too_many_lines)]
     fn staffed_world(firm_cash: i64) -> World {
         let mut world = World::new(WorldSeed::new(7), SimDate::new(2025, 1).expect("date"));
         world
@@ -292,6 +366,9 @@ mod tests {
             .expect("country registration");
         world
             .register_good(Good::new(GoodId::new(1), "Food").expect("good"))
+            .expect("good registration");
+        world
+            .register_good(Good::new(GoodId::new(2), "Energy").expect("good"))
             .expect("good registration");
         world
             .register_consumption_profile(
@@ -321,6 +398,9 @@ mod tests {
             )
             .expect("region registration");
         world
+            .set_regional_price(RegionId::new(1), GoodId::new(2), Money::from_minor_units(3))
+            .expect("input price");
+        world
             .register_production_recipe(
                 ProductionRecipe::new(
                     RecipeId::new(1),
@@ -328,7 +408,10 @@ mod tests {
                     GoodId::new(1),
                     QuantityMilli::new(1_000),
                     1_000,
-                    vec![],
+                    vec![ProductionInput::new(
+                        GoodId::new(2),
+                        QuantityMilli::new(2_000),
+                    )],
                 )
                 .expect("recipe"),
             )
@@ -343,7 +426,7 @@ mod tests {
                     100,
                     100,
                     Money::from_minor_units(firm_cash),
-                    BTreeMap::new(),
+                    BTreeMap::from([(GoodId::new(2), QuantityMilli::new(100_000))]),
                 )
                 .expect("firm"),
             )
@@ -452,6 +535,38 @@ mod tests {
         assert_eq!(
             direct.employment_agreements()[&(FirmId::new(1), crate::CohortId::new(1))].workers(),
             workers_before
+        );
+    }
+
+    #[test]
+    fn observed_operations_derive_replayable_sales_and_input_costs() {
+        let mut direct = staffed_world(20_000);
+        direct
+            .record_firm_sale(FirmId::new(1), Money::from_minor_units(1_000))
+            .expect("sale observation");
+        let mut replayed = direct.clone();
+        let cash_before = direct.firms()[&FirmId::new(1)].cash();
+        let inventory_before = direct.firms()[&FirmId::new(1)].inventories().clone();
+
+        let derived = direct
+            .derive_firm_expectations_from_observations(FirmId::new(1), 2)
+            .expect("derived expectations");
+        WorldCommand::DeriveFirmExpectationsFromObservations {
+            firm: FirmId::new(1),
+            horizon_months: 2,
+        }
+        .apply(&mut replayed)
+        .expect("replayed derivation");
+
+        assert_eq!(derived.expected_sales_revenue().minor_units(), 2_000);
+        assert_eq!(derived.expected_input_costs().minor_units(), 600);
+        assert_eq!(derived.expected_financing(), Money::default());
+        assert_eq!(derived.source(), FirmExpectationSource::ObservedOperations);
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.firms()[&FirmId::new(1)].cash(), cash_before);
+        assert_eq!(
+            direct.firms()[&FirmId::new(1)].inventories(),
+            &inventory_before
         );
     }
 

@@ -214,3 +214,5 @@ Every accepted slice updates this file with status, tests, measurements, known a
 - Reoriented social causality toward concrete cohort experience durations and typed historical events rather than generic crisis debuffs.
 
 - Added replayable firm cash-flow expectations and expectation-aware advisory staffing, with recovery and deterioration tests; forecasts remain knowledge state and cannot move resources directly. Next gate: derive forecasts from observed sales, input prices, and financing offers rather than externally supplied values.
+
+- Added replayable operational forecast derivation from realized sales, physically feasible recipe throughput, and observed regional input prices. Financing remains zero until concrete offers exist; current values persist across the forecast horizon as an explicit myopic approximation. Next gate: finite sales/price memory and concrete financing offers.
