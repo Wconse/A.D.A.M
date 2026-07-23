@@ -389,6 +389,7 @@ pub enum WorldError {
         stage: &'static str,
         date: SimDate,
     },
+    AnnualClosureAlreadyExecuted(i32),
     InsufficientHouseholdCash(CohortId),
     UnknownCohort(CohortId),
     InvalidProduction(&'static str),
@@ -515,6 +516,9 @@ impl fmt::Display for WorldError {
                     "monthly stage {stage} already executed for {date}"
                 )
             }
+            Self::AnnualClosureAlreadyExecuted(year) => {
+                write!(formatter, "annual closure already executed for {year}")
+            }
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidFirmExpectations(reason) => {
                 write!(formatter, "invalid firm expectations: {reason}")
@@ -640,6 +644,7 @@ pub struct World {
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
     pub(crate) last_cohort_experience_date: Option<SimDate>,
+    pub(crate) last_annual_closure_year: Option<i32>,
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
@@ -695,6 +700,7 @@ impl World {
             last_payroll_date: None,
             last_household_cashflow_date: None,
             last_cohort_experience_date: None,
+            last_annual_closure_year: None,
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             firms: BTreeMap::new(),
@@ -985,6 +991,13 @@ impl World {
                     hash.write_i32(date.year());
                     hash.write_u16(date.day_of_year());
                 }
+            }
+        }
+        match self.last_annual_closure_year {
+            None => hash.write_u8(0),
+            Some(year) => {
+                hash.write_u8(1);
+                hash.write_i32(year);
             }
         }
         hash.write_u64(self.firm_expectations.len() as u64);

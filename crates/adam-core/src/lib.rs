@@ -64,6 +64,7 @@ pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
 };
 pub use rng::{RandomStream, WorldSeed};
+pub use simulation::EconomicYearResult;
 pub use social::{CohortExperience, SocialStress, SocialStressMemory};
 pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
 pub use time::{SimDate, TimeError};
@@ -75,4 +76,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 15;
+pub const SIMULATION_VERSION: u32 = 16;

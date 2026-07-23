@@ -31,6 +31,12 @@ struct CountryUpdate {
     cohesion: BasisPoints,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EconomicYearResult {
+    pub closed_year: i32,
+    pub months: Vec<crate::MonthlyEconomicCycleResult>,
+}
+
 impl World {
     /// Simulates one complete causal year as an atomic state transition.
     ///
@@ -42,11 +48,20 @@ impl World {
     /// Returns [`WorldError`] without changing the world if date or fixed-point arithmetic
     /// cannot be represented.
     pub fn advance_one_year(&mut self) -> Result<(), WorldError> {
+        let simulated_year = self.date.year();
+        if self.last_annual_closure_year == Some(simulated_year) {
+            return Err(WorldError::AnnualClosureAlreadyExecuted(simulated_year));
+        }
         let mut close_date = self.date;
         close_date.advance_years(1)?;
-        let region_updates = self.plan_regions()?;
-        let country_updates = self.plan_countries(&region_updates)?;
-        self.apply_year(close_date, &region_updates, &country_updates);
+        let region_updates = self.plan_regions(simulated_year)?;
+        let country_updates = self.plan_countries(simulated_year, &region_updates)?;
+        self.apply_year(
+            simulated_year,
+            close_date,
+            &region_updates,
+            &country_updates,
+        );
         Ok(())
     }
 
@@ -63,7 +78,49 @@ impl World {
         Ok(())
     }
 
-    fn plan_regions(&self) -> Result<Vec<RegionUpdate>, WorldError> {
+    /// Runs twelve atomic economic months followed by one annual demographic/fiscal closure.
+    /// # Errors
+    /// Returns the first monthly or annual error without changing the failing year.
+    pub fn advance_economic_year(&mut self) -> Result<EconomicYearResult, WorldError> {
+        let closed_year = self.date.year();
+        if self.last_annual_closure_year == Some(closed_year) {
+            return Err(WorldError::AnnualClosureAlreadyExecuted(closed_year));
+        }
+        let mut next = self.clone();
+        let mut months = Vec::with_capacity(12);
+        for _ in 0..12 {
+            months.push(next.execute_monthly_economic_cycle()?);
+        }
+        let region_updates = next.plan_regions(closed_year)?;
+        let country_updates = next.plan_countries(closed_year, &region_updates)?;
+        let close_date = next.date;
+        next.apply_year(closed_year, close_date, &region_updates, &country_updates);
+        next.events.append(
+            close_date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year,
+                monthly_cycles: 12,
+            },
+        );
+        let result = EconomicYearResult {
+            closed_year,
+            months,
+        };
+        *self = next;
+        Ok(result)
+    }
+
+    /// Runs several monthly economic years, committing each completed year in order.
+    /// # Errors
+    /// Returns the first failing year while preserving earlier completed years.
+    pub fn advance_economic_years(&mut self, years: u32) -> Result<(), WorldError> {
+        for _ in 0..years {
+            self.advance_economic_year()?;
+        }
+        Ok(())
+    }
+
+    fn plan_regions(&self, simulated_year: i32) -> Result<Vec<RegionUpdate>, WorldError> {
         self.regions
             .values()
             .map(|region| {
@@ -74,7 +131,7 @@ impl World {
                     .indicators();
                 let population_rate = population_rate(
                     self.seed,
-                    self.date.year(),
+                    simulated_year,
                     region.id(),
                     region.population(),
                     region.annual_output(),
@@ -83,7 +140,7 @@ impl World {
                 let population = apply_population_rate(region.population(), population_rate)?;
                 let output_rate = output_rate(
                     self.seed,
-                    self.date.year(),
+                    simulated_year,
                     region.id(),
                     population_rate,
                     indicators.legitimacy(),
@@ -106,6 +163,7 @@ impl World {
 
     fn plan_countries(
         &self,
+        simulated_year: i32,
         region_updates: &[RegionUpdate],
     ) -> Result<Vec<CountryUpdate>, WorldError> {
         let mut old_output = BTreeMap::<CountryId, i128>::new();
@@ -129,7 +187,7 @@ impl World {
             .map(|country| {
                 plan_country(
                     self.seed,
-                    self.date.year(),
+                    simulated_year,
                     country.id(),
                     country.indicators(),
                     *old_output.get(&country.id()).unwrap_or(&0),
@@ -141,6 +199,7 @@ impl World {
 
     fn apply_year(
         &mut self,
+        simulated_year: i32,
         close_date: crate::SimDate,
         region_updates: &[RegionUpdate],
         country_updates: &[CountryUpdate],
@@ -212,6 +271,7 @@ impl World {
             );
         }
         self.date = close_date;
+        self.last_annual_closure_year = Some(simulated_year);
         self.events.append(
             close_date,
             DomainEvent::YearAdvanced {

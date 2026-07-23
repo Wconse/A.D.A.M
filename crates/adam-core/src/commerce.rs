@@ -330,6 +330,64 @@ mod tests {
     }
 
     #[test]
+    fn economic_year_runs_twelve_months_then_one_annual_closure() {
+        let mut direct = commercial_world(true);
+        let mut replayed = direct.clone();
+        let result = direct.advance_economic_year().expect("economic year");
+        WorldCommand::AdvanceEconomicYear
+            .apply(&mut replayed)
+            .expect("replayed economic year");
+
+        assert_eq!(result.closed_year, 2025);
+        assert_eq!(result.months.len(), 12);
+        assert_eq!(direct.date(), SimDate::new(2026, 1).expect("date"));
+        assert_eq!(direct.firm_operating_history()[&FirmId::new(1)].len(), 12);
+        let monthly_cycles = direct
+            .events()
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.event(),
+                    crate::DomainEvent::MonthlyEconomicCycleCompleted { .. }
+                )
+            })
+            .count();
+        assert_eq!(monthly_cycles, 12);
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn fifty_economic_years_keep_bounded_firm_memory() {
+        let mut world = commercial_world(true);
+        world
+            .advance_economic_years(50)
+            .expect("fifty economic years");
+        assert_eq!(world.date(), SimDate::new(2075, 1).expect("date"));
+        assert_eq!(world.firm_operating_history()[&FirmId::new(1)].len(), 12);
+        let monthly_cycles = world
+            .events()
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.event(),
+                    crate::DomainEvent::MonthlyEconomicCycleCompleted { .. }
+                )
+            })
+            .count();
+        let annual_closures = world
+            .events()
+            .events()
+            .iter()
+            .filter(|event| matches!(event.event(), crate::DomainEvent::YearAdvanced { .. }))
+            .count();
+        assert_eq!(monthly_cycles, 600);
+        assert_eq!(annual_closures, 50);
+    }
+
+    #[test]
     fn repeated_monthly_stage_is_rejected_without_mutation() {
         let mut world = commercial_world(true);
         world.execute_monthly_payroll().expect("first payroll");

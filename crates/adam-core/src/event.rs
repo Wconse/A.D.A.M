@@ -6,6 +6,10 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
+    EconomicYearCompleted {
+        closed_year: i32,
+        monthly_cycles: u8,
+    },
     MonthAdvanced {
         date: SimDate,
     },
