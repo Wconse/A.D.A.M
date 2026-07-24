@@ -26,6 +26,16 @@ pub struct FirmProcurementResult {
     pub unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
 }
 
+/// Outcome of the settle phase: what moved, what stayed unmet, and the
+/// evidence the record phase needs. Behaviour is locked by
+/// crates/adam-core/tests/intermediate_procurement.rs.
+struct ProcurementSettlement {
+    fills: Vec<FirmProcurementFill>,
+    unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
+    trade_prices: BTreeMap<(FirmId, GoodId), Money>,
+    purchases: BTreeMap<(FirmId, GoodId), (u64, i64)>,
+}
+
 impl World {
     pub(crate) fn plan_monthly_firm_procurement(
         &self,
@@ -69,13 +79,9 @@ impl World {
         Ok(orders)
     }
 
-    // TODO(refactor slice): split into plan/settle/record helpers; behavior
-    // is now locked by crates/adam-core/tests/intermediate_procurement.rs.
-    #[allow(clippy::too_many_lines)]
-    pub(crate) fn execute_monthly_firm_procurement(
-        &mut self,
-    ) -> Result<FirmProcurementResult, WorldError> {
-        let orders = self.plan_monthly_firm_procurement()?;
+    /// Plan phase: the canonical, deterministically ordered offer book for
+    /// intermediate firm-to-firm trade. Pure read; no state changes.
+    fn plan_procurement_offer_book(&self) -> Result<Vec<MarketOffer>, WorldError> {
         let mut offers: Vec<MarketOffer> = self
             .plan_firm_market_offers()?
             .into_iter()
@@ -97,12 +103,25 @@ impl World {
                 offer.seller,
             )
         });
+        Ok(offers)
+    }
+
+    /// Settle phase: match orders against the offer book and move cash and
+    /// inventories. All movement happens on a clone of the firm ledger and is
+    /// committed only after the whole month settles, so any error leaves the
+    /// world untouched.
+    #[allow(clippy::too_many_lines)]
+    fn settle_procurement_orders(
+        &mut self,
+        orders: &[FirmProcurementOrder],
+        offers: &mut [MarketOffer],
+    ) -> Result<ProcurementSettlement, WorldError> {
         let mut firms = self.firms().clone();
         let mut fills = Vec::new();
         let mut unmet = BTreeMap::new();
         let mut trade_prices: BTreeMap<(FirmId, GoodId), Money> = BTreeMap::new();
         let mut purchases: BTreeMap<(FirmId, GoodId), (u64, i64)> = BTreeMap::new();
-        for order in &orders {
+        for order in orders {
             let mut remaining = order.quantity.get();
             for offer in offers.iter_mut().filter(|offer| {
                 offer.region == order.region
@@ -178,7 +197,21 @@ impl World {
             }
         }
         self.firms = firms;
-        for ((buyer, good), (quantity, spend)) in purchases {
+        Ok(ProcurementSettlement {
+            fills,
+            unmet,
+            trade_prices,
+            purchases,
+        })
+    }
+
+    /// Record phase: persist purchase aggregates, append trade events, and
+    /// fold settled sales into firm observations and revenue.
+    fn record_procurement_outcomes(
+        &mut self,
+        settlement: &ProcurementSettlement,
+    ) -> Result<(), WorldError> {
+        for (&(buyer, good), &(quantity, spend)) in &settlement.purchases {
             self.monthly_firm_procurement_purchases.insert(
                 (buyer, good),
                 (QuantityMilli::new(quantity), Money::from_minor_units(spend)),
@@ -186,7 +219,7 @@ impl World {
         }
         let mut revenue = BTreeMap::<FirmId, i128>::new();
         let mut sold = BTreeMap::<(FirmId, GoodId), u64>::new();
-        for fill in &fills {
+        for fill in &settlement.fills {
             *revenue.entry(fill.seller).or_default() += i128::from(fill.spend.minor_units());
             let quantity = sold.entry((fill.seller, fill.good)).or_default();
             *quantity = quantity
@@ -205,7 +238,8 @@ impl World {
         }
         for ((firm, good), quantity) in sold {
             let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
-            let unit_price = trade_prices
+            let unit_price = settlement
+                .trade_prices
                 .get(&(firm, good))
                 .copied()
                 .expect("settled procurement sale must have a recorded trade price");
@@ -232,10 +266,22 @@ impl World {
                 ),
             )?;
         }
+        Ok(())
+    }
+
+    /// One monthly procurement cycle: plan the offer book, settle orders
+    /// against it, then record the evidence trail.
+    pub(crate) fn execute_monthly_firm_procurement(
+        &mut self,
+    ) -> Result<FirmProcurementResult, WorldError> {
+        let orders = self.plan_monthly_firm_procurement()?;
+        let mut offers = self.plan_procurement_offer_book()?;
+        let settlement = self.settle_procurement_orders(&orders, &mut offers)?;
+        self.record_procurement_outcomes(&settlement)?;
         Ok(FirmProcurementResult {
             orders,
-            fills,
-            unmet,
+            fills: settlement.fills,
+            unmet: settlement.unmet,
         })
     }
 }

@@ -14,12 +14,16 @@ The first playable artifact will simulate several fictional countries for fifty 
 
 - `adam-core`: engine-independent simulation library;
 - `adam-cli`: console runner and future chronicle exporter;
+- `adam-content`: data-driven demo world content, validated and loaded from TOML;
 - typed identifiers and discrete simulation time;
 - deterministic, explicitly seeded random streams;
 - ordered world storage and append-only typed event log;
 - household cohort ledger with exact regional population conservation;
 - budget-constrained household demand generated from population, profiles, and regional prices;
 - stable state fingerprint for regression checks;
+- monthly firm production, intermediate procurement, and household markets;
+- annual demographic and fiscal closure with public debt and interest, emitted as typed events;
+- yearly chronicle generated only from the typed event log;
 - determinism tests and cross-platform quality scripts;
 - architecture and decision records.
 
@@ -29,7 +33,7 @@ The first playable artifact will simulate several fictional countries for fifty 
 ADAM/
 ├── apps/adam-cli/          # Console composition root; no domain rules
 ├── crates/adam-core/       # Headless deterministic simulation
-├── config/                 # Data-driven world definitions
+├── crates/adam-content/    # Data-driven demo world content (TOML)
 ├── docs/                   # Architecture, determinism contract, ADRs
 ├── scripts/                # Reproducible local quality gates
 └── .github/workflows/      # CI quality gate
@@ -45,10 +49,10 @@ Install Rust with [rustup](https://rustup.rs/), then restart the terminal.
 ## Quick start
 
 ```bash
-cargo run -- --seed 1 --years 50
+cargo run --release -p adam-cli -- --seed 1 --years 50
 ```
 
-The initial scaffold runs a minimal deterministic clock and prints a stable state fingerprint. Simulation systems and prose generation will be added as small tested slices.
+The demo world runs fifty years of monthly production, firm-to-firm procurement, household markets, and annual demographic and fiscal closure, then prints a yearly chronicle and a stable state fingerprint used as the regression baseline.
 
 ## Quality gate
 
@@ -91,7 +95,7 @@ See the project documentation:
 
 ## Status
 
-Foundation scaffold. No gameplay claim is made yet.
+Stage 0 in progress: a deterministic monthly economy with annual demographic and fiscal closure (including public debt service) runs behind determinism, chronicle, and fingerprint gates. No gameplay claim is made yet.
 
 ## License
 

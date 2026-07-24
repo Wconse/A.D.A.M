@@ -398,3 +398,17 @@ Debt service is now auditable instead of being folded invisibly into aggregate f
 Acceptance evidence: formatting and the full quality gate pass (93 tests across all crates); a new simulation gate test proves a world seeded with 1,000,000 debt emits the event with exactly 30,000 interest while a debt-free world emits none, and a new chronicle gate test proves the sentence renders from the event alone. The stable fingerprint hashes world state only - not the event log - and no state or rule changed, so the seed-1 50-year baseline must stay at `7530160749567993110` - and it does.
 
 Next gate: split procurement into plan/settle/record helpers - procurement.rs carries a TODO(refactor slice) and mixes planning, settlement, and observation recording in one monolithic function; the refactor must keep behaviour and the fingerprint baseline byte-identical.
+
+### Procurement plan-settle-record refactor gate
+
+Completed vertical slice:
+
+```text
+execute_monthly_firm_procurement -> plan_procurement_offer_book (pure deterministic offer book) -> settle_procurement_orders (all cash and inventory movement on a cloned ledger, committed only on full success) -> record_procurement_outcomes (purchase aggregates, FirmProcurementTrade events, market outcomes, revenue) -> behaviour byte-identical -> fingerprint baseline unchanged
+```
+
+The TODO(refactor slice) monolith in procurement.rs is gone. Planning, settlement, and recording are now separate functions with one narrow seam each: the offer book is a pure read, settlement is the only place resources move and stays atomic on error, and recording is the only place evidence is persisted. A private ProcurementSettlement struct carries fills, unmet demand, trade prices, and purchase aggregates between the phases. No rule changed: the slice is accepted only because the full gate stays green (93 tests, behaviour locked by the intermediate procurement suite) and the seed-1 50-year fingerprint stays at `7530160749567993110`.
+
+The README was refreshed in the same slice: the repository layout now names crates/adam-content instead of the retired config/ directory, the quick start matches the release CLI invocation, and the foundation list and status describe the running monthly economy, fiscal closure with debt service, and the chronicle instead of the original scaffold.
+
+Next gate: fiscal stress must feed back into spending - a country whose debt service consumes a growing share of its revenue should restrain discretionary spending instead of expanding it, so debt spirals become a policy problem rather than an arithmetic inevitability. This is a rule change: it will move the fingerprint baseline and bump SIMULATION_VERSION.
