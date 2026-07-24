@@ -454,3 +454,16 @@ The Stage 0 requirement of several countries is now real content, not a schema p
 This is a content change under unchanged rules: SIMULATION_VERSION stays 30 and the seed-1 50-year fingerprint moved to `8292603064090461814` as the new content baseline. Acceptance: 96 tests green, chronicle mentions two countries end to end, release self-comparison identical.
 
 Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya Roden, Sana Kettu) exist in the world but the chronicle never names them; surface owner decisions as attributed chronicle lines so the letopis reads as history made by people, not aggregates.
+
+### Named chronicle actors gate (step 029)
+
+- The yearly chronicle resolves names from the journal itself (ActorRegistered / RegionRegistered)
+  and narrates who acted: the actor behind the largest emergency relief, the most active
+  production manager, and the region hit hardest by rationing.
+- Derived narration only: no rules changed, no new events, SIMULATION_VERSION stays 30,
+  seed-1/50y baseline unchanged: 8292603064090461814.
+- Gate: 97 tests; the release chronicle must name at least one demo elite
+  (Mara Voss / Ilya Roden / Sana Kettu).
+- Next gate: first causal war slice - a concrete material grievance between two countries
+  becomes a typed hostility state that disrupts cross-border trade, resolved deterministically
+  inside the monthly tick.

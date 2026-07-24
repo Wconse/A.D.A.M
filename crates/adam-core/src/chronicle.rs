@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{DomainEvent, World};
+use crate::{ActorId, DomainEvent, RegionId, World};
 
 /// One deterministic yearly narrative summary derived only from authoritative domain events.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,13 +15,24 @@ impl World {
     #[must_use]
     pub fn chronicle(&self) -> Vec<ChronicleEntry> {
         let mut years = BTreeMap::<i32, YearSummary>::new();
+        let mut actor_names = BTreeMap::<ActorId, String>::new();
+        let mut region_names = BTreeMap::<RegionId, String>::new();
         for envelope in self.events().events() {
+            match envelope.event() {
+                DomainEvent::ActorRegistered { actor, name, .. } => {
+                    actor_names.insert(*actor, name.clone());
+                }
+                DomainEvent::RegionRegistered { region, name, .. } => {
+                    region_names.insert(*region, name.clone());
+                }
+                _ => {}
+            }
             let row = years.entry(envelope.date().year()).or_default();
             row.observe(envelope.event());
         }
         years
             .into_iter()
-            .filter_map(|(year, summary)| summary.finish(year))
+            .filter_map(|(year, summary)| summary.finish(year, &actor_names, &region_names))
             .collect()
     }
 }
@@ -29,6 +40,9 @@ impl World {
 #[derive(Default)]
 struct YearSummary {
     months: u64,
+    relief_by_actor: BTreeMap<ActorId, i128>,
+    target_changes_by_actor: BTreeMap<ActorId, u64>,
+    rationing_by_region: BTreeMap<RegionId, u64>,
     production_milli: u128,
     traded_milli: u128,
     household_borrowing_minor: i128,
@@ -57,6 +71,9 @@ impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
         match event {
             DomainEvent::MonthlyEconomicCycleCompleted { .. } => self.months += 1,
+            DomainEvent::FirmProductionTargetSet { actor, .. } => {
+                *self.target_changes_by_actor.entry(*actor).or_default() += 1;
+            }
             DomainEvent::ProductionCompleted { quantity, .. } => {
                 self.production_milli += u128::from(quantity.get());
             }
@@ -66,8 +83,10 @@ impl YearSummary {
             DomainEvent::HouseholdSurvivalBorrowed { amount, .. } => {
                 self.household_borrowing_minor += i128::from(amount.minor_units());
             }
-            DomainEvent::EmergencyReliefFunded { amount, .. } => {
+            DomainEvent::EmergencyReliefFunded { actor, amount, .. } => {
                 self.relief_minor += i128::from(amount.minor_units());
+                *self.relief_by_actor.entry(*actor).or_default() +=
+                    i128::from(amount.minor_units());
             }
             DomainEvent::EmergencyReliefDebtIssued { amount, .. } => {
                 self.relief_debt_minor += i128::from(amount.minor_units());
@@ -86,11 +105,13 @@ impl YearSummary {
                 );
             }
             DomainEvent::SurvivalRationingApplied {
+                region,
                 requested,
                 available,
                 ..
             } => {
                 self.rationing_actions += 1;
+                *self.rationing_by_region.entry(*region).or_default() += 1;
                 self.rationed_requested_milli += u128::from(requested.get());
                 self.rationed_available_milli += u128::from(available.get());
             }
@@ -126,7 +147,12 @@ impl YearSummary {
         }
     }
 
-    fn finish(self, year: i32) -> Option<ChronicleEntry> {
+    fn finish(
+        self,
+        year: i32,
+        actor_names: &BTreeMap<ActorId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) -> Option<ChronicleEntry> {
         if self.months == 0 && !self.completed {
             return None;
         }
@@ -202,6 +228,7 @@ impl YearSummary {
                 self.politics_changes
             ));
         }
+        self.push_named_attributions(&mut sentences, actor_names, region_names);
         if sentences.is_empty() {
             sentences.push(format!(
                 "{} monthly cycles closed without a material event.",
@@ -213,6 +240,47 @@ impl YearSummary {
             importance: self.importance(),
             text: sentences.join(" "),
         })
+    }
+
+    fn push_named_attributions(
+        &self,
+        sentences: &mut Vec<String>,
+        actor_names: &BTreeMap<ActorId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if let Some((actor, funded)) = self
+            .relief_by_actor
+            .iter()
+            .max_by_key(|(actor, funded)| (**funded, std::cmp::Reverse(**actor)))
+        {
+            if let Some(name) = actor_names.get(actor) {
+                sentences.push(format!(
+                    "{name} directed {funded} minor currency units of the emergency relief."
+                ));
+            }
+        }
+        if let Some((actor, changes)) = self
+            .target_changes_by_actor
+            .iter()
+            .max_by_key(|(actor, changes)| (**changes, std::cmp::Reverse(**actor)))
+        {
+            if let Some(name) = actor_names.get(actor) {
+                sentences.push(format!(
+                    "{name} led firm management with {changes} production target adjustments."
+                ));
+            }
+        }
+        if let Some((region, actions)) = self
+            .rationing_by_region
+            .iter()
+            .max_by_key(|(region, actions)| (**actions, std::cmp::Reverse(**region)))
+        {
+            if let Some(name) = region_names.get(region) {
+                sentences.push(format!(
+                    "Shortages pressed hardest on {name}, with {actions} rationing actions."
+                ));
+            }
+        }
     }
 
     fn importance(&self) -> u16 {
@@ -344,5 +412,72 @@ mod tests {
         assert!(chronicle[0].text.contains("spent 700"));
         assert!(chronicle[0].text.contains("200 of public debt"));
         assert!(chronicle[0].text.contains("across 1 countries"));
+    }
+
+    #[test]
+    fn chronicle_names_the_most_active_elite_actors_and_regions() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::ActorRegistered {
+                actor: crate::ActorId::new(1),
+                home_region: crate::RegionId::new(1),
+                name: "Mara Voss".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: crate::RegionId::new(1),
+                country: CountryId::new(1),
+                name: "Northreach".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EmergencyReliefFunded {
+                actor: crate::ActorId::new(1),
+                country: CountryId::new(1),
+                cohort: CohortId::new(1),
+                amount: Money::from_minor_units(50),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::FirmProductionTargetSet {
+                actor: crate::ActorId::new(1),
+                firm: crate::FirmId::new(1),
+                previous_batches: Some(5),
+                target_batches: 2,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::SurvivalRationingApplied {
+                country: CountryId::new(1),
+                region: crate::RegionId::new(1),
+                good: crate::GoodId::new(1),
+                requested: crate::QuantityMilli::new(1_000),
+                available: crate::QuantityMilli::new(400),
+                cohorts: 1,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        let text = &chronicle[0].text;
+        assert!(text.contains("Mara Voss directed 50 minor currency units"));
+        assert!(
+            text.contains("Mara Voss led firm management with 1 production target adjustments")
+        );
+        assert!(text.contains("Shortages pressed hardest on Northreach, with 1 rationing actions"));
     }
 }
