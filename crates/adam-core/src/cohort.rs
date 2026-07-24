@@ -399,6 +399,11 @@ impl World {
                 .ok_or(WorldError::ArithmeticOverflow("cohort rescale sum"))
         })?;
         if old_total == 0 {
+            // An extinct region is a legitimate outcome: closing the year
+            // with a zero target must be chronicled, not crash the run.
+            if target.people() == 0 {
+                return Ok(Vec::new());
+            }
             return Err(WorldError::InvalidCohort(
                 "cannot rescale an all-zero regional cohort ledger",
             ));

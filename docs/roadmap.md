@@ -290,3 +290,16 @@ firm input requirements -> B2B offers -> procurement fills moving cash and inven
 Verified end-to-end by `crates/adam-core/tests/intermediate_procurement.rs`: a farm -> bakery -> households chain proves twelve monthly B2B grain trades move firm cash and inventories, measured regional output equals settled household final consumption plus valued inventory change and excludes intermediate turnover, money is conserved across firms, households, and paid sales taxes, and the economic year replays identically through the command boundary.
 
 Repository debt discovered while closing this gate: the committed tree referenced the `adam-cli` and `adam-content` crates without any sources, although earlier progress entries describe a working console chronicle and schema-v5 producing content. Placeholder targets were restored so the workspace builds again. The next gate is to rebuild the Stage 0 console chronicle runner and producing content, and to settle two accounting questions: record B2B market outcomes at the actual transaction price instead of the regional reference price, and decide whether the sales tax should cascade over intermediate turnover or apply only to final sales.
+### Stage 0 console chronicle gate
+
+Completed vertical slice:
+
+```text
+embedded demo content -> 50 deterministic economic years -> readable yearly console chronicle -> seed comparison -> graceful regional extinction
+```
+
+`adam-cli` is a real runner again (`--seed N --years N`, defaults 1/50): it advances whole economic years and renders a yearly chronicle from the domain event log (household purchases, firm-to-firm trade, sales taxes, measured regional output, population, fiscal closure, politics). `adam-content` provides the deterministic embedded two-region demo scenario: Northreach carries a thin bakery cash buffer and decays into extinction mid-century under the sales-tax monetary drain, while Southvale is buffered to survive the full horizon. Verified on a real run: equal seeds produce byte-identical 50-year chronicles, different seeds diverge, and the collapse of Northreach unfolds causally (firm cash exhaustion -> wage arrears -> deprivation -> mortality -> extinction) while the country's legitimacy erodes from about 8900 bp to about 4500 bp.
+
+Core fix shipped with this slice: an extinct region (all-zero cohort ledger with a zero rescale target) now closes the annual demographic closure cleanly instead of erroring, covered by a dedicated regression test.
+
+Author decision recorded: the sales tax must stop cascading over intermediate B2B turnover and apply to final household sales only. That accounting separation (taxable final revenue vs. total revenue as decision evidence for firms) is the next gate. After it, rebuild the lost TOML content pipeline (schema v5) on top of the embedded demo scenario.
