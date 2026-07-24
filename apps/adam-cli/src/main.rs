@@ -88,6 +88,17 @@ fn render_chronicle(world: &World, args: &Args) -> String {
     for envelope in world.events().events() {
         collect_event(&mut out, &mut stats, envelope.event());
     }
+    let chronicle = world.chronicle();
+    if !chronicle.is_empty() {
+        let _ = writeln!(out, "\n=== chronicle ===");
+        for entry in &chronicle {
+            let _ = writeln!(
+                out,
+                "{} (importance {}): {}",
+                entry.year, entry.importance, entry.text
+            );
+        }
+    }
     let _ = writeln!(out, "\nfinal fingerprint: {:?}", world.stable_fingerprint());
     out
 }
