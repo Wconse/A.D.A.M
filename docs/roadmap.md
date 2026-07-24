@@ -426,3 +426,17 @@ Three slices in one step. First, the yearly chronicle now reports what governmen
 Third, the debt brake: a country whose accumulated public debt grows relative to its annual output now restrains discretionary spending before the deficit compounds further. The cause is a concrete monetary state (the debt stock and measured output), not a derived mood score; the effect is graduated, capped, and floored so states never spend below a survival floor. The gate test holds seed and legitimacy fixed and varies only opening debt: revenue is identical, spending is strictly lower for the indebted twin. This is a rule change, so SIMULATION_VERSION is now 30 and the new seed-1 50-year fingerprint baseline is `17363996423594943694` (95 tests green).
 
 Next gate: seed comparison in the console runner - run two seeds side by side and report where their chronicles diverge, closing the Stage 0 requirement for seed comparison, plus a timed release profile of the 50-year run before any optimization work.
+
+### Seed comparison and timing gate
+
+Completed vertical slice (step 027):
+
+```text
+cli: --compare-seed N -> second deterministic world -> first divergent chronicle year reported side by side -> compare fingerprint printed -> timing line (simulated N years in X s, Y ms per year) after the fingerprint
+```
+
+The console runner now closes two Stage 0 requirements. Seed comparison: `--compare-seed` runs a second world under identical rules and reports the first year where the two chronicles diverge, proving that the seed shapes history itself rather than only the fingerprint header; comparing a seed with itself must report identical chronicles and an identical fingerprint, which doubles as a determinism check in release mode. Timing: every run now reports wall-clock duration and milliseconds per simulated year, giving the first measured profiling baseline before any optimization work. Wall-clock time is reporting-only diagnostics in the CLI layer; it never enters the simulation.
+
+Acceptance: 95 tests green, seed-1 50-year fingerprint baseline unchanged at `17363996423594943694` (SIMULATION_VERSION 30), self-comparison identical, seeds 1 and 2 diverge.
+
+Next gate: a second country in the demo content (TOML) so the chronicle narrates more than one fiscal and demographic path in a single run. This is a content change: the seed-1 baseline moves and the content schema gains a second country without any rule changes.

@@ -50,6 +50,7 @@ Install Rust with [rustup](https://rustup.rs/), then restart the terminal.
 
 ```bash
 cargo run --release -p adam-cli -- --seed 1 --years 50
+cargo run --release -p adam-cli -- --seed 1 --years 50 --compare-seed 2
 ```
 
 The demo world runs fifty years of monthly production, firm-to-firm procurement, household markets, and annual demographic and fiscal closure, then prints a yearly chronicle and a stable state fingerprint used as the regression baseline.

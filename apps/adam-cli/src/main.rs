@@ -3,7 +3,7 @@
 //! Runs the embedded demo scenario for a number of deterministic economic
 //! years and prints a yearly chronicle derived from the domain event log.
 //!
-//! Usage: `adam-cli [--seed N] [--years N]` (defaults: seed 1, 50 years).
+//! Usage: `adam-cli [--seed N] [--years N] [--compare-seed N]` (defaults: seed 1, 50 years).
 
 use std::fmt::Write as _;
 use std::process::ExitCode;
@@ -13,10 +13,15 @@ use adam_core::{DomainEvent, World, WorldError};
 struct Args {
     seed: u64,
     years: u32,
+    compare_seed: Option<u64>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { seed: 1, years: 50 };
+    let mut args = Args {
+        seed: 1,
+        years: 50,
+        compare_seed: None,
+    };
     let mut input = std::env::args().skip(1);
     while let Some(flag) = input.next() {
         let value = input
@@ -33,6 +38,13 @@ fn parse_args() -> Result<Args, String> {
                     .parse()
                     .map_err(|error| format!("invalid --years: {error}"))?;
             }
+            "--compare-seed" => {
+                args.compare_seed = Some(
+                    value
+                        .parse()
+                        .map_err(|error| format!("invalid --compare-seed: {error}"))?,
+                );
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -44,7 +56,7 @@ fn main() -> ExitCode {
         Ok(args) => args,
         Err(error) => {
             eprintln!("error: {error}");
-            eprintln!("usage: adam-cli [--seed N] [--years N]");
+            eprintln!("usage: adam-cli [--seed N] [--years N] [--compare-seed N]");
             return ExitCode::from(2);
         }
     };
@@ -62,8 +74,32 @@ fn main() -> ExitCode {
 
 fn run(args: &Args) -> Result<String, WorldError> {
     let mut world = adam_content::demo_world(args.seed)?;
+    let started = std::time::Instant::now();
     world.advance_economic_years(args.years)?;
-    Ok(render_chronicle(&world, args))
+    let elapsed = started.elapsed();
+    let mut out = render_chronicle(&world, args);
+    let per_year_ms = if args.years == 0 {
+        0.0
+    } else {
+        elapsed.as_secs_f64() * 1_000.0 / f64::from(args.years)
+    };
+    let _ = writeln!(
+        out,
+        "simulated {} years in {:.3} s ({:.1} ms per year)",
+        args.years,
+        elapsed.as_secs_f64(),
+        per_year_ms
+    );
+    if let Some(compare_seed) = args.compare_seed {
+        let mut other = adam_content::demo_world(compare_seed)?;
+        other.advance_economic_years(args.years)?;
+        let _ = write!(
+            out,
+            "{}",
+            render_divergence(&world, &other, args, compare_seed)
+        );
+    }
+    Ok(out)
 }
 
 #[derive(Default)]
@@ -189,4 +225,48 @@ fn flush_year(out: &mut String, stats: &mut YearStats, closed_year: i32) {
         let _ = writeln!(out, "{line}");
     }
     *stats = YearStats::default();
+}
+
+fn render_divergence(world: &World, other: &World, args: &Args, compare_seed: u64) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "\n=== seed comparison: {} vs {} ===",
+        args.seed, compare_seed
+    );
+    let left = world.chronicle();
+    let right = other.chronicle();
+    let mut diverged = false;
+    for (ours, theirs) in left.iter().zip(right.iter()) {
+        if ours.year != theirs.year || ours.text != theirs.text {
+            let _ = writeln!(
+                out,
+                "histories diverge at year {}:",
+                ours.year.min(theirs.year)
+            );
+            let _ = writeln!(out, "  seed {}: {}", args.seed, ours.text);
+            let _ = writeln!(out, "  seed {}: {}", compare_seed, theirs.text);
+            diverged = true;
+            break;
+        }
+    }
+    if !diverged && left.len() != right.len() {
+        let _ = writeln!(
+            out,
+            "histories diverge in length: {} vs {} chronicle years",
+            left.len(),
+            right.len()
+        );
+        diverged = true;
+    }
+    if !diverged {
+        let _ = writeln!(out, "chronicles are identical for {} years", args.years);
+    }
+    let _ = writeln!(
+        out,
+        "compare fingerprint (seed {}): {:?}",
+        compare_seed,
+        other.stable_fingerprint()
+    );
+    out
 }
