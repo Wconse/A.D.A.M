@@ -569,12 +569,20 @@ output_good_id = 1
 output_per_batch_milli = 1000000
 labor_milli_worker_months = 1000
 
+[[production_recipes.inputs]]
+good_id = 3
+quantity_per_batch_milli = 100000
+
 [[production_recipes]]
 id = 1002
 name = "Housing service provision"
 output_good_id = 2
 output_per_batch_milli = 1000000
 labor_milli_worker_months = 1000
+
+[[production_recipes.inputs]]
+good_id = 3
+quantity_per_batch_milli = 100000
 
 [[production_recipes]]
 id = 1003
@@ -590,6 +598,10 @@ output_good_id = 5
 output_per_batch_milli = 1000000
 labor_milli_worker_months = 1000
 
+[[production_recipes.inputs]]
+good_id = 3
+quantity_per_batch_milli = 100000
+
 [[firms]]
 id = 1101
 name = "Aster Foods"
@@ -598,6 +610,10 @@ recipe_id = 1001
 workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
+
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
 
 [[employment_agreements]]
 firm_id = 1101
@@ -639,6 +655,10 @@ workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
 
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
+
 [[employment_agreements]]
 firm_id = 1102
 cohort_id = 10103
@@ -675,14 +695,15 @@ id = 1103
 name = "Aster Energy"
 region_id = 101
 recipe_id = 1003
-workers = 20000
-capacity_batches = 20000
+workers = 40000
+capacity_batches = 40000
 cash_minor = 1000000000000
+
 
 [[employment_agreements]]
 firm_id = 1103
 cohort_id = 10103
-workers = 20000
+workers = 40000
 monthly_wage_per_worker_minor = 1000
 
 [[ownership_stakes]]
@@ -718,6 +739,10 @@ recipe_id = 1005
 workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
+
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
 
 [[employment_agreements]]
 firm_id = 1104
@@ -759,6 +784,10 @@ workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
 
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
+
 [[employment_agreements]]
 firm_id = 2101
 cohort_id = 20103
@@ -799,6 +828,10 @@ workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
 
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
+
 [[employment_agreements]]
 firm_id = 2102
 cohort_id = 20103
@@ -835,14 +868,15 @@ id = 2103
 name = "Boreal Energy"
 region_id = 201
 recipe_id = 1003
-workers = 20000
-capacity_batches = 20000
+workers = 40000
+capacity_batches = 40000
 cash_minor = 1000000000000
+
 
 [[employment_agreements]]
 firm_id = 2103
 cohort_id = 20103
-workers = 20000
+workers = 40000
 monthly_wage_per_worker_minor = 1000
 
 [[ownership_stakes]]
@@ -878,6 +912,10 @@ recipe_id = 1005
 workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
+
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
 
 [[employment_agreements]]
 firm_id = 2104
@@ -919,6 +957,10 @@ workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
 
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
+
 [[employment_agreements]]
 firm_id = 3101
 cohort_id = 30103
@@ -959,6 +1001,10 @@ workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
 
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
+
 [[employment_agreements]]
 firm_id = 3102
 cohort_id = 30103
@@ -995,14 +1041,15 @@ id = 3103
 name = "Cyrene Energy"
 region_id = 301
 recipe_id = 1003
-workers = 20000
-capacity_batches = 20000
+workers = 40000
+capacity_batches = 40000
 cash_minor = 1000000000000
+
 
 [[employment_agreements]]
 firm_id = 3103
 cohort_id = 30103
-workers = 20000
+workers = 40000
 monthly_wage_per_worker_minor = 1000
 
 [[ownership_stakes]]
@@ -1038,6 +1085,10 @@ recipe_id = 1005
 workers = 20000
 capacity_batches = 20000
 cash_minor = 1000000000000
+
+[[firms.inventories]]
+good_id = 3
+quantity_milli = 2000000000
 
 [[employment_agreements]]
 firm_id = 3104

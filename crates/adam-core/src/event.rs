@@ -115,6 +115,13 @@ pub enum DomainEvent {
         liability: Money,
         paid: Money,
     },
+    FirmProcurementTrade {
+        buyer: FirmId,
+        seller: FirmId,
+        good: GoodId,
+        quantity: QuantityMilli,
+        spend: Money,
+    },
     MarketTrade {
         buyer: CohortId,
         seller: FirmId,

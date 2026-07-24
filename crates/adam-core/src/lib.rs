@@ -19,6 +19,7 @@ pub mod logistics;
 pub mod management;
 pub mod market;
 pub mod observation;
+pub mod procurement;
 pub mod production;
 pub mod rationing;
 pub mod relief;
@@ -70,6 +71,7 @@ pub use market::{
     clear_local_market,
 };
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
+pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};
 pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
 };

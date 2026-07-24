@@ -1,0 +1,8 @@
+{
+  "apiKeyHelper": "echo $ANTHROPIC_AUTH_TOKEN",
+  "primaryModel": "claude-sonnet-4-6",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://cc.freemodel.dev",
+    "ANTHROPIC_AUTH_TOKEN": "fe_oa_0cb1ff9dd018891099adb61429e920c7847f64ef3e8e25f4"
+  }
+}

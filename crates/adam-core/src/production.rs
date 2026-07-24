@@ -401,12 +401,19 @@ impl World {
     /// # Errors
     /// Returns [`WorldError`] on fixed-point overflow.
     pub fn plan_monthly_production(&self) -> Result<Vec<ProductionPlan>, WorldError> {
-        self.plan_monthly_production_internal(true)
+        self.plan_monthly_production_internal(true, true)
+    }
+
+    pub(crate) fn plan_monthly_production_requirements(
+        &self,
+    ) -> Result<Vec<ProductionPlan>, WorldError> {
+        self.plan_monthly_production_internal(true, false)
     }
 
     fn plan_monthly_production_internal(
         &self,
         honor_management_targets: bool,
+        honor_input_limits: bool,
     ) -> Result<Vec<ProductionPlan>, WorldError> {
         self.firms
             .values()
@@ -464,17 +471,19 @@ impl World {
                     batches = target_batches;
                     limiting = "management target";
                 }
-                for input in recipe.inputs() {
-                    let available = firm
-                        .inventories()
-                        .get(&input.good())
-                        .copied()
-                        .unwrap_or_default()
-                        .get();
-                    let input_batches = available / input.quantity_per_batch().get();
-                    if input_batches < batches {
-                        batches = input_batches;
-                        limiting = "intermediate input";
+                if honor_input_limits {
+                    for input in recipe.inputs() {
+                        let available = firm
+                            .inventories()
+                            .get(&input.good())
+                            .copied()
+                            .unwrap_or_default()
+                            .get();
+                        let input_batches = available / input.quantity_per_batch().get();
+                        if input_batches < batches {
+                            batches = input_batches;
+                            limiting = "intermediate input";
+                        }
                     }
                 }
                 let output = recipe
@@ -502,7 +511,7 @@ impl World {
         &self,
     ) -> Result<Vec<ProductionAdjustmentProposal>, WorldError> {
         let physical: BTreeMap<FirmId, u64> = self
-            .plan_monthly_production_internal(false)?
+            .plan_monthly_production_internal(false, true)?
             .into_iter()
             .map(|plan| (plan.firm(), plan.batches()))
             .collect();

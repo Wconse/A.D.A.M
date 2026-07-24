@@ -1,11 +1,13 @@
 use crate::{
     DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
-    HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord,
-    ProductionPlan, SimDate, SurvivalRationingOutcome, World, WorldError, clear_local_market,
+    FirmProcurementResult, HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing,
+    MarketOrder, PayrollRecord, ProductionPlan, SimDate, SurvivalRationingOutcome, World,
+    WorldError, clear_local_market,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MonthlyCommercialCycleResult {
+    pub procurement: FirmProcurementResult,
     pub production_plans: Vec<ProductionPlan>,
     pub offer_plans: Vec<FirmMarketOfferPlan>,
     pub demand_intents: Vec<DemandIntent>,
@@ -37,6 +39,7 @@ impl World {
         }
         let mut next = self.clone();
         let production_plans = next.execute_monthly_production()?;
+        let procurement = next.execute_monthly_firm_procurement()?;
         let offer_plans = next.plan_firm_market_offers()?;
         let offers: Vec<_> = offer_plans
             .iter()
@@ -87,6 +90,7 @@ impl World {
             },
         );
         let result = MonthlyCommercialCycleResult {
+            procurement,
             production_plans,
             offer_plans,
             demand_intents,
