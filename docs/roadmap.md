@@ -412,3 +412,17 @@ The TODO(refactor slice) monolith in procurement.rs is gone. Planning, settlemen
 The README was refreshed in the same slice: the repository layout now names crates/adam-content instead of the retired config/ directory, the quick start matches the release CLI invocation, and the foundation list and status describe the running monthly economy, fiscal closure with debt service, and the chronicle instead of the original scaffold.
 
 Next gate: fiscal stress must feed back into spending - a country whose debt service consumes a growing share of its revenue should restrain discretionary spending instead of expanding it, so debt spirals become a policy problem rather than an arithmetic inevitability. This is a rule change: it will move the fingerprint baseline and bump SIMULATION_VERSION.
+
+### Fiscal debt brake gate
+
+Completed vertical slices (combined step 026):
+
+```text
+chronicle: CountryFiscalYearClosed -> fiscal totals sentence (revenue, spending, closing debt, countries) -> cli: prose chronicle printed before the final fingerprint -> rule: public debt to output ratio restrains discretionary spending (1 bps of spending per 10 bps of debt ratio, capped at 600 bps, spending floor 1_200 bps) -> SIMULATION_VERSION 30 -> new seed-1 50-year baseline 17363996423594943694
+```
+
+Three slices in one step. First, the yearly chronicle now reports what governments collected, spent, and owed at closure, derived only from CountryFiscalYearClosed events; second, the console runner prints the prose chronicle before the fingerprint, so a 50-year run ends with readable history instead of raw statistics. Both slices were gated against the previous baseline `7530160749567993110` and left it untouched, proving they observe without causing.
+
+Third, the debt brake: a country whose accumulated public debt grows relative to its annual output now restrains discretionary spending before the deficit compounds further. The cause is a concrete monetary state (the debt stock and measured output), not a derived mood score; the effect is graduated, capped, and floored so states never spend below a survival floor. The gate test holds seed and legitimacy fixed and varies only opening debt: revenue is identical, spending is strictly lower for the indebted twin. This is a rule change, so SIMULATION_VERSION is now 30 and the new seed-1 50-year fingerprint baseline is `17363996423594943694` (95 tests green).
+
+Next gate: seed comparison in the console runner - run two seeds side by side and report where their chronicles diverge, closing the Stage 0 requirement for seed comparison, plus a timed release profile of the 50-year run before any optimization work.

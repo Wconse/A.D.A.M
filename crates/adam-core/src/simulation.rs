@@ -10,6 +10,9 @@ const ECONOMY_DOMAIN: u64 = 0x4543_4f4e_4f4d_5900;
 const POLITICS_DOMAIN: u64 = 0x504f_4c49_5449_4353;
 const RATE_SCALE: i128 = 1_000_000;
 const SALES_TAX_BPS: i128 = 2_000;
+const DEBT_BRAKE_RATIO_DIVISOR: i128 = 10;
+const DEBT_BRAKE_MAX_BPS: i128 = 600;
+const SPENDING_FLOOR_BPS: i128 = 1_200;
 const DEBT_INTEREST_BPS: i128 = 300;
 
 #[derive(Clone, Debug)]
@@ -638,7 +641,18 @@ fn plan_material_country(
     new_output: i128,
     tax_revenue: i128,
 ) -> Result<CountryUpdate, WorldError> {
-    let spending_bps = 2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10;
+    let debt_for_brake = i128::from(indicators.public_debt().minor_units()).max(0);
+    let debt_ratio_bps = if debt_for_brake == 0 {
+        0
+    } else if new_output <= 0 {
+        DEBT_BRAKE_MAX_BPS * DEBT_BRAKE_RATIO_DIVISOR
+    } else {
+        debt_for_brake.saturating_mul(10_000) / new_output
+    };
+    let debt_brake_bps = (debt_ratio_bps / DEBT_BRAKE_RATIO_DIVISOR).min(DEBT_BRAKE_MAX_BPS);
+    let spending_bps = (2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10
+        - debt_brake_bps)
+        .max(SPENDING_FLOOR_BPS);
     let revenue = money_from_i128(tax_revenue, "collected sales tax revenue")?;
     let interest =
         i128::from(indicators.public_debt().minor_units()).max(0) * DEBT_INTEREST_BPS / 10_000;
@@ -685,7 +699,18 @@ fn plan_country(
     new_output: i128,
 ) -> Result<CountryUpdate, WorldError> {
     let revenue_bps = 1_600 + i128::from(indicators.elite_cohesion().get()) / 20;
-    let spending_bps = 2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10;
+    let debt_for_brake = i128::from(indicators.public_debt().minor_units()).max(0);
+    let debt_ratio_bps = if debt_for_brake == 0 {
+        0
+    } else if new_output <= 0 {
+        DEBT_BRAKE_MAX_BPS * DEBT_BRAKE_RATIO_DIVISOR
+    } else {
+        debt_for_brake.saturating_mul(10_000) / new_output
+    };
+    let debt_brake_bps = (debt_ratio_bps / DEBT_BRAKE_RATIO_DIVISOR).min(DEBT_BRAKE_MAX_BPS);
+    let spending_bps = (2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10
+        - debt_brake_bps)
+        .max(SPENDING_FLOOR_BPS);
     let revenue = money_from_i128(new_output * revenue_bps / 10_000, "fiscal revenue")?;
     let interest =
         i128::from(indicators.public_debt().minor_units()).max(0) * DEBT_INTEREST_BPS / 10_000;
@@ -995,5 +1020,62 @@ mod tests {
             envelope.event(),
             DomainEvent::PublicDebtInterestCharged { .. }
         )));
+    }
+
+    #[test]
+    fn public_debt_restrains_discretionary_spending() {
+        let build = |debt: i64| {
+            let indicators = CountryIndicators::new(
+                Money::from_minor_units(0),
+                Money::from_minor_units(debt),
+                BasisPoints::new(5_000).expect("valid legitimacy"),
+                BasisPoints::new(5_000).expect("valid cohesion"),
+            );
+            let mut world = World::new(
+                WorldSeed::new(61),
+                SimDate::new(2025, 1).expect("valid date"),
+            );
+            world
+                .register_country(
+                    Country::new(CountryId::new(1), "A")
+                        .expect("country")
+                        .with_indicators(indicators),
+                )
+                .expect("country");
+            world
+                .register_region(
+                    Region::new(
+                        RegionId::new(1),
+                        CountryId::new(1),
+                        "Capital",
+                        Population::new(1_000_000),
+                        Money::from_minor_units(4_000_000_000_000),
+                    )
+                    .expect("region"),
+                )
+                .expect("region");
+            world
+        };
+        let mut lean = build(0);
+        let mut indebted = build(800_000_000_000);
+        lean.advance_one_year().expect("simulation succeeds");
+        indebted.advance_one_year().expect("simulation succeeds");
+        let fiscal = |world: &World| {
+            world
+                .events()
+                .events()
+                .iter()
+                .find_map(|envelope| match envelope.event() {
+                    DomainEvent::CountryFiscalYearClosed {
+                        revenue, spending, ..
+                    } => Some((*revenue, *spending)),
+                    _ => None,
+                })
+                .expect("fiscal closure event")
+        };
+        let (lean_revenue, lean_spending) = fiscal(&lean);
+        let (indebted_revenue, indebted_spending) = fiscal(&indebted);
+        assert_eq!(lean_revenue.minor_units(), indebted_revenue.minor_units());
+        assert!(indebted_spending.minor_units() < lean_spending.minor_units());
     }
 }
