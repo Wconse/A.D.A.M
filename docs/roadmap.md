@@ -342,3 +342,17 @@ settled B2B fill at the offer price -> per-(seller, good) trade price -> seller 
 Acceptance evidence: formatting and the full quality gate pass (88 tests across all crates); the seed-1 50-year fingerprint is unchanged at `10095822769523244874`, exactly as required - all demo markups are zero, so trade prices coincide with reference prices by construction and the chronicle must not move.
 
 Remaining sibling debt for future narrow slices: buyer-side `input_prices` in `capture_monthly_firm_observation` still come from the regional reference table (an honest buyer-side record needs a monthly procurement-fills buffer in world state, i.e. a save-schema and fingerprint change), and `plan_regional_inventory_change` still values inventory investment at reference prices.
+
+### Actual buyer-side procurement input prices gate
+
+Completed vertical slice:
+
+```text
+settled B2B fills -> per-(buyer, good) monthly purchase buffer in world state -> capture_monthly_firm_observation derives each input price from actual monthly spend / quantity -> reference-price fallback only for goods not purchased this month -> monthly reset -> SIMULATION_VERSION 28 -> new demo fingerprint baseline
+```
+
+`capture_monthly_firm_observation` now reports the actual average price the buyer paid for each recipe input during the month instead of the regional reference price. Procurement aggregates settled fills into a new world-state buffer `monthly_firm_procurement_purchases` keyed by `(buyer, good)` with total quantity and total spend; the buffer participates in the stable fingerprint, is written only after the atomic firm-state swap, and is cleared in `reset_monthly_firm_accounts`, so it lives exactly one month. Because observed input prices feed `observed_operating_baseline` and firm expectations, management decisions now react to the prices firms actually paid. A new gate test gives the farm a 20% markup so the bakery pays 6 per grain unit while the reference price stays 5, and proves the bakery's captured observation reports 6, not 5.
+
+Acceptance evidence: formatting and the full quality gate pass (89 tests across all crates); the seed-1 50-year chronicle body is byte-identical to the pre-patch run once the `final fingerprint:` line is excluded (all demo markups are zero, so actual prices coincide with reference prices by construction and the history must not move). The fingerprint baseline changes by design because `SIMULATION_VERSION` (27 -> 28) and the new world-state buffer participate in the hash: the old baseline `10095822769523244874` is retired and the new seed-1 50-year baseline is `6474822005825804939`.
+
+Next gate: value planned regional inventory changes at observed prices - `plan_regional_inventory_change` still prices inventory investment from the regional reference table.

@@ -101,6 +101,7 @@ impl World {
         let mut fills = Vec::new();
         let mut unmet = BTreeMap::new();
         let mut trade_prices: BTreeMap<(FirmId, GoodId), Money> = BTreeMap::new();
+        let mut purchases: BTreeMap<(FirmId, GoodId), (u64, i64)> = BTreeMap::new();
         for order in &orders {
             let mut remaining = order.quantity.get();
             for offer in offers.iter_mut().filter(|offer| {
@@ -152,6 +153,17 @@ impl World {
                     .apply_cash_delta(spend)?;
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
                 trade_prices.insert((offer.seller, order.good), offer.unit_price);
+                let purchase = purchases.entry((order.buyer, order.good)).or_default();
+                purchase.0 =
+                    purchase
+                        .0
+                        .checked_add(quantity)
+                        .ok_or(WorldError::ArithmeticOverflow(
+                            "firm procurement purchase quantity",
+                        ))?;
+                purchase.1 = purchase.1.checked_add(spend.minor_units()).ok_or(
+                    WorldError::ArithmeticOverflow("firm procurement purchase spend"),
+                )?;
                 remaining -= quantity;
                 fills.push(FirmProcurementFill {
                     buyer: order.buyer,
@@ -166,6 +178,12 @@ impl World {
             }
         }
         self.firms = firms;
+        for ((buyer, good), (quantity, spend)) in purchases {
+            self.monthly_firm_procurement_purchases.insert(
+                (buyer, good),
+                (QuantityMilli::new(quantity), Money::from_minor_units(spend)),
+            );
+        }
         let mut revenue = BTreeMap::<FirmId, i128>::new();
         let mut sold = BTreeMap::<(FirmId, GoodId), u64>::new();
         for fill in &fills {

@@ -61,14 +61,30 @@ impl World {
             .ok_or(WorldError::UnknownRecipe(definition.recipe()))?;
         let mut input_prices = BTreeMap::new();
         for input in recipe.inputs() {
-            let price = self
-                .regional_prices
-                .get(&(definition.region(), input.good()))
+            let purchase = self
+                .monthly_firm_procurement_purchases
+                .get(&(firm, input.good()))
                 .copied()
-                .ok_or(WorldError::MissingRegionalPrice {
-                    region: definition.region(),
-                    good: input.good(),
-                })?;
+                .filter(|(quantity, _)| quantity.get() > 0);
+            let price = if let Some((quantity, spend)) = purchase {
+                let unit_price = i128::from(spend.minor_units())
+                    .checked_mul(i128::from(crate::QuantityMilli::SCALE))
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "observed procurement unit price",
+                    ))?
+                    / i128::from(quantity.get());
+                Money::from_minor_units(i64::try_from(unit_price).map_err(|_| {
+                    WorldError::ArithmeticOverflow("observed procurement unit price")
+                })?)
+            } else {
+                self.regional_prices
+                    .get(&(definition.region(), input.good()))
+                    .copied()
+                    .ok_or(WorldError::MissingRegionalPrice {
+                        region: definition.region(),
+                        good: input.good(),
+                    })?
+            };
             input_prices.insert(input.good(), price);
         }
         let accounts = self

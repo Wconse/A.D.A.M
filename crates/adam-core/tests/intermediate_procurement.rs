@@ -406,3 +406,43 @@ fn procurement_observation_records_actual_trade_price_not_reference_price() {
     assert_eq!(grain_sale.unit_price, Money::from_minor_units(6));
     assert_ne!(grain_sale.unit_price, Money::from_minor_units(5));
 }
+#[test]
+fn buyer_observation_records_actual_procurement_price_not_reference_price() {
+    let mut world = production_chain_world();
+    // A 20% farm markup makes the actual B2B grain trade settle at 6 while
+    // the regional reference price stays 5.
+    world
+        .set_firm_policy(
+            ActorId::new(1),
+            FirmId::new(FARM),
+            FirmPolicy::new(
+                0,
+                BasisPoints::new(2_000).expect("markup"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+            )
+            .expect("policy"),
+        )
+        .expect("set farm markup");
+    let result = world
+        .execute_monthly_economic_cycle()
+        .expect("economic month");
+
+    // The bakery actually paid 6 for one grain unit.
+    assert_eq!(result.commercial.procurement.fills.len(), 1);
+    let fill = result.commercial.procurement.fills[0];
+    assert_eq!(fill.buyer, FirmId::new(BAKERY));
+    assert_eq!(fill.spend, Money::from_minor_units(6));
+
+    // The buyer's captured observation reports the actually paid grain price,
+    // not the regional reference price.
+    let observation = world.firm_operating_history()[&FirmId::new(BAKERY)]
+        .last()
+        .expect("bakery observation");
+    assert_eq!(
+        observation.input_prices()[&GoodId::new(GRAIN)],
+        Money::from_minor_units(6),
+        "buyer observation must carry the actually paid unit price"
+    );
+}

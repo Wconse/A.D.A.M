@@ -673,6 +673,8 @@ pub struct World {
     pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
+    pub(crate) monthly_firm_procurement_purchases:
+        BTreeMap<(FirmId, GoodId), (crate::QuantityMilli, Money)>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
     pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
@@ -738,6 +740,7 @@ impl World {
             firm_expectations: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
+            monthly_firm_procurement_purchases: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -1079,6 +1082,13 @@ impl World {
                     Self::write_market_offer_outcome_fingerprint(hash, *outcome);
                 }
             }
+        }
+        hash.write_u64(self.monthly_firm_procurement_purchases.len() as u64);
+        for ((firm, good), (quantity, spend)) in &self.monthly_firm_procurement_purchases {
+            hash.write_u32(firm.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
+            hash.write_i64(spend.minor_units());
         }
         hash.write_u64(self.monthly_firm_market_outcomes.len() as u64);
         for (firm, outcomes) in &self.monthly_firm_market_outcomes {
