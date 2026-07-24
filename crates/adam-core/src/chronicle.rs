@@ -40,6 +40,10 @@ struct YearSummary {
     rationed_requested_milli: u128,
     rationed_available_milli: u128,
     politics_changes: u64,
+    fiscal_revenue_minor: i128,
+    fiscal_spending_minor: i128,
+    closing_debt_minor: i128,
+    closed_countries: u64,
     debt_interest_minor: i128,
     indebted_countries: u64,
     measured_regions: u64,
@@ -104,6 +108,17 @@ impl YearSummary {
             DomainEvent::PublicDebtInterestCharged { interest, .. } => {
                 self.indebted_countries += 1;
                 self.debt_interest_minor += i128::from(interest.minor_units());
+            }
+            DomainEvent::CountryFiscalYearClosed {
+                revenue,
+                spending,
+                debt,
+                ..
+            } => {
+                self.fiscal_revenue_minor += i128::from(revenue.minor_units());
+                self.fiscal_spending_minor += i128::from(spending.minor_units());
+                self.closing_debt_minor += i128::from(debt.minor_units());
+                self.closed_countries += 1;
             }
             DomainEvent::CountryPoliticsChanged { .. } => self.politics_changes += 1,
             DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
@@ -170,6 +185,15 @@ impl YearSummary {
             sentences.push(format!(
                 "Public debt service charged {} minor currency units of interest across {} indebted countries.",
                 self.debt_interest_minor, self.indebted_countries
+            ));
+        }
+        if self.closed_countries > 0 {
+            sentences.push(format!(
+                "Treasuries collected {} and spent {} minor currency units, closing the year with {} of public debt across {} countries.",
+                self.fiscal_revenue_minor,
+                self.fiscal_spending_minor,
+                self.closing_debt_minor,
+                self.closed_countries
             ));
         }
         if self.politics_changes > 0 {
@@ -291,5 +315,34 @@ mod tests {
         assert!(chronicle[0].text.contains("interest"));
         assert!(chronicle[0].text.contains("30000"));
         assert!(chronicle[0].text.contains("1 indebted"));
+    }
+
+    #[test]
+    fn chronicle_reports_fiscal_closure_totals() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(9), date);
+        world.events.append(
+            date,
+            DomainEvent::CountryFiscalYearClosed {
+                country: CountryId::new(1),
+                revenue: Money::from_minor_units(500),
+                spending: Money::from_minor_units(700),
+                treasury: Money::from_minor_units(0),
+                debt: Money::from_minor_units(200),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert!(chronicle[0].text.contains("collected 500"));
+        assert!(chronicle[0].text.contains("spent 700"));
+        assert!(chronicle[0].text.contains("200 of public debt"));
+        assert!(chronicle[0].text.contains("across 1 countries"));
     }
 }
