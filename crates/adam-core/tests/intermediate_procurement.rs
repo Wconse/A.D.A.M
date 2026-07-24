@@ -446,3 +446,283 @@ fn buyer_observation_records_actual_procurement_price_not_reference_price() {
         "buyer observation must carry the actually paid unit price"
     );
 }
+
+#[allow(clippy::too_many_lines)]
+fn lean_bakery_world() -> World {
+    // Same production chain as `production_chain_world`, except the bakery
+    // opens the year without a grain buffer. It then finishes the year holding
+    // the grain unit procured in December: a real positive grain inventory
+    // investment whose valuation price is visible in the annual measurement.
+    let mut world = World::new(WorldSeed::new(4_242), SimDate::new(2025, 1).expect("date"));
+    world
+        .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+        .expect("register country");
+    world
+        .register_good(Good::new(GoodId::new(GRAIN), "Grain").expect("good"))
+        .expect("register grain");
+    world
+        .register_good(Good::new(GoodId::new(BREAD), "Bread").expect("good"))
+        .expect("register bread");
+    world
+        .register_consumption_profile(
+            ConsumptionProfile::new(
+                NeedProfileId::new(1),
+                "Households",
+                vec![ConsumptionTarget::new(
+                    GoodId::new(BREAD),
+                    NeedTier::Survival,
+                    DemandBasis::PerPerson,
+                    QuantityMilli::new(1_000),
+                )],
+            )
+            .expect("profile"),
+        )
+        .expect("register profile");
+    world
+        .register_region(
+            Region::new(
+                RegionId::new(1),
+                CountryId::new(1),
+                "R",
+                Population::new(2),
+                Money::from_minor_units(1),
+            )
+            .expect("region"),
+        )
+        .expect("register region");
+    world
+        .register_actor(
+            Actor::new(ActorId::new(1), "Owner", RegionId::new(1), 1980).expect("actor"),
+        )
+        .expect("register actor");
+    world
+        .register_production_recipe(
+            ProductionRecipe::new(
+                RecipeId::new(FARM),
+                "Grain recipe",
+                GoodId::new(GRAIN),
+                QuantityMilli::new(1_000),
+                1_000,
+                vec![],
+            )
+            .expect("grain recipe"),
+        )
+        .expect("register grain recipe");
+    world
+        .register_production_recipe(
+            ProductionRecipe::new(
+                RecipeId::new(BAKERY),
+                "Bread recipe",
+                GoodId::new(BREAD),
+                QuantityMilli::new(2_000),
+                1_000,
+                vec![ProductionInput::new(
+                    GoodId::new(GRAIN),
+                    QuantityMilli::new(1_000),
+                )],
+            )
+            .expect("bread recipe"),
+        )
+        .expect("register bread recipe");
+    world
+        .register_firm(
+            Firm::new(
+                FirmId::new(FARM),
+                "Farm",
+                RegionId::new(1),
+                RecipeId::new(FARM),
+                1,
+                1,
+                Money::from_minor_units(1_000),
+                BTreeMap::new(),
+            )
+            .expect("farm"),
+        )
+        .expect("register farm");
+    world
+        .register_firm(
+            Firm::new(
+                FirmId::new(BAKERY),
+                "Bakery",
+                RegionId::new(1),
+                RecipeId::new(BAKERY),
+                1,
+                1,
+                Money::from_minor_units(1_000),
+                BTreeMap::from([(GoodId::new(BREAD), QuantityMilli::new(2_000))]),
+            )
+            .expect("bakery"),
+        )
+        .expect("register bakery");
+    world
+        .register_household_cohort(
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(2),
+                2,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Employed,
+                Money::default(),
+                Money::from_minor_units(100),
+                Money::default(),
+            )
+            .expect("cohort"),
+        )
+        .expect("register cohort");
+    for firm in [FirmId::new(FARM), FirmId::new(BAKERY)] {
+        world
+            .register_ownership_stake(OwnershipStake::new(
+                firm,
+                ActorId::new(1),
+                BasisPoints::new(6_000).expect("rights"),
+                BasisPoints::new(6_000).expect("rights"),
+            ))
+            .expect("ownership");
+        world
+            .register_firm_appointment(FirmAppointment::new(
+                firm,
+                ActorId::new(1),
+                CorporateRole::OperationsManager,
+            ))
+            .expect("appointment");
+        world
+            .set_firm_policy(
+                ActorId::new(1),
+                firm,
+                FirmPolicy::new(
+                    0,
+                    BasisPoints::new(0).expect("markup"),
+                    BasisPoints::new(0).expect("allocation"),
+                    BasisPoints::new(0).expect("allocation"),
+                    BasisPoints::new(0).expect("allocation"),
+                )
+                .expect("policy"),
+            )
+            .expect("set policy");
+        world
+            .set_firm_production_target(ActorId::new(1), firm, 1)
+            .expect("target");
+    }
+    world
+        .register_employment_agreement(
+            EmploymentAgreement::new(
+                FirmId::new(FARM),
+                CohortId::new(1),
+                1,
+                Money::from_minor_units(50),
+            )
+            .expect("farm agreement"),
+        )
+        .expect("register farm agreement");
+    world
+        .register_employment_agreement(
+            EmploymentAgreement::new(
+                FirmId::new(BAKERY),
+                CohortId::new(1),
+                1,
+                Money::from_minor_units(50),
+            )
+            .expect("bakery agreement"),
+        )
+        .expect("register bakery agreement");
+    world
+        .set_regional_price(
+            RegionId::new(1),
+            GoodId::new(GRAIN),
+            Money::from_minor_units(5),
+        )
+        .expect("grain price");
+    world
+        .set_regional_price(
+            RegionId::new(1),
+            GoodId::new(BREAD),
+            Money::from_minor_units(10),
+        )
+        .expect("bread price");
+    world
+}
+
+#[test]
+fn inventory_investment_is_valued_at_observed_prices_not_reference_prices() {
+    let mut world = lean_bakery_world();
+    // A 20% farm markup separates the actual grain trade price (6) from the
+    // regional reference price (5).
+    world
+        .set_firm_policy(
+            ActorId::new(1),
+            FirmId::new(FARM),
+            FirmPolicy::new(
+                0,
+                BasisPoints::new(2_000).expect("markup"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+            )
+            .expect("policy"),
+        )
+        .expect("set farm markup");
+    world.advance_economic_year().expect("economic year");
+
+    // Physical premise: the bakery ends the year holding exactly the grain
+    // unit procured in December (opening grain was zero) and no bread.
+    let bakery = &world.firms()[&FirmId::new(BAKERY)];
+    assert_eq!(
+        bakery.inventories()[&GoodId::new(GRAIN)],
+        QuantityMilli::new(1_000)
+    );
+    assert_eq!(
+        bakery
+            .inventories()
+            .get(&GoodId::new(BREAD))
+            .copied()
+            .unwrap_or_default(),
+        QuantityMilli::default()
+    );
+
+    // Monetary premise: all twelve monthly grain trades settled at 6.
+    let procurement_spend: i64 = world
+        .events()
+        .events()
+        .iter()
+        .filter_map(|envelope| match envelope.event() {
+            DomainEvent::FirmProcurementTrade { spend, .. } => Some(spend.minor_units()),
+            _ => None,
+        })
+        .sum();
+    assert_eq!(procurement_spend, 72, "twelve monthly grain trades at 6");
+
+    // The grain investment (+1.0) must be valued at the actually paid price 6
+    // and the bread drawdown (-2.0) at the actually observed sale price 10:
+    // inventory change -14, where the reference table would report -15.
+    let (final_consumption, inventory_change, annual_output) = world
+        .events()
+        .events()
+        .iter()
+        .find_map(|envelope| match envelope.event() {
+            DomainEvent::RegionalOutputMeasured {
+                region,
+                final_consumption,
+                inventory_change,
+                annual_output,
+            } if *region == RegionId::new(1) => Some((
+                final_consumption.minor_units(),
+                inventory_change.minor_units(),
+                annual_output.minor_units(),
+            )),
+            _ => None,
+        })
+        .expect("regional output measurement");
+    assert_eq!(
+        final_consumption, 240,
+        "twelve months of two bread units at 10"
+    );
+    assert_eq!(
+        inventory_change, -14,
+        "inventory investment must be valued at observed transaction prices"
+    );
+    assert_eq!(annual_output, final_consumption + inventory_change);
+}

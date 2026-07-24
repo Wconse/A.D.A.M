@@ -356,3 +356,17 @@ settled B2B fills -> per-(buyer, good) monthly purchase buffer in world state ->
 Acceptance evidence: formatting and the full quality gate pass (89 tests across all crates); the seed-1 50-year chronicle body is byte-identical to the pre-patch run once the `final fingerprint:` line is excluded (all demo markups are zero, so actual prices coincide with reference prices by construction and the history must not move). The fingerprint baseline changes by design because `SIMULATION_VERSION` (27 -> 28) and the new world-state buffer participate in the hash: the old baseline `10095822769523244874` is retired and the new seed-1 50-year baseline is `6474822005825804939`.
 
 Next gate: value planned regional inventory changes at observed prices - `plan_regional_inventory_change` still prices inventory investment from the regional reference table.
+
+### Observed-price inventory valuation gate
+
+Completed vertical slice:
+
+```text
+bounded firm observation history (exactly the closed year) -> latest observed per-(firm, good) transaction price: buyer-side input price first, then seller-side settled market outcome -> plan_regional_inventory_change values annual inventory deltas at observed prices -> regional reference table only as a fallback for goods with no observed trades -> no schema change -> SIMULATION_VERSION stays 28 -> fingerprint baseline unchanged
+```
+
+`plan_regional_inventory_change` now values annual inventory investment at the prices firms actually transacted at instead of the regional reference table. A private valuation helper scans the firm's bounded operating history and prefers the most recent buyer-side observed input price, then the most recent seller-side settled market-outcome price for the good; the regional reference price remains only as a fallback. Together with the seller-side (actual trade prices) and buyer-side (actual procurement prices) gates this closes the loop: both components of measured regional output - final consumption and inventory change - now derive from actual transactions.
+
+Acceptance evidence: formatting and the full quality gate pass (90 tests across all crates); a new gate test gives the farm a 20% markup and proves the annual inventory change is valued at the observed transaction price of 6 per grain unit instead of the reference price 5. Because no world-state schema changed and all demo markups are zero, the seed-1 50-year fingerprint must stay at `6474822005825804939` - and it does.
+
+Next gate: charge annual interest on public debt - `close_budget` capitalizes deficits into debt, but the debt stock is causally inert: a country carrying half a million of debt closes the same budget as a debt-free one.

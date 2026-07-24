@@ -255,6 +255,29 @@ impl World {
             .collect()
     }
 
+    /// Latest observed transaction price for one firm and good in the closed year.
+    ///
+    /// Prefers the buyer-side price the firm actually paid for the good, then the
+    /// firm's latest settled seller-side outcome price. `None` means the bounded
+    /// operating history holds no transaction evidence for this good, and the
+    /// caller falls back to the regional reference table.
+    fn observed_inventory_valuation_price(&self, firm: FirmId, good: GoodId) -> Option<Money> {
+        let history = self.firm_operating_history.get(&firm)?;
+        for observation in history.iter().rev() {
+            if let Some(price) = observation.input_prices().get(&good) {
+                return Some(*price);
+            }
+            if let Some(outcome) = observation
+                .market_outcomes()
+                .iter()
+                .rev()
+                .find(|outcome| outcome.good == good && outcome.sold.get() > 0)
+            {
+                return Some(outcome.unit_price);
+            }
+        }
+        None
+    }
     fn plan_regional_inventory_change(
         &self,
         opening: &BTreeMap<FirmId, BTreeMap<GoodId, QuantityMilli>>,
@@ -277,12 +300,17 @@ impl World {
                     .unwrap_or_default()
                     .get();
                 let delta = i128::from(current) - i128::from(previous);
-                let price = self.regional_prices.get(&(firm.region(), good)).ok_or(
-                    WorldError::MissingRegionalPrice {
-                        region: firm.region(),
-                        good,
-                    },
-                )?;
+                let price = match self.observed_inventory_valuation_price(firm.id(), good) {
+                    Some(observed) => observed,
+                    None => self
+                        .regional_prices
+                        .get(&(firm.region(), good))
+                        .copied()
+                        .ok_or(WorldError::MissingRegionalPrice {
+                            region: firm.region(),
+                            good,
+                        })?,
+                };
                 let value = delta.checked_mul(i128::from(price.minor_units())).ok_or(
                     WorldError::ArithmeticOverflow("regional inventory valuation"),
                 )? / i128::from(QuantityMilli::SCALE);
