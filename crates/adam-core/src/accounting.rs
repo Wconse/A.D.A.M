@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FirmMonthlyAccounts {
     sales_revenue: Money,
+    final_sales_revenue: Money,
     wages_owed: Money,
     wages_paid: Money,
     wage_arrears: Money,
@@ -13,6 +14,10 @@ impl FirmMonthlyAccounts {
     #[must_use]
     pub const fn sales_revenue(self) -> Money {
         self.sales_revenue
+    }
+    #[must_use]
+    pub const fn final_sales_revenue(self) -> Money {
+        self.final_sales_revenue
     }
     #[must_use]
     pub const fn wages_owed(self) -> Money {
@@ -161,6 +166,23 @@ impl World {
                 .sales_revenue,
             revenue,
             "firm monthly sales",
+        )
+    }
+    /// Records a final (household) sale: counted in total revenue and in the taxable base.
+    pub(crate) fn record_firm_final_sale(
+        &mut self,
+        firm: FirmId,
+        revenue: Money,
+    ) -> Result<(), WorldError> {
+        self.record_firm_sale(firm, revenue)?;
+        FirmMonthlyAccounts::add(
+            &mut self
+                .firm_monthly_accounts
+                .entry(firm)
+                .or_default()
+                .final_sales_revenue,
+            revenue,
+            "firm monthly final sales",
         )
     }
     pub(crate) fn record_firm_payroll(

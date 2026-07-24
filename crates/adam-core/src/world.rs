@@ -1067,6 +1067,7 @@ impl World {
                 hash.write_i32(observation.date().year());
                 hash.write_u16(observation.date().day_of_year());
                 hash.write_i64(observation.sales_revenue().minor_units());
+                hash.write_i64(observation.final_sales_revenue().minor_units());
                 hash.write_u64(observation.produced_batches());
                 hash.write_u64(observation.input_prices().len() as u64);
                 for (good, price) in observation.input_prices() {
@@ -1091,6 +1092,7 @@ impl World {
         for (firm, row) in &self.firm_monthly_accounts {
             hash.write_u32(firm.get());
             hash.write_i64(row.sales_revenue().minor_units());
+            hash.write_i64(row.final_sales_revenue().minor_units());
             hash.write_i64(row.wages_owed().minor_units());
             hash.write_i64(row.wages_paid().minor_units());
             hash.write_i64(row.wage_arrears().minor_units());

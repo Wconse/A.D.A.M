@@ -8,6 +8,7 @@ pub const FIRM_OBSERVATION_HISTORY_LIMIT: usize = 12;
 pub struct FirmOperatingObservation {
     date: SimDate,
     sales_revenue: Money,
+    final_sales_revenue: Money,
     produced_batches: u64,
     input_prices: BTreeMap<GoodId, Money>,
     market_outcomes: Vec<MarketOfferOutcome>,
@@ -20,6 +21,10 @@ impl FirmOperatingObservation {
     #[must_use]
     pub const fn sales_revenue(&self) -> Money {
         self.sales_revenue
+    }
+    #[must_use]
+    pub const fn final_sales_revenue(&self) -> Money {
+        self.final_sales_revenue
     }
     #[must_use]
     pub const fn produced_batches(&self) -> u64 {
@@ -88,6 +93,7 @@ impl World {
         let observation = FirmOperatingObservation {
             date: self.date,
             sales_revenue: accounts.sales_revenue(),
+            final_sales_revenue: accounts.final_sales_revenue(),
             produced_batches: accounts.produced_batches(),
             input_prices,
             market_outcomes,
@@ -102,6 +108,7 @@ impl World {
             crate::DomainEvent::FirmOperatingObservationCaptured {
                 firm,
                 sales_revenue: observation.sales_revenue(),
+                final_sales_revenue: observation.final_sales_revenue(),
                 produced_batches: observation.produced_batches(),
                 input_prices: observation
                     .input_prices()

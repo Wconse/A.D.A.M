@@ -65,6 +65,7 @@ pub enum DomainEvent {
     FirmOperatingObservationCaptured {
         firm: FirmId,
         sales_revenue: Money,
+        final_sales_revenue: Money,
         produced_batches: u64,
         input_prices: Vec<(GoodId, Money)>,
         market_outcomes: Vec<crate::MarketOfferOutcome>,

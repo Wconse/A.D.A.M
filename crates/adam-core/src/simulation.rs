@@ -297,6 +297,9 @@ impl World {
         Ok(changes)
     }
 
+    /// Sales tax is levied on final household sales only; intermediate
+    /// firm-to-firm turnover is untaxed. Total revenue remains untaxed
+    /// decision evidence for firm management.
     fn plan_firm_sales_taxes(&self) -> Result<Vec<FirmTaxUpdate>, WorldError> {
         self.firms
             .values()
@@ -304,7 +307,7 @@ impl World {
                 let history = self.firm_operating_history.get(&firm.id())?;
                 let taxable_sales = history.iter().try_fold(0_i128, |total, observation| {
                     total
-                        .checked_add(i128::from(observation.sales_revenue().minor_units()))
+                        .checked_add(i128::from(observation.final_sales_revenue().minor_units()))
                         .ok_or(WorldError::ArithmeticOverflow("annual taxable firm sales"))
                 });
                 Some((firm, taxable_sales))

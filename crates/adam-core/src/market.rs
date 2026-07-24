@@ -288,7 +288,7 @@ fn record_market_settlement_evidence(
         );
     }
     for (firm, revenue) in revenues {
-        world.record_firm_sale(firm, revenue)?;
+        world.record_firm_final_sale(firm, revenue)?;
     }
     for fill in &clearing.fills {
         world.events.append(

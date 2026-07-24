@@ -303,3 +303,16 @@ embedded demo content -> 50 deterministic economic years -> readable yearly cons
 Core fix shipped with this slice: an extinct region (all-zero cohort ledger with a zero rescale target) now closes the annual demographic closure cleanly instead of erroring, covered by a dedicated regression test.
 
 Author decision recorded: the sales tax must stop cascading over intermediate B2B turnover and apply to final household sales only. That accounting separation (taxable final revenue vs. total revenue as decision evidence for firms) is the next gate. After it, rebuild the lost TOML content pipeline (schema v5) on top of the embedded demo scenario.
+### Final-sales-only sales tax gate
+
+Completed vertical slice:
+
+```text
+separate taxable final revenue from total revenue -> tax final household sales only -> untaxed intermediate B2B turnover -> re-verified 50-year deterministic chronicle
+```
+
+The annual sales tax (20%) is now levied exclusively on final household sales. Firm monthly accounts and operating observations carry both figures: `final_sales_revenue` (the taxable base, filled only by household market settlement) and `sales_revenue` (total revenue including intermediate firm-to-firm turnover), which stays untaxed decision evidence for firm management. Both fields participate in the stable world fingerprint; SIMULATION_VERSION bumped to 27. Verified on a real run: year-one taxes dropped from 66,000 (turnover cascade) to 52,800 = 20% x 264,000 of household spending; equal seeds still produce byte-identical 50-year chronicles and different seeds diverge; the demo narrative is preserved (Northreach still decays into extinction mid-century, Southvale persists).
+
+Observed modeling debt for a future slice: with the smaller tax base the country runs a permanent deficit and public debt grows without bound or consequence (about 544,000 by year 50) - there is no debt service and no fiscal adjustment yet. A debt-and-spending feedback belongs in a later politics/fiscal slice.
+
+Next gate: rebuild the TOML content pipeline (schema v5) on top of the embedded demo scenario.
