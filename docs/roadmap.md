@@ -440,3 +440,17 @@ The console runner now closes two Stage 0 requirements. Seed comparison: `--comp
 Acceptance: 95 tests green, seed-1 50-year fingerprint baseline unchanged at `17363996423594943694` (SIMULATION_VERSION 30), self-comparison identical, seeds 1 and 2 diverge.
 
 Next gate: a second country in the demo content (TOML) so the chronicle narrates more than one fiscal and demographic path in a single run. This is a content change: the seed-1 baseline moves and the content schema gains a second country without any rule changes.
+
+### Second country gate
+
+Completed vertical slice (step 028):
+
+```text
+content schema v6: [[countries]] list + per-region country id -> demo adds Borealia with region Eastport (actor Sana Kettu, grain and bread firms) -> annual closure emits CountryFiscalYearClosed per country -> chronicle reports totals across 2 countries -> console runner narrates two national paths in one run
+```
+
+The Stage 0 requirement of several countries is now real content, not a schema promise. The scenario schema moved from a single `[country]` table to a `[[countries]]` list with an explicit `country` id on every region, so scenarios can shape any political map without code changes. Borealia starts between Arcadia's two extremes (mid buffers, mid wages), so its long-run fate is decided by the simulation, not by construction. A gate test builds the demo world, advances one economic year, and requires the chronicle to report fiscal closure across 2 countries.
+
+This is a content change under unchanged rules: SIMULATION_VERSION stays 30 and the seed-1 50-year fingerprint moved to `8292603064090461814` as the new content baseline. Acceptance: 96 tests green, chronicle mentions two countries end to end, release self-comparison identical.
+
+Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya Roden, Sana Kettu) exist in the world but the chronicle never names them; surface owner decisions as attributed chronicle lines so the letopis reads as history made by people, not aggregates.

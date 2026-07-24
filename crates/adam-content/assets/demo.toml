@@ -1,15 +1,20 @@
-# A.D.A.M content schema v5.
-# Stage 0 demo: two contrasting regional stories under the 20% final-sales tax.
+# A.D.A.M content schema v6.
+# Stage 0 demo: two contrasting Arcadian stories plus the separate country of
+# Borealia, all under the 20% final-sales tax.
 # All money values are minor units; all quantities are milli-units (1000 = 1.0).
-schema_version = 5
+schema_version = 6
 
 [scenario]
 start_year = 2026
 start_day = 1
 
-[country]
+[[countries]]
 id = 1
 name = "Arcadia"
+
+[[countries]]
+id = 2
+name = "Borealia"
 
 [[goods]]
 id = 1
@@ -50,6 +55,7 @@ quantity_per_batch_milli = 1000
 [[regions]]
 id = 1
 name = "Northreach"
+country = 1
 population = 1000
 initial_annual_output = 1
 
@@ -130,6 +136,7 @@ allocations_bp = [0, 0, 0]
 [[regions]]
 id = 2
 name = "Southvale"
+country = 1
 population = 1000
 initial_annual_output = 1
 
@@ -188,6 +195,87 @@ capacity_batches = 500
 production_target = 500
 cash = 1500000
 wage = 18
+
+[[regions.firms.inventory]]
+good = 1
+quantity_milli = 500000
+
+[[regions.firms.inventory]]
+good = 2
+quantity_milli = 1000000
+
+[regions.firms.governance]
+owner_voting_bp = 6000
+owner_economic_bp = 6000
+manager_role = "operations_manager"
+
+[regions.firms.policy]
+inventory_buffer_days = 0
+price_markup_bp = 0
+allocations_bp = [0, 0, 0]
+
+[[regions]]
+id = 3
+name = "Eastport"
+country = 2
+population = 1000
+initial_annual_output = 1
+
+[regions.owner]
+id = 3
+name = "Sana Kettu"
+birth_year = 1985
+
+[regions.cohort]
+id = 3
+need_profile = 1
+people = 1000
+households = 400
+age_band = "adult"
+household_type = "working_age"
+education = "secondary"
+employment = "employed"
+annual_income = 0
+liquid_wealth = 20000
+debt = 0
+
+[[regions.prices]]
+good = 1
+minor_units = 5
+
+[[regions.prices]]
+good = 2
+minor_units = 11
+
+[[regions.firms]]
+id = 31
+name = "Eastport Grain Collective"
+recipe = 1
+workers = 125
+capacity_batches = 125
+production_target = 125
+cash = 300000
+wage = 20
+
+[regions.firms.governance]
+owner_voting_bp = 6000
+owner_economic_bp = 6000
+manager_role = "operations_manager"
+
+[regions.firms.policy]
+inventory_buffer_days = 0
+price_markup_bp = 0
+allocations_bp = [0, 0, 0]
+
+[[regions.firms]]
+id = 32
+name = "Eastport Bakery"
+recipe = 2
+workers = 500
+capacity_batches = 500
+production_target = 500
+cash = 900000
+wage = 20
 
 [[regions.firms.inventory]]
 good = 1

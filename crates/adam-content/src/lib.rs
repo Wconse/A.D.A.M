@@ -1,12 +1,16 @@
 //! Versioned content loading and validation for A.D.A.M.
 //!
-//! Content schema v5: a scenario is a TOML document (see `assets/demo.toml`)
+//! Content schema v6: a scenario is a TOML document (see `assets/demo.toml`)
 //! loaded into a [`World`] through [`world_from_toml_str`]. The embedded
 //! Stage 0 demo scenario keeps telling two contrasting stories under the 20%
 //! final-sales tax, the only monetary sink of the closed economy:
 //! - Northreach runs a thin bakery cash buffer and is expected to decay
 //!   mid-chronicle (wage arrears, deprivation, mortality);
 //! - Southvale carries buffers and wages sized to survive the full 50 years.
+//!
+//! Schema v6 replaces the single country with a countries list: the demo also
+//! runs Borealia, a second country with its own region, so a single run
+//! narrates more than one fiscal and demographic path.
 
 use std::collections::BTreeMap;
 
@@ -20,9 +24,9 @@ use adam_core::{
 };
 
 /// Content schema version understood by this crate.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
-/// The embedded Stage 0 demo scenario in content schema v5.
+/// The embedded Stage 0 demo scenario in content schema v6.
 pub const DEMO_SCENARIO_TOML: &str = include_str!("../assets/demo.toml");
 
 /// Errors raised while loading scenario content.
@@ -59,7 +63,7 @@ impl From<WorldError> for ContentError {
 struct ScenarioSpec {
     schema_version: u32,
     scenario: ScenarioMeta,
-    country: CountrySpec,
+    countries: Vec<CountrySpec>,
     goods: Vec<GoodSpec>,
     consumption_profiles: Vec<ProfileSpec>,
     recipes: Vec<RecipeSpec>,
@@ -130,6 +134,7 @@ struct RegionSpec {
     name: String,
     population: u64,
     initial_annual_output: i64,
+    country: u32,
     owner: OwnerSpec,
     cohort: CohortSpec,
     prices: Vec<PriceSpec>,
@@ -223,7 +228,7 @@ pub fn demo_world(seed: u64) -> Result<World, WorldError> {
     }
 }
 
-/// Builds a [`World`] from a content schema v5 TOML scenario document.
+/// Builds a [`World`] from a content schema v6 TOML scenario document.
 ///
 /// # Errors
 /// Returns [`ContentError`] when the document cannot be parsed, violates the
@@ -240,18 +245,20 @@ pub fn world_from_toml_str(seed: u64, document: &str) -> Result<World, ContentEr
         .map_err(|error| ContentError::Schema(format!("invalid start date: {error:?}")))?;
     let mut world = World::new(WorldSeed::new(seed), start);
     register_catalog(&mut world, &spec)?;
-    let country = CountryId::new(spec.country.id);
+
     for region in &spec.regions {
-        register_region_economy(&mut world, country, region)?;
+        register_region_economy(&mut world, CountryId::new(region.country), region)?;
     }
     Ok(world)
 }
 
 fn register_catalog(world: &mut World, spec: &ScenarioSpec) -> Result<(), ContentError> {
-    world.register_country(
-        Country::new(CountryId::new(spec.country.id), &spec.country.name)
-            .map_err(|error| ContentError::Schema(format!("invalid country: {error:?}")))?,
-    )?;
+    for country in &spec.countries {
+        world.register_country(
+            Country::new(CountryId::new(country.id), &country.name)
+                .map_err(|error| ContentError::Schema(format!("invalid country: {error:?}")))?,
+        )?;
+    }
     for good in &spec.goods {
         world.register_good(
             Good::new(GoodId::new(good.id), &good.name)
@@ -438,7 +445,7 @@ fn parse_basis_points(value: u16) -> Result<BasisPoints, ContentError> {
 }
 
 fn unsupported(kind: &str, value: &str) -> ContentError {
-    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v5"))
+    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v6"))
 }
 
 fn parse_need_tier(value: &str) -> Result<NeedTier, ContentError> {
@@ -519,7 +526,7 @@ mod tests {
 
     #[test]
     fn wrong_schema_version_is_rejected() {
-        let document = DEMO_SCENARIO_TOML.replace("schema_version = 5", "schema_version = 4");
+        let document = DEMO_SCENARIO_TOML.replace("schema_version = 6", "schema_version = 4");
         assert!(matches!(
             world_from_toml_str(1, &document),
             Err(ContentError::Schema(_))
@@ -533,5 +540,18 @@ mod tests {
             world_from_toml_str(1, &document),
             Err(ContentError::Schema(_))
         ));
+    }
+
+    #[test]
+    fn demo_world_narrates_two_countries() {
+        let mut world = demo_world(1).expect("demo world");
+        world.advance_economic_year().expect("first economic year");
+        assert!(
+            world
+                .chronicle()
+                .iter()
+                .any(|entry| entry.text.contains("across 2 countries")),
+            "chronicle should report fiscal closure across 2 countries"
+        );
     }
 }
