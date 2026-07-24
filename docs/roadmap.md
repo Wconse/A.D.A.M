@@ -329,3 +329,16 @@ embedded Rust scenario constants -> strict serde schema v5 -> TOML scenario asse
 Acceptance evidence: formatting and the full quality gate pass; the TOML-loaded seed-1 world produces the exact established 50-year fingerprint `10095822769523244874`, proving that extracting content from Rust changed neither world state, event order, nor chronicle behavior.
 
 Next narrow debt candidate: make firm-to-firm procurement observations carry the actual transaction price rather than the regional reference price, while preserving deterministic replay and money conservation.
+### Actual procurement trade prices gate
+
+Completed vertical slice:
+
+```text
+settled B2B fill at the offer price -> per-(seller, good) trade price -> seller monthly market outcome -> bounded operating history -> unchanged demo fingerprint
+```
+
+`execute_monthly_firm_procurement` now records the seller-side `MarketOfferOutcome.unit_price` from the actually settled offer price instead of looking the value up in the regional reference table. The price is captured per (seller, good) at fill time in a local deterministic map, so no new world state, save schema, or fingerprint format was introduced. A new gate test in `crates/adam-core/tests/intermediate_procurement.rs` gives the farm a 20% markup so the trade price (6) diverges from the reference price (5) and proves both that the B2B fill settles at 6 and that the seller's captured monthly observation reports 6, not 5.
+
+Acceptance evidence: formatting and the full quality gate pass (88 tests across all crates); the seed-1 50-year fingerprint is unchanged at `10095822769523244874`, exactly as required - all demo markups are zero, so trade prices coincide with reference prices by construction and the chronicle must not move.
+
+Remaining sibling debt for future narrow slices: buyer-side `input_prices` in `capture_monthly_firm_observation` still come from the regional reference table (an honest buyer-side record needs a monthly procurement-fills buffer in world state, i.e. a save-schema and fingerprint change), and `plan_regional_inventory_change` still values inventory investment at reference prices.

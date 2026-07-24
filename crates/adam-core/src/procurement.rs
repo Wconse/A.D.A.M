@@ -100,6 +100,7 @@ impl World {
         let mut firms = self.firms().clone();
         let mut fills = Vec::new();
         let mut unmet = BTreeMap::new();
+        let mut trade_prices: BTreeMap<(FirmId, GoodId), Money> = BTreeMap::new();
         for order in &orders {
             let mut remaining = order.quantity.get();
             for offer in offers.iter_mut().filter(|offer| {
@@ -150,6 +151,7 @@ impl World {
                     .ok_or(WorldError::UnknownFirm(offer.seller))?
                     .apply_cash_delta(spend)?;
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
+                trade_prices.insert((offer.seller, order.good), offer.unit_price);
                 remaining -= quantity;
                 fills.push(FirmProcurementFill {
                     buyer: order.buyer,
@@ -185,14 +187,10 @@ impl World {
         }
         for ((firm, good), quantity) in sold {
             let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
-            let unit_price = self
-                .regional_prices
-                .get(&(definition.region(), good))
+            let unit_price = trade_prices
+                .get(&(firm, good))
                 .copied()
-                .ok_or(WorldError::MissingRegionalPrice {
-                    region: definition.region(),
-                    good,
-                })?;
+                .expect("settled procurement sale must have a recorded trade price");
             self.monthly_firm_market_outcomes
                 .entry(firm)
                 .or_default()

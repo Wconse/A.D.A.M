@@ -363,3 +363,46 @@ fn intermediate_turnover_is_excluded_from_regional_output_and_money_is_conserved
     assert_eq!(direct, replayed);
     assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
 }
+
+#[test]
+fn procurement_observation_records_actual_trade_price_not_reference_price() {
+    let mut world = production_chain_world();
+    // A 20% farm markup separates the actual trade price (6) from the
+    // regional reference price (5).
+    world
+        .set_firm_policy(
+            ActorId::new(1),
+            FirmId::new(FARM),
+            FirmPolicy::new(
+                0,
+                BasisPoints::new(2_000).expect("markup"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+            )
+            .expect("policy"),
+        )
+        .expect("set farm markup");
+    let result = world
+        .execute_monthly_economic_cycle()
+        .expect("first economic month");
+
+    // The B2B fill settled at the marked-up offer price, not the reference.
+    assert_eq!(result.commercial.procurement.fills.len(), 1);
+    let fill = result.commercial.procurement.fills[0];
+    assert_eq!(fill.quantity, QuantityMilli::new(1_000));
+    assert_eq!(fill.spend, Money::from_minor_units(6));
+
+    // The seller's captured monthly observation reports the actual trade
+    // price, not the regional reference price.
+    let observation = world.firm_operating_history()[&FirmId::new(FARM)]
+        .last()
+        .expect("farm observation");
+    let grain_sale = observation
+        .market_outcomes()
+        .iter()
+        .find(|outcome| outcome.good == GoodId::new(GRAIN) && outcome.sold.get() > 0)
+        .expect("settled grain sale outcome");
+    assert_eq!(grain_sale.unit_price, Money::from_minor_units(6));
+    assert_ne!(grain_sale.unit_price, Money::from_minor_units(5));
+}
