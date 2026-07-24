@@ -40,6 +40,8 @@ struct YearSummary {
     rationed_requested_milli: u128,
     rationed_available_milli: u128,
     politics_changes: u64,
+    debt_interest_minor: i128,
+    indebted_countries: u64,
     measured_regions: u64,
     final_consumption_minor: i128,
     inventory_change_minor: i128,
@@ -98,6 +100,10 @@ impl YearSummary {
                 self.final_consumption_minor += i128::from(final_consumption.minor_units());
                 self.inventory_change_minor += i128::from(inventory_change.minor_units());
                 self.measured_output_minor += i128::from(annual_output.minor_units());
+            }
+            DomainEvent::PublicDebtInterestCharged { interest, .. } => {
+                self.indebted_countries += 1;
+                self.debt_interest_minor += i128::from(interest.minor_units());
             }
             DomainEvent::CountryPoliticsChanged { .. } => self.politics_changes += 1,
             DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
@@ -158,6 +164,12 @@ impl YearSummary {
                 self.final_consumption_minor,
                 self.inventory_change_minor,
                 self.measured_regions
+            ));
+        }
+        if self.debt_interest_minor > 0 {
+            sentences.push(format!(
+                "Public debt service charged {} minor currency units of interest across {} indebted countries.",
+                self.debt_interest_minor, self.indebted_countries
             ));
         }
         if self.politics_changes > 0 {
@@ -252,5 +264,32 @@ mod tests {
         assert!(chronicle[0].text.contains("3 excess deaths"));
         assert!(chronicle[0].text.contains("borrowed 100"));
         assert!(chronicle[0].text.contains("transferred 50"));
+    }
+
+    #[test]
+    fn chronicle_reports_public_debt_service() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::PublicDebtInterestCharged {
+                country: CountryId::new(1),
+                opening_debt: Money::from_minor_units(1_000_000),
+                interest: Money::from_minor_units(30_000),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert!(chronicle[0].text.contains("interest"));
+        assert!(chronicle[0].text.contains("30000"));
+        assert!(chronicle[0].text.contains("1 indebted"));
     }
 }

@@ -384,3 +384,17 @@ Public debt is no longer a causally inert counter. Both fiscal planners now add 
 Acceptance evidence: formatting and the full quality gate pass (91 tests across all crates); a new gate test runs two worlds identical except for an initial 1,000,000 public debt and proves the indebted world closes the year exactly 1,030,000 deeper in debt - the seed principal plus the 300 bps interest, charged and capitalized. The old seed-1 50-year baseline `6474822005825804939` is retired because the demo world runs persistent deficits and its debt now compounds; the new baseline is `7530160749567993110`.
 
 Next gate: surface debt service in the typed journal - the interest charge is folded into aggregate fiscal spending inside `CountryFiscalYearClosed` and cannot be audited as a separate domain event.
+
+### Public debt service journal gate
+
+Completed vertical slice:
+
+```text
+annual interest charge -> carried through CountryUpdate as opening debt + interest -> apply_year emits PublicDebtInterestCharged before the fiscal closure event -> chronicle aggregates the charges into an explicit yearly debt-service sentence -> event log and chronicle change, world state does not -> SIMULATION_VERSION stays 29 -> fingerprint baseline unchanged
+```
+
+Debt service is now auditable instead of being folded invisibly into aggregate fiscal spending. Every annual closure that charges interest emits a typed `PublicDebtInterestCharged { country, opening_debt, interest }` domain event next to `CountryFiscalYearClosed`, and the yearly chronicle reports the total charge across indebted countries as its own sentence. This keeps the causal chain readable in the archive: opening debt stock, the concrete interest charged on it, and the resulting fiscal closure are separate, replayable journal entries.
+
+Acceptance evidence: formatting and the full quality gate pass (93 tests across all crates); a new simulation gate test proves a world seeded with 1,000,000 debt emits the event with exactly 30,000 interest while a debt-free world emits none, and a new chronicle gate test proves the sentence renders from the event alone. The stable fingerprint hashes world state only - not the event log - and no state or rule changed, so the seed-1 50-year baseline must stay at `7530160749567993110` - and it does.
+
+Next gate: split procurement into plan/settle/record helpers - procurement.rs carries a TODO(refactor slice) and mixes planning, settlement, and observation recording in one monolithic function; the refactor must keep behaviour and the fingerprint baseline byte-identical.

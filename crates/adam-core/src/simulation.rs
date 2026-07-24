@@ -39,6 +39,8 @@ struct CountryUpdate {
     spending: Money,
     treasury: Money,
     debt: Money,
+    opening_debt: Money,
+    interest: Money,
     legitimacy: BasisPoints,
     cohesion: BasisPoints,
 }
@@ -537,6 +539,16 @@ impl World {
             indicators.set_public_debt(update.debt);
             indicators.set_legitimacy(update.legitimacy);
             indicators.set_elite_cohesion(update.cohesion);
+            if update.interest.minor_units() > 0 {
+                self.events.append(
+                    close_date,
+                    DomainEvent::PublicDebtInterestCharged {
+                        country: update.id,
+                        opening_debt: update.opening_debt,
+                        interest: update.interest,
+                    },
+                );
+            }
             self.events.append(
                 close_date,
                 DomainEvent::CountryFiscalYearClosed {
@@ -657,6 +669,8 @@ fn plan_material_country(
         spending,
         treasury,
         debt,
+        opening_debt: indicators.public_debt(),
+        interest: money_from_i128(interest, "public debt interest")?,
         legitimacy,
         cohesion,
     })
@@ -702,6 +716,8 @@ fn plan_country(
         spending,
         treasury,
         debt,
+        opening_debt: indicators.public_debt(),
+        interest: money_from_i128(interest, "public debt interest")?,
         legitimacy,
         cohesion,
     })
@@ -921,5 +937,63 @@ mod tests {
             debt_of(&indebted) - debt_of(&debt_free),
             1_000_000 + interest
         );
+    }
+
+    #[test]
+    fn debt_service_is_recorded_as_a_typed_domain_event() {
+        let indicators = CountryIndicators::new(
+            Money::from_minor_units(0),
+            Money::from_minor_units(1_000_000),
+            BasisPoints::new(5_000).expect("valid legitimacy"),
+            BasisPoints::new(5_000).expect("valid cohesion"),
+        );
+        let mut world = World::new(
+            WorldSeed::new(47),
+            SimDate::new(2025, 1).expect("valid date"),
+        );
+        world
+            .register_country(
+                Country::new(CountryId::new(1), "A")
+                    .expect("country")
+                    .with_indicators(indicators),
+            )
+            .expect("country");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Capital",
+                    Population::new(1_000_000),
+                    Money::from_minor_units(4_000_000_000_000),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world.advance_one_year().expect("simulation succeeds");
+
+        let charged = world
+            .events()
+            .events()
+            .iter()
+            .find_map(|envelope| match envelope.event() {
+                DomainEvent::PublicDebtInterestCharged {
+                    country,
+                    opening_debt,
+                    interest,
+                } => Some((*country, *opening_debt, *interest)),
+                _ => None,
+            })
+            .expect("debt service event");
+        assert_eq!(charged.0, CountryId::new(1));
+        assert_eq!(charged.1, Money::from_minor_units(1_000_000));
+        assert_eq!(charged.2, Money::from_minor_units(30_000));
+
+        let mut debt_free = economy(47, 5_000);
+        debt_free.advance_one_year().expect("simulation succeeds");
+        assert!(!debt_free.events().events().iter().any(|envelope| matches!(
+            envelope.event(),
+            DomainEvent::PublicDebtInterestCharged { .. }
+        )));
     }
 }

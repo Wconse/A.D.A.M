@@ -292,6 +292,11 @@ pub enum DomainEvent {
         treasury: Money,
         debt: Money,
     },
+    PublicDebtInterestCharged {
+        country: CountryId,
+        opening_debt: Money,
+        interest: Money,
+    },
     CountryPoliticsChanged {
         country: CountryId,
         legitimacy: BasisPoints,
