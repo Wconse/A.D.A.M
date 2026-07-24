@@ -316,3 +316,16 @@ The annual sales tax (20%) is now levied exclusively on final household sales. F
 Observed modeling debt for a future slice: with the smaller tax base the country runs a permanent deficit and public debt grows without bound or consequence (about 544,000 by year 50) - there is no debt service and no fiscal adjustment yet. A debt-and-spending feedback belongs in a later politics/fiscal slice.
 
 Next gate: rebuild the TOML content pipeline (schema v5) on top of the embedded demo scenario.
+### TOML content pipeline (schema v5)
+
+Completed vertical slice:
+
+```text
+embedded Rust scenario constants -> strict serde schema v5 -> TOML scenario asset -> deterministic World registration
+```
+
+`adam-content` now exposes `world_from_toml_str(seed, document)` and keeps `demo_world(seed)` as the stable Stage 0 entry point. The demo scenario lives in `crates/adam-content/assets/demo.toml`; unknown fields, malformed TOML, unsupported enum values, and schema versions other than 5 are rejected. The loader preserves deterministic registration order and converts content into the same authoritative `adam-core` domain model used by commands and simulation.
+
+Acceptance evidence: formatting and the full quality gate pass; the TOML-loaded seed-1 world produces the exact established 50-year fingerprint `10095822769523244874`, proving that extracting content from Rust changed neither world state, event order, nor chronicle behavior.
+
+Next narrow debt candidate: make firm-to-firm procurement observations carry the actual transaction price rather than the regional reference price, while preserving deterministic replay and money conservation.

@@ -1,12 +1,9 @@
 //! Versioned content loading and validation for A.D.A.M.
 //!
-//! The TOML content pipeline described by earlier roadmap entries has to be
-//! rebuilt because its sources were never committed. Until then this crate
-//! provides the deterministic embedded demo scenario used by the Stage 0
-//! console chronicle runner.
-//!
-//! The demo deliberately tells two contrasting stories under the 20% sales
-//! tax, which is the only monetary sink of the closed economy:
+//! Content schema v5: a scenario is a TOML document (see `assets/demo.toml`)
+//! loaded into a [`World`] through [`world_from_toml_str`]. The embedded
+//! Stage 0 demo scenario keeps telling two contrasting stories under the 20%
+//! final-sales tax, the only monetary sink of the closed economy:
 //! - Northreach runs a thin bakery cash buffer and is expected to decay
 //!   mid-chronicle (wage arrears, deprivation, mortality);
 //! - Southvale carries buffers and wages sized to survive the full 50 years.
@@ -22,243 +19,475 @@ use adam_core::{
     WorldSeed,
 };
 
-const GRAIN: u32 = 1;
-const BREAD: u32 = 2;
-const FARM_RECIPE: u32 = 1;
-const BAKERY_RECIPE: u32 = 2;
-const NEED_PROFILE: u32 = 1;
-const COUNTRY: u32 = 1;
+/// Content schema version understood by this crate.
+pub const SCHEMA_VERSION: u32 = 5;
 
-struct RegionSpec {
-    region: u32,
-    name: &'static str,
-    owner_name: &'static str,
-    farm_name: &'static str,
-    bakery_name: &'static str,
-    farm_wage: i64,
-    bakery_wage: i64,
-    farm_cash: i64,
-    bakery_cash: i64,
-    grain_price: i64,
-    bread_price: i64,
+/// The embedded Stage 0 demo scenario in content schema v5.
+pub const DEMO_SCENARIO_TOML: &str = include_str!("../assets/demo.toml");
+
+/// Errors raised while loading scenario content.
+#[derive(Debug)]
+pub enum ContentError {
+    /// The TOML document could not be parsed.
+    Parse(toml::de::Error),
+    /// The document parsed but violates the content schema.
+    Schema(String),
+    /// The world rejected an entity during registration.
+    World(WorldError),
 }
 
-fn region_specs() -> [RegionSpec; 2] {
-    [
-        RegionSpec {
-            region: 1,
-            name: "Northreach",
-            owner_name: "Mara Voss",
-            farm_name: "Northreach Grain Collective",
-            bakery_name: "Northreach Bakery",
-            farm_wage: 16,
-            bakery_wage: 16,
-            farm_cash: 200_000,
-            bakery_cash: 400_000,
-            grain_price: 5,
-            bread_price: 10,
-        },
-        RegionSpec {
-            region: 2,
-            name: "Southvale",
-            owner_name: "Ilya Roden",
-            farm_name: "Southvale Grain Collective",
-            bakery_name: "Southvale Bakery",
-            farm_wage: 24,
-            bakery_wage: 18,
-            farm_cash: 400_000,
-            bakery_cash: 1_500_000,
-            grain_price: 6,
-            bread_price: 12,
-        },
-    ]
+impl std::fmt::Display for ContentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(error) => write!(f, "content parse error: {error}"),
+            Self::Schema(message) => write!(f, "content schema error: {message}"),
+            Self::World(error) => write!(f, "world rejected content: {error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for ContentError {}
+
+impl From<WorldError> for ContentError {
+    fn from(error: WorldError) -> Self {
+        Self::World(error)
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScenarioSpec {
+    schema_version: u32,
+    scenario: ScenarioMeta,
+    country: CountrySpec,
+    goods: Vec<GoodSpec>,
+    consumption_profiles: Vec<ProfileSpec>,
+    recipes: Vec<RecipeSpec>,
+    regions: Vec<RegionSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScenarioMeta {
+    start_year: i32,
+    start_day: u16,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CountrySpec {
+    id: u32,
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GoodSpec {
+    id: u32,
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfileSpec {
+    id: u32,
+    name: String,
+    targets: Vec<TargetSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TargetSpec {
+    good: u32,
+    tier: String,
+    basis: String,
+    quantity_milli: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecipeSpec {
+    id: u32,
+    name: String,
+    output_good: u32,
+    output_per_batch_milli: u64,
+    labor_milli: u64,
+    #[serde(default)]
+    inputs: Vec<RecipeInputSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecipeInputSpec {
+    good: u32,
+    quantity_per_batch_milli: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegionSpec {
+    id: u32,
+    name: String,
+    population: u64,
+    initial_annual_output: i64,
+    owner: OwnerSpec,
+    cohort: CohortSpec,
+    prices: Vec<PriceSpec>,
+    firms: Vec<FirmSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnerSpec {
+    id: u32,
+    name: String,
+    birth_year: i32,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CohortSpec {
+    id: u32,
+    need_profile: u32,
+    people: u64,
+    households: u64,
+    age_band: String,
+    household_type: String,
+    education: String,
+    employment: String,
+    annual_income: i64,
+    liquid_wealth: i64,
+    debt: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PriceSpec {
+    good: u32,
+    minor_units: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FirmSpec {
+    id: u32,
+    name: String,
+    recipe: u32,
+    workers: u64,
+    capacity_batches: u64,
+    production_target: u64,
+    cash: i64,
+    wage: i64,
+    #[serde(default)]
+    inventory: Vec<InventorySpec>,
+    governance: GovernanceSpec,
+    policy: PolicySpec,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InventorySpec {
+    good: u32,
+    quantity_milli: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GovernanceSpec {
+    owner_voting_bp: u16,
+    owner_economic_bp: u16,
+    manager_role: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicySpec {
+    inventory_buffer_days: u16,
+    price_markup_bp: u16,
+    allocations_bp: [u16; 3],
 }
 
 /// Builds the embedded Stage 0 demo scenario.
 ///
 /// # Errors
-/// Returns [`WorldError`] if any demo entity fails registration.
+/// Returns [`WorldError`] if the world rejects a demo entity.
 ///
 /// # Panics
-/// Panics only if an embedded demo constant is itself invalid, which is a
+/// Panics only if the embedded demo document itself is invalid, which is a
 /// programming error in this crate.
 pub fn demo_world(seed: u64) -> Result<World, WorldError> {
-    let mut world = World::new(
-        WorldSeed::new(seed),
-        SimDate::new(2026, 1).expect("demo start date"),
-    );
-    register_catalog(&mut world)?;
-    for spec in &region_specs() {
-        register_region_economy(&mut world, spec)?;
+    match world_from_toml_str(seed, DEMO_SCENARIO_TOML) {
+        Ok(world) => Ok(world),
+        Err(ContentError::World(error)) => Err(error),
+        Err(error) => panic!("embedded demo scenario is invalid: {error}"),
+    }
+}
+
+/// Builds a [`World`] from a content schema v5 TOML scenario document.
+///
+/// # Errors
+/// Returns [`ContentError`] when the document cannot be parsed, violates the
+/// content schema, or is rejected during world registration.
+pub fn world_from_toml_str(seed: u64, document: &str) -> Result<World, ContentError> {
+    let spec: ScenarioSpec = toml::from_str(document).map_err(ContentError::Parse)?;
+    if spec.schema_version != SCHEMA_VERSION {
+        let version = spec.schema_version;
+        return Err(ContentError::Schema(format!(
+            "unsupported schema_version {version} (expected {SCHEMA_VERSION})"
+        )));
+    }
+    let start = SimDate::new(spec.scenario.start_year, spec.scenario.start_day)
+        .map_err(|error| ContentError::Schema(format!("invalid start date: {error:?}")))?;
+    let mut world = World::new(WorldSeed::new(seed), start);
+    register_catalog(&mut world, &spec)?;
+    let country = CountryId::new(spec.country.id);
+    for region in &spec.regions {
+        register_region_economy(&mut world, country, region)?;
     }
     Ok(world)
 }
 
-fn register_catalog(world: &mut World) -> Result<(), WorldError> {
+fn register_catalog(world: &mut World, spec: &ScenarioSpec) -> Result<(), ContentError> {
     world.register_country(
-        Country::new(CountryId::new(COUNTRY), "Arcadia").expect("demo country"),
+        Country::new(CountryId::new(spec.country.id), &spec.country.name)
+            .map_err(|error| ContentError::Schema(format!("invalid country: {error:?}")))?,
     )?;
-    world.register_good(Good::new(GoodId::new(GRAIN), "Grain").expect("demo grain"))?;
-    world.register_good(Good::new(GoodId::new(BREAD), "Bread").expect("demo bread"))?;
-    world.register_consumption_profile(
-        ConsumptionProfile::new(
-            NeedProfileId::new(NEED_PROFILE),
-            "Households",
-            vec![ConsumptionTarget::new(
-                GoodId::new(BREAD),
-                NeedTier::Survival,
-                DemandBasis::PerPerson,
-                QuantityMilli::new(1_000),
-            )],
-        )
-        .expect("demo consumption profile"),
-    )?;
-    world.register_production_recipe(
-        ProductionRecipe::new(
-            RecipeId::new(FARM_RECIPE),
-            "Grain farming",
-            GoodId::new(GRAIN),
-            QuantityMilli::new(4_000),
-            1_000,
-            vec![],
-        )
-        .expect("demo farm recipe"),
-    )?;
-    world.register_production_recipe(
-        ProductionRecipe::new(
-            RecipeId::new(BAKERY_RECIPE),
-            "Bread baking",
-            GoodId::new(BREAD),
-            QuantityMilli::new(2_000),
-            1_000,
-            vec![ProductionInput::new(
-                GoodId::new(GRAIN),
-                QuantityMilli::new(1_000),
-            )],
-        )
-        .expect("demo bakery recipe"),
-    )?;
-    Ok(())
-}
-
-fn register_region_economy(world: &mut World, spec: &RegionSpec) -> Result<(), WorldError> {
-    let region = RegionId::new(spec.region);
-    world.register_region(
-        Region::new(
-            region,
-            CountryId::new(COUNTRY),
-            spec.name,
-            Population::new(1_000),
-            Money::from_minor_units(1),
-        )
-        .expect("demo region"),
-    )?;
-    world.register_actor(
-        Actor::new(ActorId::new(spec.region), spec.owner_name, region, 1980).expect("demo actor"),
-    )?;
-    world.register_household_cohort(
-        HouseholdCohort::new(
-            CohortId::new(spec.region),
-            region,
-            NeedProfileId::new(NEED_PROFILE),
-            Population::new(1_000),
-            400,
-            AgeBand::Adult,
-            HouseholdType::WorkingAge,
-            EducationLevel::Secondary,
-            EmploymentStatus::Employed,
-            Money::default(),
-            Money::from_minor_units(20_000),
-            Money::default(),
-        )
-        .expect("demo cohort"),
-    )?;
-    world.set_regional_price(
-        region,
-        GoodId::new(GRAIN),
-        Money::from_minor_units(spec.grain_price),
-    )?;
-    world.set_regional_price(
-        region,
-        GoodId::new(BREAD),
-        Money::from_minor_units(spec.bread_price),
-    )?;
-    register_region_firms(world, spec)
-}
-
-fn register_region_firms(world: &mut World, spec: &RegionSpec) -> Result<(), WorldError> {
-    let region = RegionId::new(spec.region);
-    let owner = ActorId::new(spec.region);
-    let farm = FirmId::new(spec.region * 10 + 1);
-    let bakery = FirmId::new(spec.region * 10 + 2);
-    world.register_firm(
-        Firm::new(
-            farm,
-            spec.farm_name,
-            region,
-            RecipeId::new(FARM_RECIPE),
-            125,
-            125,
-            Money::from_minor_units(spec.farm_cash),
-            BTreeMap::new(),
-        )
-        .expect("demo farm"),
-    )?;
-    world.register_firm(
-        Firm::new(
-            bakery,
-            spec.bakery_name,
-            region,
-            RecipeId::new(BAKERY_RECIPE),
-            500,
-            500,
-            Money::from_minor_units(spec.bakery_cash),
-            BTreeMap::from([
-                (GoodId::new(GRAIN), QuantityMilli::new(500_000)),
-                (GoodId::new(BREAD), QuantityMilli::new(1_000_000)),
-            ]),
-        )
-        .expect("demo bakery"),
-    )?;
-    for (firm, workers, target, wage) in [
-        (farm, 125_u64, 125_u64, spec.farm_wage),
-        (bakery, 500, 500, spec.bakery_wage),
-    ] {
-        world.register_ownership_stake(OwnershipStake::new(
-            firm,
-            owner,
-            BasisPoints::new(6_000).expect("demo ownership"),
-            BasisPoints::new(6_000).expect("demo ownership"),
-        ))?;
-        world.register_firm_appointment(FirmAppointment::new(
-            firm,
-            owner,
-            CorporateRole::OperationsManager,
-        ))?;
-        world.set_firm_policy(
-            owner,
-            firm,
-            FirmPolicy::new(
-                0,
-                BasisPoints::new(0).expect("demo markup"),
-                BasisPoints::new(0).expect("demo allocation"),
-                BasisPoints::new(0).expect("demo allocation"),
-                BasisPoints::new(0).expect("demo allocation"),
-            )
-            .expect("demo policy"),
+    for good in &spec.goods {
+        world.register_good(
+            Good::new(GoodId::new(good.id), &good.name)
+                .map_err(|error| ContentError::Schema(format!("invalid good: {error:?}")))?,
         )?;
-        world.set_firm_production_target(owner, firm, target)?;
-        world.register_employment_agreement(
-            EmploymentAgreement::new(
-                firm,
-                CohortId::new(spec.region),
-                workers,
-                Money::from_minor_units(wage),
+    }
+    for profile in &spec.consumption_profiles {
+        let mut targets = Vec::new();
+        for target in &profile.targets {
+            targets.push(ConsumptionTarget::new(
+                GoodId::new(target.good),
+                parse_need_tier(&target.tier)?,
+                parse_demand_basis(&target.basis)?,
+                QuantityMilli::new(target.quantity_milli),
+            ));
+        }
+        world.register_consumption_profile(
+            ConsumptionProfile::new(NeedProfileId::new(profile.id), &profile.name, targets)
+                .map_err(|error| {
+                    ContentError::Schema(format!("invalid consumption profile: {error:?}"))
+                })?,
+        )?;
+    }
+    for recipe in &spec.recipes {
+        let inputs = recipe
+            .inputs
+            .iter()
+            .map(|input| {
+                ProductionInput::new(
+                    GoodId::new(input.good),
+                    QuantityMilli::new(input.quantity_per_batch_milli),
+                )
+            })
+            .collect();
+        world.register_production_recipe(
+            ProductionRecipe::new(
+                RecipeId::new(recipe.id),
+                &recipe.name,
+                GoodId::new(recipe.output_good),
+                QuantityMilli::new(recipe.output_per_batch_milli),
+                recipe.labor_milli,
+                inputs,
             )
-            .expect("demo agreement"),
+            .map_err(|error| ContentError::Schema(format!("invalid recipe: {error:?}")))?,
         )?;
     }
     Ok(())
+}
+
+fn register_region_economy(
+    world: &mut World,
+    country: CountryId,
+    spec: &RegionSpec,
+) -> Result<(), ContentError> {
+    let region = RegionId::new(spec.id);
+    world.register_region(
+        Region::new(
+            region,
+            country,
+            &spec.name,
+            Population::new(spec.population),
+            Money::from_minor_units(spec.initial_annual_output),
+        )
+        .map_err(|error| ContentError::Schema(format!("invalid region: {error:?}")))?,
+    )?;
+    world.register_actor(
+        Actor::new(
+            ActorId::new(spec.owner.id),
+            &spec.owner.name,
+            region,
+            spec.owner.birth_year,
+        )
+        .map_err(|error| ContentError::Schema(format!("invalid actor: {error:?}")))?,
+    )?;
+    world.register_household_cohort(
+        HouseholdCohort::new(
+            CohortId::new(spec.cohort.id),
+            region,
+            NeedProfileId::new(spec.cohort.need_profile),
+            Population::new(spec.cohort.people),
+            spec.cohort.households,
+            parse_age_band(&spec.cohort.age_band)?,
+            parse_household_type(&spec.cohort.household_type)?,
+            parse_education(&spec.cohort.education)?,
+            parse_employment(&spec.cohort.employment)?,
+            Money::from_minor_units(spec.cohort.annual_income),
+            Money::from_minor_units(spec.cohort.liquid_wealth),
+            Money::from_minor_units(spec.cohort.debt),
+        )
+        .map_err(|error| ContentError::Schema(format!("invalid cohort: {error:?}")))?,
+    )?;
+    for price in &spec.prices {
+        world.set_regional_price(
+            region,
+            GoodId::new(price.good),
+            Money::from_minor_units(price.minor_units),
+        )?;
+    }
+    for firm in &spec.firms {
+        register_firm_definition(world, region, firm)?;
+    }
+    for firm in &spec.firms {
+        register_firm_governance(world, spec, firm)?;
+    }
+    Ok(())
+}
+
+fn register_firm_definition(
+    world: &mut World,
+    region: RegionId,
+    spec: &FirmSpec,
+) -> Result<(), ContentError> {
+    let mut inventories = BTreeMap::new();
+    for row in &spec.inventory {
+        inventories.insert(
+            GoodId::new(row.good),
+            QuantityMilli::new(row.quantity_milli),
+        );
+    }
+    world.register_firm(
+        Firm::new(
+            FirmId::new(spec.id),
+            &spec.name,
+            region,
+            RecipeId::new(spec.recipe),
+            spec.workers,
+            spec.capacity_batches,
+            Money::from_minor_units(spec.cash),
+            inventories,
+        )
+        .map_err(|error| ContentError::Schema(format!("invalid firm: {error:?}")))?,
+    )?;
+    Ok(())
+}
+
+fn register_firm_governance(
+    world: &mut World,
+    region: &RegionSpec,
+    spec: &FirmSpec,
+) -> Result<(), ContentError> {
+    let firm = FirmId::new(spec.id);
+    let owner = ActorId::new(region.owner.id);
+    world.register_ownership_stake(OwnershipStake::new(
+        firm,
+        owner,
+        parse_basis_points(spec.governance.owner_voting_bp)?,
+        parse_basis_points(spec.governance.owner_economic_bp)?,
+    ))?;
+    world.register_firm_appointment(FirmAppointment::new(
+        firm,
+        owner,
+        parse_role(&spec.governance.manager_role)?,
+    ))?;
+    world.set_firm_policy(
+        owner,
+        firm,
+        FirmPolicy::new(
+            spec.policy.inventory_buffer_days,
+            parse_basis_points(spec.policy.price_markup_bp)?,
+            parse_basis_points(spec.policy.allocations_bp[0])?,
+            parse_basis_points(spec.policy.allocations_bp[1])?,
+            parse_basis_points(spec.policy.allocations_bp[2])?,
+        )
+        .map_err(|error| ContentError::Schema(format!("invalid firm policy: {error:?}")))?,
+    )?;
+    world.set_firm_production_target(owner, firm, spec.production_target)?;
+    world.register_employment_agreement(
+        EmploymentAgreement::new(
+            firm,
+            CohortId::new(region.cohort.id),
+            spec.workers,
+            Money::from_minor_units(spec.wage),
+        )
+        .map_err(|error| {
+            ContentError::Schema(format!("invalid employment agreement: {error:?}"))
+        })?,
+    )?;
+    Ok(())
+}
+
+fn parse_basis_points(value: u16) -> Result<BasisPoints, ContentError> {
+    BasisPoints::new(value)
+        .map_err(|error| ContentError::Schema(format!("invalid basis points: {error:?}")))
+}
+
+fn unsupported(kind: &str, value: &str) -> ContentError {
+    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v5"))
+}
+
+fn parse_need_tier(value: &str) -> Result<NeedTier, ContentError> {
+    match value {
+        "survival" => Ok(NeedTier::Survival),
+        other => Err(unsupported("need tier", other)),
+    }
+}
+
+fn parse_demand_basis(value: &str) -> Result<DemandBasis, ContentError> {
+    match value {
+        "per_person" => Ok(DemandBasis::PerPerson),
+        other => Err(unsupported("demand basis", other)),
+    }
+}
+
+fn parse_age_band(value: &str) -> Result<AgeBand, ContentError> {
+    match value {
+        "adult" => Ok(AgeBand::Adult),
+        other => Err(unsupported("age band", other)),
+    }
+}
+
+fn parse_household_type(value: &str) -> Result<HouseholdType, ContentError> {
+    match value {
+        "working_age" => Ok(HouseholdType::WorkingAge),
+        other => Err(unsupported("household type", other)),
+    }
+}
+
+fn parse_education(value: &str) -> Result<EducationLevel, ContentError> {
+    match value {
+        "secondary" => Ok(EducationLevel::Secondary),
+        other => Err(unsupported("education level", other)),
+    }
+}
+
+fn parse_employment(value: &str) -> Result<EmploymentStatus, ContentError> {
+    match value {
+        "employed" => Ok(EmploymentStatus::Employed),
+        other => Err(unsupported("employment status", other)),
+    }
+}
+
+fn parse_role(value: &str) -> Result<CorporateRole, ContentError> {
+    match value {
+        "operations_manager" => Ok(CorporateRole::OperationsManager),
+        other => Err(unsupported("corporate role", other)),
+    }
 }
 
 #[cfg(test)]
@@ -278,5 +507,31 @@ mod tests {
         a.advance_economic_years(2).expect("two years");
         b.advance_economic_years(2).expect("two years");
         assert_eq!(a.stable_fingerprint(), b.stable_fingerprint());
+    }
+
+    #[test]
+    fn broken_document_is_a_parse_error() {
+        assert!(matches!(
+            world_from_toml_str(1, "not = ["),
+            Err(ContentError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn wrong_schema_version_is_rejected() {
+        let document = DEMO_SCENARIO_TOML.replace("schema_version = 5", "schema_version = 4");
+        assert!(matches!(
+            world_from_toml_str(1, &document),
+            Err(ContentError::Schema(_))
+        ));
+    }
+
+    #[test]
+    fn unsupported_enum_values_are_rejected() {
+        let document = DEMO_SCENARIO_TOML.replace("tier = \"survival\"", "tier = \"luxury\"");
+        assert!(matches!(
+            world_from_toml_str(1, &document),
+            Err(ContentError::Schema(_))
+        ));
     }
 }
