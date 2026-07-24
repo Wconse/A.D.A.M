@@ -370,3 +370,17 @@ bounded firm observation history (exactly the closed year) -> latest observed pe
 Acceptance evidence: formatting and the full quality gate pass (90 tests across all crates); a new gate test gives the farm a 20% markup and proves the annual inventory change is valued at the observed transaction price of 6 per grain unit instead of the reference price 5. Because no world-state schema changed and all demo markups are zero, the seed-1 50-year fingerprint must stay at `6474822005825804939` - and it does.
 
 Next gate: charge annual interest on public debt - `close_budget` capitalizes deficits into debt, but the debt stock is causally inert: a country carrying half a million of debt closes the same budget as a debt-free one.
+
+### Public debt interest gate
+
+Completed vertical slice:
+
+```text
+outstanding public debt -> annual 300 bps interest charge added to fiscal spending in both fiscal planners -> worse fiscal balance -> close_budget capitalizes the unfunded deficit back into debt -> compounding debt burden feeds the existing negative fiscal signal on legitimacy and elite cohesion -> SIMULATION_VERSION 29 -> new demo fingerprint baseline
+```
+
+Public debt is no longer a causally inert counter. Both fiscal planners now add `debt * DEBT_INTEREST_BPS / 10_000` (`DEBT_INTEREST_BPS = 300`) to fiscal spending before the budget closes, so a country pays for past deficits with a worse present balance: more debt means more spending, a deeper deficit, more capitalized debt next year, and - through the existing fiscal signal - sustained pressure on legitimacy and elite cohesion. No new world state was added; the rule changes history for the same seed, so `SIMULATION_VERSION` moves 28 -> 29.
+
+Acceptance evidence: formatting and the full quality gate pass (91 tests across all crates); a new gate test runs two worlds identical except for an initial 1,000,000 public debt and proves the indebted world closes the year exactly 1,030,000 deeper in debt - the seed principal plus the 300 bps interest, charged and capitalized. The old seed-1 50-year baseline `6474822005825804939` is retired because the demo world runs persistent deficits and its debt now compounds; the new baseline is `7530160749567993110`.
+
+Next gate: surface debt service in the typed journal - the interest charge is folded into aggregate fiscal spending inside `CountryFiscalYearClosed` and cannot be audited as a separate domain event.

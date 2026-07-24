@@ -10,6 +10,7 @@ const ECONOMY_DOMAIN: u64 = 0x4543_4f4e_4f4d_5900;
 const POLITICS_DOMAIN: u64 = 0x504f_4c49_5449_4353;
 const RATE_SCALE: i128 = 1_000_000;
 const SALES_TAX_BPS: i128 = 2_000;
+const DEBT_INTEREST_BPS: i128 = 300;
 
 #[derive(Clone, Debug)]
 struct RegionUpdate {
@@ -627,7 +628,12 @@ fn plan_material_country(
 ) -> Result<CountryUpdate, WorldError> {
     let spending_bps = 2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10;
     let revenue = money_from_i128(tax_revenue, "collected sales tax revenue")?;
-    let spending = money_from_i128(new_output * spending_bps / 10_000, "fiscal spending")?;
+    let interest =
+        i128::from(indicators.public_debt().minor_units()).max(0) * DEBT_INTEREST_BPS / 10_000;
+    let spending = money_from_i128(
+        new_output * spending_bps / 10_000 + interest,
+        "fiscal spending",
+    )?;
     let balance = i128::from(revenue.minor_units()) - i128::from(spending.minor_units());
     let (treasury, debt) = close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
     let growth_ppm = if old_output == 0 {
@@ -667,7 +673,12 @@ fn plan_country(
     let revenue_bps = 1_600 + i128::from(indicators.elite_cohesion().get()) / 20;
     let spending_bps = 2_200 + i128::from(10_000 - indicators.legitimacy().get()) / 10;
     let revenue = money_from_i128(new_output * revenue_bps / 10_000, "fiscal revenue")?;
-    let spending = money_from_i128(new_output * spending_bps / 10_000, "fiscal spending")?;
+    let interest =
+        i128::from(indicators.public_debt().minor_units()).max(0) * DEBT_INTEREST_BPS / 10_000;
+    let spending = money_from_i128(
+        new_output * spending_bps / 10_000 + interest,
+        "fiscal spending",
+    )?;
     let balance = i128::from(revenue.minor_units()) - i128::from(spending.minor_units());
     let (treasury, debt) = close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
     let growth_ppm = if old_output == 0 {
@@ -851,6 +862,64 @@ mod tests {
                 .public_debt()
                 .minor_units()
                 > 0
+        );
+    }
+
+    #[test]
+    fn public_debt_interest_deepens_the_deficit_and_compounds_debt() {
+        fn world_with_debt(debt: i64) -> World {
+            let indicators = CountryIndicators::new(
+                Money::from_minor_units(0),
+                Money::from_minor_units(debt),
+                BasisPoints::new(5_000).expect("valid legitimacy"),
+                BasisPoints::new(5_000).expect("valid cohesion"),
+            );
+            let mut world = World::new(
+                WorldSeed::new(47),
+                SimDate::new(2025, 1).expect("valid date"),
+            );
+            world
+                .register_country(
+                    Country::new(CountryId::new(1), "A")
+                        .expect("country")
+                        .with_indicators(indicators),
+                )
+                .expect("country");
+            world
+                .register_region(
+                    Region::new(
+                        RegionId::new(1),
+                        CountryId::new(1),
+                        "Capital",
+                        Population::new(1_000_000),
+                        Money::from_minor_units(4_000_000_000_000),
+                    )
+                    .expect("region"),
+                )
+                .expect("region");
+            world
+        }
+
+        let mut indebted = world_with_debt(1_000_000);
+        let mut debt_free = world_with_debt(0);
+        indebted.advance_one_year().expect("simulation succeeds");
+        debt_free.advance_one_year().expect("simulation succeeds");
+
+        let debt_of = |world: &World| {
+            i128::from(
+                world.countries()[&CountryId::new(1)]
+                    .indicators()
+                    .public_debt()
+                    .minor_units(),
+            )
+        };
+        // Same seed, same year, identical worlds except the seed principal:
+        // the indebted world must end exactly principal + 300 bps interest deeper,
+        // because the interest widens the deficit and close_budget capitalizes it.
+        let interest = 1_000_000_i128 * DEBT_INTEREST_BPS / 10_000;
+        assert_eq!(
+            debt_of(&indebted) - debt_of(&debt_free),
+            1_000_000 + interest
         );
     }
 }
