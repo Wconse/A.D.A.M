@@ -69,6 +69,9 @@ impl World {
         Ok(orders)
     }
 
+    // TODO(refactor slice): split into plan/settle/record helpers; behavior
+    // is now locked by crates/adam-core/tests/intermediate_procurement.rs.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn execute_monthly_firm_procurement(
         &mut self,
     ) -> Result<FirmProcurementResult, WorldError> {

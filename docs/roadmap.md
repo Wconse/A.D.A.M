@@ -278,3 +278,15 @@ settled household consumption
 ```
 
 The next gate is explicit intermediate-goods procurement between firms. B2B turnover must move cash and inventories while regional output continues to count only final demand plus inventory investment, preventing double counting.
+
+### Intermediate procurement gate
+
+Completed vertical slice:
+
+```text
+firm input requirements -> B2B offers -> procurement fills moving cash and inventories -> final-demand-only regional output -> conserved money -> replayable year
+```
+
+Verified end-to-end by `crates/adam-core/tests/intermediate_procurement.rs`: a farm -> bakery -> households chain proves twelve monthly B2B grain trades move firm cash and inventories, measured regional output equals settled household final consumption plus valued inventory change and excludes intermediate turnover, money is conserved across firms, households, and paid sales taxes, and the economic year replays identically through the command boundary.
+
+Repository debt discovered while closing this gate: the committed tree referenced the `adam-cli` and `adam-content` crates without any sources, although earlier progress entries describe a working console chronicle and schema-v5 producing content. Placeholder targets were restored so the workspace builds again. The next gate is to rebuild the Stage 0 console chronicle runner and producing content, and to settle two accounting questions: record B2B market outcomes at the actual transaction price instead of the regional reference price, and decide whether the sales tax should cascade over intermediate turnover or apply only to final sales.
