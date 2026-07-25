@@ -740,3 +740,21 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Deliberate limits: only survival tiers consume the planning ledger, emergency-relief costing
   remains reference-priced, and routes remain immediate accounting links without capacity
   constraints.
+
+### Capacity-constrained household import gate (step 042)
+
+- Household survival imports are now capped by the remaining uncontracted
+  monthly capacity of the selected route: monthly capacity minus active
+  freight-contract reservations, spot freight usage, and in-transit shipment
+  reservations (ADR 0091).
+- `clear_market_with_delivery` consumes a shared per-route capacity map across
+  all orders of the month; the demand planner mirrors the same cap so reserved
+  budgets anticipate capped fills plus the reference-priced fallback.
+- Concrete gate: with foreign price 6, tariff 1, and route capacity 600 for a
+  1000-unit survival need, the planner reserves 9, clearing fills exactly 600
+  at spend 4, and 400 stays unmet; replay reproduces the same state.
+- Demo history is unchanged (fingerprint 12100901864703017553,
+  SIMULATION_VERSION 34) because demo routes have ample capacity.
+- Known limits: firm-to-firm procurement imports are not capacity-capped yet;
+  the proportional-rationing planning path caps quotes without sharing
+  capacity between cohorts; relief purchasing still uses reference prices.

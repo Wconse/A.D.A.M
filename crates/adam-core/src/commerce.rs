@@ -61,9 +61,13 @@ impl World {
             })
             .collect();
         let rationing = next.apply_survival_rationing(&mut orders, &offers)?;
-        let mut clearing = clear_market_with_delivery(&orders, &offers, |origin, destination| {
-            next.direct_market_route_cost(origin, destination)
-        })?;
+        let mut market_route_capacity = next.market_spot_route_capacity();
+        let mut clearing = clear_market_with_delivery(
+            &orders,
+            &offers,
+            &mut market_route_capacity,
+            |origin, destination| next.direct_market_route(origin, destination),
+        )?;
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
@@ -432,6 +436,58 @@ mod tests {
                 .expect("route");
         }
         world
+    }
+
+    #[test]
+    fn route_capacity_limits_household_survival_imports() {
+        let mut direct = household_shortage_world(false);
+        direct
+            .set_regional_price(RegionId::new(2), GoodId::new(1), Money::from_minor_units(6))
+            .expect("foreign price");
+        direct
+            .register_logistics_route(
+                LogisticsRoute::new(
+                    RouteId::new(1),
+                    RegionId::new(2),
+                    RegionId::new(1),
+                    TransportMode::Road,
+                    QuantityMilli::new(600),
+                    Money::from_minor_units(1),
+                    1,
+                    10_000,
+                )
+                .expect("route")
+                .with_carrier(FirmId::new(2)),
+            )
+            .expect("route");
+        let mut replayed = direct.clone();
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed economic month");
+
+        let survival: Vec<_> = result
+            .commercial
+            .demand_intents
+            .iter()
+            .filter(|intent| intent.tier() == NeedTier::Survival)
+            .collect();
+        assert_eq!(survival.len(), 1);
+        assert_eq!(survival[0].reserved_spend(), Money::from_minor_units(9));
+        assert_eq!(result.commercial.clearing.fills.len(), 1);
+        let fill = result.commercial.clearing.fills[0];
+        assert_eq!(fill.seller, FirmId::new(2));
+        assert_eq!(fill.quantity, QuantityMilli::new(600));
+        assert_eq!(fill.spend, Money::from_minor_units(4));
+        assert_eq!(
+            result.commercial.clearing.unmet
+                [&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(400)
+        );
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
     }
 
     #[test]

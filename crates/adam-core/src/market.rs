@@ -1,4 +1,6 @@
-use crate::{CohortId, FirmId, GoodId, Money, NeedTier, QuantityMilli, RegionId, WorldError};
+use crate::{
+    CohortId, FirmId, GoodId, Money, NeedTier, QuantityMilli, RegionId, RouteId, WorldError,
+};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MarketOffer {
     pub seller: FirmId,
@@ -169,16 +171,19 @@ fn average_observed_firm_sales(
 }
 
 /// Clears goods markets deterministically, with local offers first and optional
-/// delivered imports after local supply is exhausted.
+/// delivered imports after local supply is exhausted. Import fills additionally
+/// consume the per-route capacity remaining in `route_capacity`; routes missing
+/// from the map are treated as unconstrained.
 /// # Errors
 /// Returns an error for non-positive prices or arithmetic overflow.
 pub fn clear_market_with_delivery<F>(
     orders: &[MarketOrder],
     offers: &[MarketOffer],
-    mut delivery_cost: F,
+    route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
+    mut delivery: F,
 ) -> Result<MarketClearing, WorldError>
 where
-    F: FnMut(RegionId, RegionId) -> Option<Money>,
+    F: FnMut(RegionId, RegionId) -> Option<(RouteId, Money)>,
 {
     let mut orders = orders.to_vec();
     orders.sort_by_key(|o| (o.region, o.good, o.tier, o.buyer));
@@ -196,43 +201,14 @@ where
     let mut unmet_by_market: std::collections::BTreeMap<(RegionId, GoodId), u64> =
         std::collections::BTreeMap::new();
     for order in orders {
-        let mut need = order.quantity.get();
-        let mut budget = order.max_spend.minor_units();
-        let candidates = market_candidates(order, &supply, &remaining, &mut delivery_cost)?;
-        for (index, tariff) in candidates {
-            if need == 0 {
-                break;
-            }
-            let offer = &supply[index];
-            let price = offer
-                .unit_price
-                .minor_units()
-                .checked_add(tariff.minor_units())
-                .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
-            let affordable = u64::try_from(
-                (i128::from(budget) * i128::from(QuantityMilli::SCALE) / i128::from(price)).max(0),
-            )
-            .map_err(|_| WorldError::ArithmeticOverflow("market affordability"))?;
-            let quantity = need.min(remaining[index]).min(affordable);
-            if quantity == 0 {
-                continue;
-            }
-            let spend = i64::try_from(
-                i128::from(price) * i128::from(quantity) / i128::from(QuantityMilli::SCALE),
-            )
-            .map_err(|_| WorldError::ArithmeticOverflow("market spend"))?;
-            need -= quantity;
-            remaining[index] -= quantity;
-            budget -= spend;
-            fills.push(MarketFill {
-                buyer: order.buyer,
-                tier: order.tier,
-                seller: offer.seller,
-                good: order.good,
-                quantity: QuantityMilli::new(quantity),
-                spend: Money::from_minor_units(spend),
-            });
-        }
+        let need = fill_market_order(
+            order,
+            &supply,
+            &mut remaining,
+            route_capacity,
+            &mut delivery,
+            &mut fills,
+        )?;
         if need > 0 {
             unmet.insert(
                 (order.buyer, order.good, order.tier),
@@ -272,14 +248,88 @@ where
     })
 }
 
+/// Fills one buyer order against the shared supply, budget, and route-capacity
+/// state, returning the unfilled remainder.
+/// # Errors
+/// Returns an error for arithmetic overflow while pricing or settling fills.
+fn fill_market_order<F>(
+    order: MarketOrder,
+    supply: &[MarketOffer],
+    remaining: &mut [u64],
+    route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
+    delivery: &mut F,
+    fills: &mut Vec<MarketFill>,
+) -> Result<u64, WorldError>
+where
+    F: FnMut(RegionId, RegionId) -> Option<(RouteId, Money)>,
+{
+    let mut need = order.quantity.get();
+    let mut budget = order.max_spend.minor_units();
+    let candidates = market_candidates(order, supply, remaining, delivery)?;
+    for candidate in candidates {
+        if need == 0 {
+            break;
+        }
+        let MarketCandidate {
+            index,
+            tariff,
+            route,
+        } = candidate;
+        let offer = &supply[index];
+        let price = offer
+            .unit_price
+            .minor_units()
+            .checked_add(tariff.minor_units())
+            .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
+        let affordable = u64::try_from(
+            (i128::from(budget) * i128::from(QuantityMilli::SCALE) / i128::from(price)).max(0),
+        )
+        .map_err(|_| WorldError::ArithmeticOverflow("market affordability"))?;
+        let route_limit = route.map_or(u64::MAX, |id| {
+            route_capacity.get(&id).copied().unwrap_or(u64::MAX)
+        });
+        let quantity = need.min(remaining[index]).min(affordable).min(route_limit);
+        if quantity == 0 {
+            continue;
+        }
+        let spend = i64::try_from(
+            i128::from(price) * i128::from(quantity) / i128::from(QuantityMilli::SCALE),
+        )
+        .map_err(|_| WorldError::ArithmeticOverflow("market spend"))?;
+        need -= quantity;
+        remaining[index] -= quantity;
+        budget -= spend;
+        if let Some(id) = route {
+            if let Some(capacity) = route_capacity.get_mut(&id) {
+                *capacity -= quantity;
+            }
+        }
+        fills.push(MarketFill {
+            buyer: order.buyer,
+            tier: order.tier,
+            seller: offer.seller,
+            good: order.good,
+            quantity: QuantityMilli::new(quantity),
+            spend: Money::from_minor_units(spend),
+        });
+    }
+    Ok(need)
+}
+
+struct MarketCandidate {
+    index: usize,
+    tariff: Money,
+    route: Option<RouteId>,
+}
+
 fn market_candidates<F>(
     order: MarketOrder,
     supply: &[MarketOffer],
     remaining: &[u64],
-    delivery_cost: &mut F,
-) -> Result<Vec<(usize, Money)>, WorldError>
+    delivery: &mut F,
+) -> Result<Vec<MarketCandidate>, WorldError>
 where
-    F: FnMut(RegionId, RegionId) -> Option<Money>,
+    F: FnMut(RegionId, RegionId) -> Option<(RouteId, Money)>,
 {
     let mut candidates = Vec::new();
     let mut imports = Vec::new();
@@ -288,23 +338,31 @@ where
             continue;
         }
         if offer.region == order.region {
-            candidates.push((index, Money::default()));
+            candidates.push(MarketCandidate {
+                index,
+                tariff: Money::default(),
+                route: None,
+            });
         } else if order.tier == NeedTier::Survival {
-            if let Some(tariff) = delivery_cost(offer.region, order.region) {
+            if let Some((route, tariff)) = delivery(offer.region, order.region) {
                 let delivered = offer
                     .unit_price
                     .minor_units()
                     .checked_add(tariff.minor_units())
                     .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
-                imports.push((delivered, offer.region, offer.seller, index, tariff));
+                imports.push((delivered, offer.region, offer.seller, index, tariff, route));
             }
         }
     }
-    imports.sort_by_key(|&(delivered, region, seller, _, _)| (delivered, region, seller));
+    imports.sort_by_key(|&(delivered, region, seller, _, _, _)| (delivered, region, seller));
     candidates.extend(
         imports
             .into_iter()
-            .map(|(_, _, _, index, tariff)| (index, tariff)),
+            .map(|(_, _, _, index, tariff, route)| MarketCandidate {
+                index,
+                tariff,
+                route: Some(route),
+            }),
     );
     Ok(candidates)
 }
@@ -317,7 +375,12 @@ pub fn clear_local_market(
     orders: &[MarketOrder],
     offers: &[MarketOffer],
 ) -> Result<MarketClearing, WorldError> {
-    clear_market_with_delivery(orders, offers, |_, _| None)
+    clear_market_with_delivery(
+        orders,
+        offers,
+        &mut std::collections::BTreeMap::new(),
+        |_, _| None,
+    )
 }
 
 fn record_market_settlement_evidence(
@@ -645,6 +708,38 @@ mod tests {
         assert_eq!(result.offer_outcomes[0].unmet_market_demand.get(), 400);
         assert!(result.offer_outcomes[0].sold_out_while_demand_remained());
     }
+    #[test]
+    fn import_fills_are_limited_by_route_capacity() {
+        let orders = [MarketOrder {
+            buyer: CohortId::new(1),
+            tier: NeedTier::Survival,
+            region: RegionId::new(1),
+            good: GoodId::new(1),
+            quantity: QuantityMilli::new(1_000),
+            max_spend: Money::from_minor_units(100),
+        }];
+        let offers = [MarketOffer {
+            seller: FirmId::new(2),
+            region: RegionId::new(2),
+            good: GoodId::new(1),
+            quantity: QuantityMilli::new(1_000),
+            unit_price: Money::from_minor_units(10),
+        }];
+        let mut route_capacity = std::collections::BTreeMap::from([(RouteId::new(1), 300_u64)]);
+        let result = clear_market_with_delivery(&orders, &offers, &mut route_capacity, |_, _| {
+            Some((RouteId::new(1), Money::from_minor_units(1)))
+        })
+        .expect("clear");
+        assert_eq!(result.fills.len(), 1);
+        assert_eq!(result.fills[0].quantity, QuantityMilli::new(300));
+        assert_eq!(result.fills[0].spend, Money::from_minor_units(3));
+        assert_eq!(
+            result.unmet[&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(700)
+        );
+        assert_eq!(route_capacity[&RouteId::new(1)], 0);
+    }
+
     #[test]
     fn inventory_policy_and_markup_form_a_concrete_offer() {
         let mut world = settlement_world();

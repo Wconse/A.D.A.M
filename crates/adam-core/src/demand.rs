@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    CohortId, DomainEvent, GoodId, MarketOffer, Money, NeedProfileId, PhysicalShortageStrategy,
-    QuantityMilli, RegionId, World, WorldError,
+    CohortId, DomainEvent, FirmId, GoodId, MarketOffer, Money, NeedProfileId,
+    PhysicalShortageStrategy, QuantityMilli, RegionId, RouteId, World, WorldError,
 };
 
 #[derive(
@@ -309,9 +309,11 @@ impl World {
     /// Forms monthly household demand against the current market offer book.
     ///
     /// Survival targets quote local offers first and then the cheapest peaceful
-    /// direct foreign delivered prices. Under market allocation the planning
-    /// copy of offer quantities is shared across cohorts in canonical market
-    /// order, so one scarce offer is never reserved twice; under proportional
+    /// direct foreign delivered prices, with import quotes capped by the
+    /// remaining uncontracted monthly route capacity available to market
+    /// imports. Under market allocation the planning copies of offer quantities
+    /// and route capacity are shared across cohorts in canonical market order,
+    /// so one scarce offer or route is never reserved twice; under proportional
     /// rationing planning keeps independent per-cohort quotes because rationing
     /// quotas are applied separately before clearing.
     ///
@@ -333,9 +335,11 @@ impl World {
         });
         let mut remaining_supply: Vec<u64> =
             supply.iter().map(|offer| offer.quantity.get()).collect();
+        let mut route_capacity = self.market_spot_route_capacity();
         let mut ledger = SurvivalSupplyLedger {
             supply: &supply,
             remaining: &mut remaining_supply,
+            routes: &mut route_capacity,
             consume: self.all_shortage_policies_use_market_allocation(),
         };
         let mut intents = Vec::new();
@@ -387,9 +391,11 @@ impl World {
             .consumption_profiles
             .get(&cohort.need_profile())
             .ok_or(WorldError::UnknownNeedProfile(cohort.need_profile()))?;
+        let mut no_routes = BTreeMap::new();
         let mut ledger = SurvivalSupplyLedger {
             supply: &[],
             remaining: &mut [],
+            routes: &mut no_routes,
             consume: false,
         };
         let cost = self
@@ -462,39 +468,65 @@ impl World {
                 continue;
             }
             if offer.region == region {
-                candidates.push((false, offer.unit_price, offer.region, offer.seller, index));
-            } else if let Some(tariff) = self.direct_market_route_cost(offer.region, region) {
+                candidates.push(SupplyCandidate {
+                    imported: false,
+                    price: offer.unit_price,
+                    origin: offer.region,
+                    seller: offer.seller,
+                    index,
+                    route: None,
+                });
+            } else if let Some((route, tariff)) = self.direct_market_route(offer.region, region) {
                 let delivered = offer
                     .unit_price
                     .minor_units()
                     .checked_add(tariff.minor_units())
                     .ok_or(WorldError::ArithmeticOverflow("household delivered price"))?;
-                candidates.push((
-                    true,
-                    Money::from_minor_units(delivered),
-                    offer.region,
-                    offer.seller,
+                candidates.push(SupplyCandidate {
+                    imported: true,
+                    price: Money::from_minor_units(delivered),
+                    origin: offer.region,
+                    seller: offer.seller,
                     index,
-                ));
+                    route: Some(route),
+                });
             }
         }
-        candidates.sort_by_key(|(imported, price, origin, seller, _)| {
-            (*imported, price.minor_units(), *origin, *seller)
+        candidates.sort_by_key(|candidate| {
+            (
+                candidate.imported,
+                candidate.price.minor_units(),
+                candidate.origin,
+                candidate.seller,
+            )
         });
         let mut needed = to_u64(quantity, "survival target quantity")?;
         let mut cost = 0_i128;
-        for (_, price, _, _, index) in candidates {
-            let purchased = needed.min(ledger.remaining[index]);
+        for candidate in candidates {
+            let route_limit = candidate.route.map_or(u64::MAX, |id| {
+                ledger.routes.get(&id).copied().unwrap_or(u64::MAX)
+            });
+            let purchased = needed
+                .min(ledger.remaining[candidate.index])
+                .min(route_limit);
+            if purchased == 0 {
+                continue;
+            }
             cost = cost
                 .checked_add(
-                    (i128::from(price.minor_units()) * i128::from(purchased)
+                    (i128::from(candidate.price.minor_units()) * i128::from(purchased)
                         + i128::from(QuantityMilli::SCALE - 1))
                         / i128::from(QuantityMilli::SCALE),
                 )
                 .ok_or(WorldError::ArithmeticOverflow("household survival cost"))?;
             needed -= purchased;
             if ledger.consume {
-                ledger.remaining[index] -= purchased;
+                ledger.remaining[candidate.index] -= purchased;
+                if let Some(id) = candidate.route {
+                    if let Some(capacity) = ledger.routes.get_mut(&id) {
+                        *capacity -= purchased;
+                    }
+                }
             }
             if needed == 0 {
                 return Ok(cost);
@@ -517,7 +549,17 @@ impl World {
 struct SurvivalSupplyLedger<'a> {
     supply: &'a [MarketOffer],
     remaining: &'a mut [u64],
+    routes: &'a mut BTreeMap<RouteId, u64>,
     consume: bool,
+}
+
+struct SupplyCandidate {
+    imported: bool,
+    price: Money,
+    origin: RegionId,
+    seller: FirmId,
+    index: usize,
+    route: Option<RouteId>,
 }
 
 #[derive(Clone, Copy, Debug)]

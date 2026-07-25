@@ -128,6 +128,17 @@ impl World {
         origin: RegionId,
         destination: RegionId,
     ) -> Option<Money> {
+        self.direct_market_route(origin, destination)
+            .map(|(_, cost)| cost)
+    }
+
+    /// Selects the lowest-tariff direct peaceful route identity and tariff for
+    /// an immediate market import. Equal tariffs resolve by stable route ID.
+    pub(crate) fn direct_market_route(
+        &self,
+        origin: RegionId,
+        destination: RegionId,
+    ) -> Option<(crate::RouteId, Money)> {
         let origin_country = self.regions.get(&origin)?.country();
         let destination_country = self.regions.get(&destination)?.country();
         if self.countries_are_hostile(origin_country, destination_country) {
@@ -138,7 +149,7 @@ impl World {
             .filter(|route| route.origin() == origin && route.destination() == destination)
             .map(|route| (route.cost_per_unit(), route.id()))
             .min_by_key(|(cost, route)| (cost.minor_units(), *route))
-            .map(|(cost, _)| cost)
+            .map(|(cost, route)| (route, cost))
     }
     /// Settle phase: match orders against the offer book and move cash and
     /// inventories. All movement happens on a clone of the firm ledger and is

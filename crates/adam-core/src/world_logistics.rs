@@ -368,6 +368,48 @@ impl World {
     pub const fn freight_capacity(&self) -> &FreightCapacityLedger {
         &self.freight_capacity
     }
+    /// Remaining uncontracted spot capacity per route available to immediate
+    /// market imports this month: monthly capacity minus active freight
+    /// contract reservations, spot freight usage, and in-transit shipment
+    /// reservations.
+    #[must_use]
+    pub(crate) fn market_spot_route_capacity(&self) -> BTreeMap<RouteId, u64> {
+        self.logistics_routes
+            .values()
+            .map(|route| {
+                let contracted: u64 = self
+                    .freight_contracts
+                    .values()
+                    .filter(|contract| {
+                        contract.status() == crate::ContractStatus::Active
+                            && contract.route() == route.id()
+                    })
+                    .map(|contract| contract.reserved_capacity().get())
+                    .sum();
+                let spot_used = self
+                    .freight_capacity
+                    .spot_used()
+                    .get(&route.id())
+                    .copied()
+                    .unwrap_or_default()
+                    .get();
+                let in_transit = self
+                    .route_capacity
+                    .reserved()
+                    .get(&route.id())
+                    .copied()
+                    .unwrap_or_default()
+                    .get();
+                let available = route
+                    .capacity()
+                    .get()
+                    .saturating_sub(contracted)
+                    .saturating_sub(spot_used)
+                    .saturating_sub(in_transit);
+                (route.id(), available)
+            })
+            .collect()
+    }
     #[must_use]
     pub fn inventory_shipments(&self) -> &BTreeMap<ShipmentId, InventoryShipment> {
         &self.inventory_shipments
