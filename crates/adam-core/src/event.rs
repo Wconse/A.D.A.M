@@ -123,6 +123,11 @@ pub enum DomainEvent {
         quantity: QuantityMilli,
         spend: Money,
     },
+    BilateralHostilityChanged {
+        first: CountryId,
+        second: CountryId,
+        active: bool,
+    },
     MarketTrade {
         buyer: CohortId,
         seller: FirmId,

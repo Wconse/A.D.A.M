@@ -1,5 +1,5 @@
 use crate::{QuantityMilli, TerminalCapacityLedger, TerminalId, TerminalQueue};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::{
@@ -413,6 +413,7 @@ pub enum WorldError {
     InsufficientCommittedInvestment(FirmId),
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
+    InvalidBilateralRelation(&'static str),
     InvalidFreightContract(&'static str),
     InvalidTerminal(&'static str),
     DuplicateTerminal(TerminalId),
@@ -567,6 +568,9 @@ impl fmt::Display for WorldError {
                 write!(formatter, "invalid investment project: {reason}")
             }
             Self::InvalidLogistics(reason) => write!(formatter, "invalid logistics: {reason}"),
+            Self::InvalidBilateralRelation(reason) => {
+                write!(formatter, "invalid bilateral relation: {reason}")
+            }
             Self::InvalidTerminal(reason) => write!(formatter, "invalid terminal: {reason}"),
             Self::DuplicateTerminal(id) => write!(formatter, "terminal {id} already exists"),
             Self::UnknownTerminal(id) => write!(formatter, "unknown terminal {id}"),
@@ -705,6 +709,8 @@ pub struct World {
     pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
     pub(crate) cohort_health: BTreeMap<CohortId, crate::CohortHealth>,
     pub(crate) government_emergency_policies: BTreeMap<CountryId, crate::GovernmentEmergencyPolicy>,
+    /// Canonical unordered country pairs whose commercial relations are hostile.
+    pub(crate) bilateral_hostilities: BTreeSet<(CountryId, CountryId)>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -769,6 +775,7 @@ impl World {
             cohort_experience: BTreeMap::new(),
             cohort_health: BTreeMap::new(),
             government_emergency_policies: BTreeMap::new(),
+            bilateral_hostilities: BTreeSet::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -927,6 +934,59 @@ impl World {
     #[must_use]
     pub fn regions(&self) -> &BTreeMap<RegionId, Region> {
         &self.regions
+    }
+
+    /// Marks or clears a symmetric bilateral hostility relation.
+    ///
+    /// Hostility is authoritative state: it is persisted, fingerprinted, and
+    /// used by cross-border commercial systems. Same-country hostility has no
+    /// meaning and is rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError`] if a country is unknown or both IDs are equal.
+    pub fn set_country_hostility(
+        &mut self,
+        first: CountryId,
+        second: CountryId,
+        active: bool,
+    ) -> Result<(), WorldError> {
+        if first == second {
+            return Err(WorldError::InvalidBilateralRelation(
+                "hostility requires two different countries",
+            ));
+        }
+        if !self.countries.contains_key(&first) {
+            return Err(WorldError::UnknownCountry(first));
+        }
+        if !self.countries.contains_key(&second) {
+            return Err(WorldError::UnknownCountry(second));
+        }
+        let pair = canonical_country_pair(first, second);
+        let changed = if active {
+            self.bilateral_hostilities.insert(pair)
+        } else {
+            self.bilateral_hostilities.remove(&pair)
+        };
+        if changed {
+            self.events.append(
+                self.date,
+                DomainEvent::BilateralHostilityChanged {
+                    first: pair.0,
+                    second: pair.1,
+                    active,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn countries_are_hostile(&self, first: CountryId, second: CountryId) -> bool {
+        first != second
+            && self
+                .bilateral_hostilities
+                .contains(&canonical_country_pair(first, second))
     }
 
     #[must_use]
@@ -1454,6 +1514,11 @@ impl World {
                 crate::PhysicalShortageStrategy::ProportionalRationing => 2,
             });
         }
+        hash.write_u64(self.bilateral_hostilities.len() as u64);
+        for (first, second) in &self.bilateral_hostilities {
+            hash.write_u32(first.get());
+            hash.write_u32(second.get());
+        }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {
             hash.write_u32(id.get());
@@ -1509,6 +1574,14 @@ impl World {
             hash.write_u16(influence.weight().get());
         }
         hash.finish()
+    }
+}
+
+fn canonical_country_pair(first: CountryId, second: CountryId) -> (CountryId, CountryId) {
+    if first < second {
+        (first, second)
+    } else {
+        (second, first)
     }
 }
 

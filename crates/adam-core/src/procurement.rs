@@ -114,6 +114,11 @@ impl World {
         origin: RegionId,
         destination: RegionId,
     ) -> Option<Money> {
+        let origin_country = self.regions.get(&origin)?.country();
+        let destination_country = self.regions.get(&destination)?.country();
+        if self.countries_are_hostile(origin_country, destination_country) {
+            return None;
+        }
         self.logistics_routes
             .values()
             .filter(|route| route.origin() == origin && route.destination() == destination)

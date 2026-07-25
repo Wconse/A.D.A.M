@@ -489,3 +489,25 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   `7045927566456398391`, with release self-comparison byte-identical.
 - Next gate: first causal war slice - a concrete bilateral hostility state severs cross-border
   procurement and makes foreign material dependence a readable conflict pressure.
+
+### Bilateral hostility embargo gate (step 031)
+
+- Countries now carry a canonical, symmetric bilateral-hostility relation. The replayable
+  `SetCountryHostility` command validates two existing, distinct countries, records a typed
+  `BilateralHostilityChanged` event only on transition, and includes the relation in persistence,
+  equality, and the stable fingerprint.
+- Active hostility is a concrete economic constraint: it removes otherwise valid direct foreign
+  offers from firm procurement while leaving local commerce and domestic supply untouched. This
+  makes the Northreach-to-Eastport dependency created in step 030 vulnerable to a political break
+  rather than treating the route graph as scenery.
+- Gate coverage extends `cross_region_procurement.rs` to two countries and proves that the same
+  route which clears an import in peace yields explicit unmet input demand under hostility; the
+  command-boundary replay is bit-identical and the transition is journaled. Full format, check,
+  Clippy, test, and docs gate passes with 102 tests. SIMULATION_VERSION advances 31 -> 32 and the
+  seed-1/50-year baseline is `10616160303486040494`; release self-comparison remains identical.
+- Deliberate limit: hostility is currently a replayable authoritative decision, not yet an
+  endogenous grievance or combat model; it blocks only cross-border intermediate procurement,
+  not shipments or household markets.
+- Next gate: derive a bounded bilateral grievance from observed cross-border material dependence
+  and shortage, then make it deterministically propose or activate hostility so conflict has a
+  material cause rather than an externally injected flag.

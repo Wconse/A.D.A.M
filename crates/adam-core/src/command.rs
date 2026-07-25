@@ -16,6 +16,11 @@ pub enum WorldCommand {
         country: crate::CountryId,
         policy: crate::GovernmentEmergencyPolicy,
     },
+    SetCountryHostility {
+        first: crate::CountryId,
+        second: crate::CountryId,
+        active: bool,
+    },
     IssueEmergencyReliefDebt {
         actor: ActorId,
         country: crate::CountryId,
@@ -131,6 +136,11 @@ impl WorldCommand {
                 country,
                 policy,
             } => world.set_government_emergency_policy(*actor, *country, *policy),
+            Self::SetCountryHostility {
+                first,
+                second,
+                active,
+            } => world.set_country_hostility(*first, *second, *active),
             Self::IssueEmergencyReliefDebt {
                 actor,
                 country,

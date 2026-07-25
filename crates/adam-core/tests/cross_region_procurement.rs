@@ -77,6 +77,9 @@ fn two_region_world(route_tariff_minor: Option<i64>, with_local_farm: bool) -> W
         .register_country(Country::new(CountryId::new(1), "A").expect("country"))
         .expect("register country");
     world
+        .register_country(Country::new(CountryId::new(2), "B").expect("country"))
+        .expect("register country");
+    world
         .register_good(Good::new(GoodId::new(GRAIN), "Grain").expect("good"))
         .expect("register grain");
     world
@@ -97,12 +100,12 @@ fn two_region_world(route_tariff_minor: Option<i64>, with_local_farm: bool) -> W
             .expect("profile"),
         )
         .expect("register profile");
-    for (region, name) in [(FARMLAND, "Farmland"), (BAKERTON, "Bakerton")] {
+    for (region, country, name) in [(FARMLAND, 1, "Farmland"), (BAKERTON, 2, "Bakerton")] {
         world
             .register_region(
                 Region::new(
                     RegionId::new(region),
-                    CountryId::new(1),
+                    CountryId::new(country),
                     name,
                     Population::new(2),
                     Money::from_minor_units(1),
@@ -376,6 +379,43 @@ fn missing_route_leaves_import_demand_unmet() {
     );
     let bakery = &world.firms()[&FirmId::new(BAKERY)];
     assert!(bakery.inventories().get(&GoodId::new(GRAIN)).is_none());
+}
+
+#[test]
+fn bilateral_hostility_severs_cross_border_procurement() {
+    let mut world = two_region_world(Some(2), false);
+    WorldCommand::SetCountryHostility {
+        first: CountryId::new(1),
+        second: CountryId::new(2),
+        active: true,
+    }
+    .apply(&mut world)
+    .expect("hostility command");
+    let mut replayed = world.clone();
+
+    let result = world
+        .execute_monthly_economic_cycle()
+        .expect("hostile economic month");
+    WorldCommand::ExecuteMonthlyEconomicCycle
+        .apply(&mut replayed)
+        .expect("replayed hostile economic month");
+
+    assert!(result.commercial.procurement.fills.is_empty());
+    assert_eq!(
+        result.commercial.procurement.unmet[&(FirmId::new(BAKERY), GoodId::new(GRAIN))],
+        QuantityMilli::new(1_000),
+        "an active bilateral hostility blocks the only foreign supplier"
+    );
+    assert!(world.events().events().iter().any(|event| matches!(
+        event.event(),
+        DomainEvent::BilateralHostilityChanged {
+            first,
+            second,
+            active: true,
+        } if *first == CountryId::new(1) && *second == CountryId::new(2)
+    )));
+    assert_eq!(world, replayed);
+    assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
 }
 
 #[test]
