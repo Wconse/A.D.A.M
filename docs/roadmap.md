@@ -654,3 +654,29 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: make household survival imports settle across a direct peaceful route, with delivered
   price and route cost, so reachable foreign food can avert the shortage rather than only explain
   its diplomatic consequence.
+
+### Delivered household survival imports gate (step 038)
+
+- Household survival imports now settle across a direct peaceful route. The generalized
+  `clear_market_with_delivery` keeps one shared inventory remainder per source offer: local offers
+  retain strict priority, then survival needs consider foreign offers by delivered price (offer
+  price plus the lowest direct route tariff), source region, and seller. The existing local-market
+  API remains a wrapper with no import routes, so local callers keep their prior behaviour.
+- The shared `direct_market_route_cost` rejects hostile country pairs and uses the lowest-tariff
+  direct route with stable tie-breaking. Market fills debit household wealth at delivered price,
+  credit the foreign seller through the existing settlement, and preserve the seller's source
+  region in outcomes. ADR 0087 records the design.
+- Gate coverage: the former household-famine scenario now proves a full replay-identical import
+  from foreign farm to household at 9 offer + 1 route cost = 10, no survival unmet demand, and no
+  grievance; the no-route scenario still leaves the demand unmet. Full format, check, Clippy,
+  test, and docs gate passes with 114 tests.
+- This changes authoritative household-market outcomes without adding state schema:
+  SIMULATION_VERSION stays at 34; the seed-1/50-year release baseline changes to
+  `12100901864703017553` (30.5 ms per simulated year).
+- Deliberate limits (per ADR 0087): imports remain immediate accounting transfers without route
+  capacity, terminals, or shipment progress; only survival needs may import; and household demand
+  budgets still use local reference prices, so a more expensive delivered import can remain partly
+  unaffordable.
+- Next gate: make household demand reserve against the cheapest reachable delivered survival price
+  rather than only the local reference price, so a solvent household can correctly budget for an
+  import that costs more than its local benchmark.

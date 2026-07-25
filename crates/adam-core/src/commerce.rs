@@ -2,7 +2,7 @@ use crate::{
     DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
     FirmProcurementResult, HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing,
     MarketOrder, PayrollRecord, ProductionPlan, SimDate, SurvivalRationingOutcome, World,
-    WorldError, clear_local_market,
+    WorldError, clear_market_with_delivery,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,7 +61,9 @@ impl World {
             })
             .collect();
         let rationing = next.apply_survival_rationing(&mut orders, &offers)?;
-        let mut clearing = clear_local_market(&orders, &offers)?;
+        let mut clearing = clear_market_with_delivery(&orders, &offers, |origin, destination| {
+            next.direct_market_route_cost(origin, destination)
+        })?;
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
@@ -387,11 +389,7 @@ mod tests {
             .set_firm_production_target(ActorId::new(2), FirmId::new(2), 1)
             .expect("foreign target");
         world
-            .set_regional_price(
-                RegionId::new(2),
-                GoodId::new(1),
-                Money::from_minor_units(10),
-            )
+            .set_regional_price(RegionId::new(2), GoodId::new(1), Money::from_minor_units(9))
             .expect("foreign price");
         if with_route {
             world
@@ -415,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn household_survival_shortage_against_reachable_foreign_supply_accrues_grievance() {
+    fn household_survival_import_settles_at_delivered_price() {
         let mut direct = household_shortage_world(true);
         let mut replayed = direct.clone();
         let result = direct
@@ -425,25 +423,18 @@ mod tests {
             .apply(&mut replayed)
             .expect("replayed economic month");
 
+        assert_eq!(result.commercial.clearing.fills.len(), 1);
+        let fill = result.commercial.clearing.fills[0];
+        assert_eq!(fill.buyer, CohortId::new(1));
+        assert_eq!(fill.seller, FirmId::new(2));
+        assert_eq!(fill.quantity, QuantityMilli::new(1_000));
         assert_eq!(
-            result.commercial.clearing.unmet
-                [&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
-            QuantityMilli::new(1_000)
+            fill.spend,
+            Money::from_minor_units(10),
+            "foreign offer 9 plus road tariff 1"
         );
-        assert_eq!(
-            direct.bilateral_grievances()[&(CountryId::new(1), CountryId::new(2))].get(),
-            500
-        );
-        assert!(direct.events().events().iter().any(|event| matches!(
-            event.event(),
-            crate::DomainEvent::BilateralGrievanceChanged {
-                aggrieved,
-                target,
-                level,
-            } if *aggrieved == CountryId::new(1)
-                && *target == CountryId::new(2)
-                && level.get() == 500
-        )));
+        assert!(result.commercial.clearing.unmet.is_empty());
+        assert!(direct.bilateral_grievances().is_empty());
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
     }

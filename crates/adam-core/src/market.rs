@@ -168,13 +168,18 @@ fn average_observed_firm_sales(
     )?))
 }
 
-/// Clears local goods markets deterministically by region/good, then order ID, price, and seller ID.
+/// Clears goods markets deterministically, with local offers first and optional
+/// delivered imports after local supply is exhausted.
 /// # Errors
 /// Returns an error for non-positive prices or arithmetic overflow.
-pub fn clear_local_market(
+pub fn clear_market_with_delivery<F>(
     orders: &[MarketOrder],
     offers: &[MarketOffer],
-) -> Result<MarketClearing, WorldError> {
+    mut delivery_cost: F,
+) -> Result<MarketClearing, WorldError>
+where
+    F: FnMut(RegionId, RegionId) -> Option<Money>,
+{
     let mut orders = orders.to_vec();
     orders.sort_by_key(|o| (o.region, o.good, o.tier, o.buyer));
     let mut supply = offers.to_vec();
@@ -193,14 +198,17 @@ pub fn clear_local_market(
     for order in orders {
         let mut need = order.quantity.get();
         let mut budget = order.max_spend.minor_units();
-        for (index, offer) in supply.iter().enumerate() {
+        let candidates = market_candidates(order, &supply, &remaining, &mut delivery_cost)?;
+        for (index, tariff) in candidates {
             if need == 0 {
                 break;
             }
-            if offer.region != order.region || offer.good != order.good || remaining[index] == 0 {
-                continue;
-            }
-            let price = offer.unit_price.minor_units();
+            let offer = &supply[index];
+            let price = offer
+                .unit_price
+                .minor_units()
+                .checked_add(tariff.minor_units())
+                .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
             let affordable = u64::try_from(
                 (i128::from(budget) * i128::from(QuantityMilli::SCALE) / i128::from(price)).max(0),
             )
@@ -263,6 +271,55 @@ pub fn clear_local_market(
         offer_outcomes,
     })
 }
+
+fn market_candidates<F>(
+    order: MarketOrder,
+    supply: &[MarketOffer],
+    remaining: &[u64],
+    delivery_cost: &mut F,
+) -> Result<Vec<(usize, Money)>, WorldError>
+where
+    F: FnMut(RegionId, RegionId) -> Option<Money>,
+{
+    let mut candidates = Vec::new();
+    let mut imports = Vec::new();
+    for (index, offer) in supply.iter().enumerate() {
+        if offer.good != order.good || remaining[index] == 0 {
+            continue;
+        }
+        if offer.region == order.region {
+            candidates.push((index, Money::default()));
+        } else if order.tier == NeedTier::Survival {
+            if let Some(tariff) = delivery_cost(offer.region, order.region) {
+                let delivered = offer
+                    .unit_price
+                    .minor_units()
+                    .checked_add(tariff.minor_units())
+                    .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
+                imports.push((delivered, offer.region, offer.seller, index, tariff));
+            }
+        }
+    }
+    imports.sort_by_key(|&(delivered, region, seller, _, _)| (delivered, region, seller));
+    candidates.extend(
+        imports
+            .into_iter()
+            .map(|(_, _, _, index, tariff)| (index, tariff)),
+    );
+    Ok(candidates)
+}
+
+/// Clears a strictly local market without considering imports.
+///
+/// # Errors
+/// Returns an error for non-positive prices or arithmetic overflow.
+pub fn clear_local_market(
+    orders: &[MarketOrder],
+    offers: &[MarketOffer],
+) -> Result<MarketClearing, WorldError> {
+    clear_market_with_delivery(orders, offers, |_, _| None)
+}
+
 fn record_market_settlement_evidence(
     world: &mut crate::World,
     clearing: &MarketClearing,

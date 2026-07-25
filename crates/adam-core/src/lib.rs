@@ -68,7 +68,7 @@ pub use logistics::{
 pub use management::FirmManagementDecision;
 pub use market::{
     FirmMarketOfferPlan, MarketClearing, MarketFill, MarketOffer, MarketOfferOutcome, MarketOrder,
-    clear_local_market,
+    clear_local_market, clear_market_with_delivery,
 };
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};

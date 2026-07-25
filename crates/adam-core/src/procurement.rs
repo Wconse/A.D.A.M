@@ -120,10 +120,10 @@ impl World {
         Ok(offers)
     }
 
-    /// Selects the lowest-tariff direct route for a procurement import.
-    /// Equal tariffs resolve by stable route ID. This first commercial slice
-    /// does not reserve physical capacity or create an in-transit shipment.
-    fn direct_procurement_route_cost(
+    /// Selects the lowest-tariff direct peaceful route for an immediate market import.
+    /// Equal tariffs resolve by stable route ID. This commercial slice does not
+    /// reserve physical capacity or create an in-transit shipment.
+    pub(crate) fn direct_market_route_cost(
         &self,
         origin: RegionId,
         destination: RegionId,
@@ -173,7 +173,7 @@ impl World {
                 if offer.region == order.region {
                     candidates.push((index, Money::default()));
                 } else if let Some(tariff) =
-                    self.direct_procurement_route_cost(offer.region, order.region)
+                    self.direct_market_route_cost(offer.region, order.region)
                 {
                     let delivered = offer
                         .unit_price
