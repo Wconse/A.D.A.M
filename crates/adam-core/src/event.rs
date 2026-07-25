@@ -128,6 +128,11 @@ pub enum DomainEvent {
         second: CountryId,
         active: bool,
     },
+    BilateralGrievanceChanged {
+        aggrieved: CountryId,
+        target: CountryId,
+        level: BasisPoints,
+    },
     MarketTrade {
         buyer: CohortId,
         seller: FirmId,

@@ -711,6 +711,8 @@ pub struct World {
     pub(crate) government_emergency_policies: BTreeMap<CountryId, crate::GovernmentEmergencyPolicy>,
     /// Canonical unordered country pairs whose commercial relations are hostile.
     pub(crate) bilateral_hostilities: BTreeSet<(CountryId, CountryId)>,
+    /// Directed bounded grievance levels keyed by (aggrieved, target) country.
+    pub(crate) bilateral_grievances: BTreeMap<(CountryId, CountryId), BasisPoints>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -776,6 +778,7 @@ impl World {
             cohort_health: BTreeMap::new(),
             government_emergency_policies: BTreeMap::new(),
             bilateral_hostilities: BTreeSet::new(),
+            bilateral_grievances: BTreeMap::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -987,6 +990,15 @@ impl World {
             && self
                 .bilateral_hostilities
                 .contains(&canonical_country_pair(first, second))
+    }
+
+    /// Directed bounded grievance levels keyed by (aggrieved, target) country.
+    ///
+    /// Grievance is authoritative state derived from observed cross-border
+    /// material dependence and shortage; it is persisted and fingerprinted.
+    #[must_use]
+    pub fn bilateral_grievances(&self) -> &BTreeMap<(CountryId, CountryId), BasisPoints> {
+        &self.bilateral_grievances
     }
 
     #[must_use]
@@ -1518,6 +1530,12 @@ impl World {
         for (first, second) in &self.bilateral_hostilities {
             hash.write_u32(first.get());
             hash.write_u32(second.get());
+        }
+        hash.write_u64(self.bilateral_grievances.len() as u64);
+        for ((aggrieved, target), level) in &self.bilateral_grievances {
+            hash.write_u32(aggrieved.get());
+            hash.write_u32(target.get());
+            hash.write_u16(level.get());
         }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {

@@ -1,6 +1,19 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{FirmId, GoodId, MarketOffer, Money, QuantityMilli, RegionId, World, WorldError};
+use crate::{
+    BasisPoints, CountryId, FirmId, GoodId, MarketOffer, Money, QuantityMilli, RegionId, World,
+    WorldError,
+};
+
+/// Monthly grievance accrual applied when a country's firm ends procurement
+/// with unmet input demand while a foreign supplier offered the good over a
+/// route that could deliver it in peace.
+const GRIEVANCE_ACCRUAL_BPS: u16 = 500;
+/// Monthly grievance decay applied to pairs without fresh material evidence.
+const GRIEVANCE_DECAY_BPS: u16 = 250;
+/// Grievance level at which the aggrieved country activates the ordinary
+/// journaled bilateral hostility relation.
+const GRIEVANCE_HOSTILITY_THRESHOLD_BPS: u16 = 7_500;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FirmProcurementOrder {
@@ -333,15 +346,113 @@ impl World {
         Ok(())
     }
 
+    /// True when any registered route connects the regions directly, ignoring
+    /// hostility. Grievance accrual asks what peace could have delivered.
+    fn peaceful_direct_route_exists(&self, origin: RegionId, destination: RegionId) -> bool {
+        self.logistics_routes
+            .values()
+            .any(|route| route.origin() == origin && route.destination() == destination)
+    }
+
+    /// Accrues, decays, and escalates bounded bilateral grievances from this
+    /// month's procurement evidence.
+    ///
+    /// A country accrues grievance toward a foreign country only when one of
+    /// its firms ends the month with unmet input demand while that country
+    /// offered the good and a direct route could deliver it in peace. Pairs
+    /// without fresh evidence decay toward zero and are dropped at zero.
+    /// Crossing the threshold activates the ordinary journaled hostility
+    /// transition, so conflict keeps a material cause.
+    fn update_bilateral_grievances(
+        &mut self,
+        unmet: &BTreeMap<(FirmId, GoodId), QuantityMilli>,
+        pristine_offers: &[MarketOffer],
+    ) -> Result<(), WorldError> {
+        let mut accrued = BTreeSet::new();
+        for &(buyer, good) in unmet.keys() {
+            let buyer_firm = self
+                .firms
+                .get(&buyer)
+                .ok_or(WorldError::UnknownFirm(buyer))?;
+            let buyer_region = buyer_firm.region();
+            let buyer_country = self
+                .regions
+                .get(&buyer_region)
+                .ok_or(WorldError::UnknownRegion(buyer_region))?
+                .country();
+            for offer in pristine_offers {
+                if offer.good != good || offer.seller == buyer || offer.quantity.get() == 0 {
+                    continue;
+                }
+                let seller_country = self
+                    .regions
+                    .get(&offer.region)
+                    .ok_or(WorldError::UnknownRegion(offer.region))?
+                    .country();
+                if seller_country == buyer_country {
+                    continue;
+                }
+                if self.peaceful_direct_route_exists(offer.region, buyer_region) {
+                    accrued.insert((buyer_country, seller_country));
+                }
+            }
+        }
+        let tracked: BTreeSet<(CountryId, CountryId)> = self
+            .bilateral_grievances
+            .keys()
+            .copied()
+            .chain(accrued.iter().copied())
+            .collect();
+        for pair in tracked {
+            let current = self
+                .bilateral_grievances
+                .get(&pair)
+                .copied()
+                .map_or(0, BasisPoints::get);
+            let next = if accrued.contains(&pair) {
+                current
+                    .saturating_add(GRIEVANCE_ACCRUAL_BPS)
+                    .min(BasisPoints::MAX)
+            } else {
+                current.saturating_sub(GRIEVANCE_DECAY_BPS)
+            };
+            if next != current {
+                let level = BasisPoints::new(next)
+                    .expect("grievance level is clamped to the basis point range");
+                if next == 0 {
+                    self.bilateral_grievances.remove(&pair);
+                } else {
+                    self.bilateral_grievances.insert(pair, level);
+                }
+                self.events.append(
+                    self.date,
+                    crate::DomainEvent::BilateralGrievanceChanged {
+                        aggrieved: pair.0,
+                        target: pair.1,
+                        level,
+                    },
+                );
+            }
+            if next >= GRIEVANCE_HOSTILITY_THRESHOLD_BPS
+                && !self.countries_are_hostile(pair.0, pair.1)
+            {
+                self.set_country_hostility(pair.0, pair.1, true)?;
+            }
+        }
+        Ok(())
+    }
+
     /// One monthly procurement cycle: plan the offer book, settle orders
-    /// against it, then record the evidence trail.
+    /// against it, record the evidence trail, then update material grievances.
     pub(crate) fn execute_monthly_firm_procurement(
         &mut self,
     ) -> Result<FirmProcurementResult, WorldError> {
         let orders = self.plan_monthly_firm_procurement()?;
         let mut offers = self.plan_procurement_offer_book()?;
+        let pristine_offers = offers.clone();
         let settlement = self.settle_procurement_orders(&orders, &mut offers)?;
         self.record_procurement_outcomes(&settlement)?;
+        self.update_bilateral_grievances(&settlement.unmet, &pristine_offers)?;
         Ok(FirmProcurementResult {
             orders,
             fills: settlement.fills,

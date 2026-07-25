@@ -525,3 +525,31 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: derive a bounded bilateral grievance from observed cross-border material dependence
   and shortage, then make it deterministically propose or activate hostility so conflict has a
   material cause rather than an externally injected flag.
+
+### Material bilateral grievance gate (step 033)
+
+- Conflict now has an executable material cause. Monthly firm procurement maintains a directed,
+  bounded grievance level per (aggrieved, target) country pair, derived only from observed facts
+  of the same month: a firm's unmet input demand, a foreign offer of that good in the pristine
+  pre-settlement book, and a direct route that could deliver it in peace. Route reachability
+  deliberately ignores hostility, so an embargo that blocks a deliverable good entrenches
+  grievance instead of erasing the evidence.
+- Dynamics are deterministic and bounded: +500 bps per evidence month, -250 bps decay per month
+  without evidence, removal at zero, ceiling at 10000 bps. Every change is journaled as the new
+  typed `BilateralGrievanceChanged` event, and crossing 7500 bps activates hostility through the
+  same journaled transition as the step 031 command, so emergent conflict reuses the one
+  authoritative hostility relation and embargo behavior. Grievance is authoritative world state:
+  serialized, compared, and fingerprinted. ADR 0082 records the design.
+- Gate coverage: new `bilateral_grievance.rs` proves accrual from a real unmet import against
+  reachable foreign supply, no accrual when no route exists, decay to removal once imports
+  resume, deterministic escalation to hostility at exactly the threshold month with the bounded
+  ceiling afterwards, and bit-identical command-boundary replay. Full format, check, Clippy,
+  test, and docs gate passes with 107 tests. The rule and fingerprint-schema change advances
+  SIMULATION_VERSION 32 -> 33; the new seed-1/50-year baseline is `6416278853682209045`
+  (31 ms per simulated year), and the demo chronicle stays grievance-free because its shortages
+  are household-side rather than firm procurement against reachable foreign supply.
+- Deliberate limits (per ADR 0082): evidence comes only from firm procurement over direct
+  routes, constants are fixed, and active hostility never de-escalates on its own.
+- Next gate: make peace reachable inside the simulation - when the grievance that caused an
+  emergent hostility has decayed to zero with no fresh material evidence, deterministically
+  deactivate that hostility through the same journaled transition.
