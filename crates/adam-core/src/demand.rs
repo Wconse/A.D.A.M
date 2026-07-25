@@ -319,7 +319,9 @@ impl World {
         offers: &[MarketOffer],
     ) -> Result<Vec<DemandIntent>, WorldError> {
         let mut intents = Vec::new();
-        for cohort in self.cohorts.values() {
+        let mut cohorts: Vec<_> = self.cohorts.values().collect();
+        cohorts.sort_by_key(|cohort| (cohort.region(), cohort.id()));
+        for cohort in cohorts {
             let profile = self
                 .consumption_profiles
                 .get(&cohort.need_profile())
