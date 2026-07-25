@@ -553,3 +553,33 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: make peace reachable inside the simulation - when the grievance that caused an
   emergent hostility has decayed to zero with no fresh material evidence, deterministically
   deactivate that hostility through the same journaled transition.
+
+### Emergent hostility de-escalation gate (step 034)
+
+- Peace is now reachable inside the simulation. The world remembers which hostilities it created
+  itself in a new canonical set `emergent_hostilities`; grievance escalation marks the pair when
+  it activates hostility. After the monthly grievance update, a pair whose directed grievances
+  have both decayed to removal is deactivated through the same journaled
+  `set_country_hostility` transition, emitting the same `BilateralHostilityChanged` event that
+  commands emit. The full material arc closes: shortage -> grievance -> hostility -> embargo ->
+  domestic substitution -> grievance decay -> peace.
+- Commanded hostility stays strictly stronger than the material system: pairs raised by
+  `SetCountryHostility` are never marked emergent and never de-escalate on their own, and a
+  commanded peace clears the emergent marker so the pair restarts from a clean slate. With
+  +500/-250 bps dynamics an emergent hostility lasts at least 30 calm months, so embargoes have
+  real duration without hand-tuned timers. ADR 0083 records the design.
+- Gate coverage: new `hostility_deescalation.rs` proves that an emergent hostility de-escalates
+  after a governed domestic producer ends the material cause (with bit-identical
+  command-boundary replay), that a commanded hostility without grievance never de-escalates, and
+  that a commanded peace clears the emergent marker. Full format, check, Clippy, test, and docs
+  gate passes with 110 tests. The emergent set is serialized and fingerprinted, advancing
+  SIMULATION_VERSION 33 -> 34; the new seed-1/50-year baseline is `8818694516742230572`
+  (32 ms per simulated year) with an unchanged chronicle narrative.
+- Deliberate limits (per ADR 0083): de-escalation consults only grievance state, not broader
+  diplomacy; firm entry is still not a replayable command, so the gate test registers its
+  domestic substitute producer on both timelines directly; only firms with an enacted policy
+  plan market offers, so material recovery requires a governed domestic producer.
+- Next gate candidates: derive grievance from household-side survival shortage so famines can
+  also sour relations; narrate grievance accrual, escalation, and peace in the chronicle so the
+  story is visible; or make firm entry a replayable `RegisterFirm` command so structural
+  substitution can happen inside the journal instead of beside it.

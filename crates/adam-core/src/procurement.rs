@@ -437,7 +437,30 @@ impl World {
                 && !self.countries_are_hostile(pair.0, pair.1)
             {
                 self.set_country_hostility(pair.0, pair.1, true)?;
+                self.mark_emergent_hostility(pair.0, pair.1);
             }
+        }
+        self.deescalate_resolved_emergent_hostilities()?;
+        Ok(())
+    }
+
+    /// Clears emergent hostility once its material cause has decayed away.
+    ///
+    /// A pair de-escalates only when neither directed grievance survives, and
+    /// only when the hostility entered through grievance escalation; commanded
+    /// hostility stays until it is commanded away.
+    fn deescalate_resolved_emergent_hostilities(&mut self) -> Result<(), WorldError> {
+        let resolved: Vec<(CountryId, CountryId)> = self
+            .emergent_hostilities
+            .iter()
+            .copied()
+            .filter(|&(first, second)| {
+                !self.bilateral_grievances.contains_key(&(first, second))
+                    && !self.bilateral_grievances.contains_key(&(second, first))
+            })
+            .collect();
+        for (first, second) in resolved {
+            self.set_country_hostility(first, second, false)?;
         }
         Ok(())
     }

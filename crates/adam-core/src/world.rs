@@ -713,6 +713,9 @@ pub struct World {
     pub(crate) bilateral_hostilities: BTreeSet<(CountryId, CountryId)>,
     /// Directed bounded grievance levels keyed by (aggrieved, target) country.
     pub(crate) bilateral_grievances: BTreeMap<(CountryId, CountryId), BasisPoints>,
+    /// Canonical hostile pairs whose hostility was activated by grievance
+    /// escalation rather than by an external command.
+    pub(crate) emergent_hostilities: BTreeSet<(CountryId, CountryId)>,
     pub(crate) countries: BTreeMap<CountryId, Country>,
     pub(crate) regions: BTreeMap<RegionId, Region>,
     pub(crate) cohorts: BTreeMap<CohortId, HouseholdCohort>,
@@ -779,6 +782,7 @@ impl World {
             government_emergency_policies: BTreeMap::new(),
             bilateral_hostilities: BTreeSet::new(),
             bilateral_grievances: BTreeMap::new(),
+            emergent_hostilities: BTreeSet::new(),
             countries: BTreeMap::new(),
             regions: BTreeMap::new(),
             cohorts: BTreeMap::new(),
@@ -969,6 +973,7 @@ impl World {
         let changed = if active {
             self.bilateral_hostilities.insert(pair)
         } else {
+            self.emergent_hostilities.remove(&pair);
             self.bilateral_hostilities.remove(&pair)
         };
         if changed {
@@ -999,6 +1004,21 @@ impl World {
     #[must_use]
     pub fn bilateral_grievances(&self) -> &BTreeMap<(CountryId, CountryId), BasisPoints> {
         &self.bilateral_grievances
+    }
+
+    /// Canonical hostile pairs whose hostility came from grievance escalation.
+    ///
+    /// These pairs de-escalate automatically once both directed grievances
+    /// have decayed away; commanded hostility never enters this set.
+    #[must_use]
+    pub fn emergent_hostilities(&self) -> &BTreeSet<(CountryId, CountryId)> {
+        &self.emergent_hostilities
+    }
+
+    /// Records that an active hostility was caused by grievance escalation.
+    pub(crate) fn mark_emergent_hostility(&mut self, first: CountryId, second: CountryId) {
+        self.emergent_hostilities
+            .insert(canonical_country_pair(first, second));
     }
 
     #[must_use]
@@ -1536,6 +1556,11 @@ impl World {
             hash.write_u32(aggrieved.get());
             hash.write_u32(target.get());
             hash.write_u16(level.get());
+        }
+        hash.write_u64(self.emergent_hostilities.len() as u64);
+        for (first, second) in &self.emergent_hostilities {
+            hash.write_u32(first.get());
+            hash.write_u32(second.get());
         }
         hash.write_u64(self.countries.len() as u64);
         for (id, country) in &self.countries {
