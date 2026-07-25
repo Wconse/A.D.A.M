@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{ActorId, DomainEvent, RegionId, World};
+use crate::{ActorId, CountryId, DomainEvent, RegionId, World};
 
 /// One deterministic yearly narrative summary derived only from authoritative domain events.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,9 +16,13 @@ impl World {
     pub fn chronicle(&self) -> Vec<ChronicleEntry> {
         let mut years = BTreeMap::<i32, YearSummary>::new();
         let mut actor_names = BTreeMap::<ActorId, String>::new();
+        let mut country_names = BTreeMap::<CountryId, String>::new();
         let mut region_names = BTreeMap::<RegionId, String>::new();
         for envelope in self.events().events() {
             match envelope.event() {
+                DomainEvent::CountryRegistered { country, name } => {
+                    country_names.insert(*country, name.clone());
+                }
                 DomainEvent::ActorRegistered { actor, name, .. } => {
                     actor_names.insert(*actor, name.clone());
                 }
@@ -32,7 +36,9 @@ impl World {
         }
         years
             .into_iter()
-            .filter_map(|(year, summary)| summary.finish(year, &actor_names, &region_names))
+            .filter_map(|(year, summary)| {
+                summary.finish(year, &actor_names, &country_names, &region_names)
+            })
             .collect()
     }
 }
@@ -43,6 +49,8 @@ struct YearSummary {
     relief_by_actor: BTreeMap<ActorId, i128>,
     target_changes_by_actor: BTreeMap<ActorId, u64>,
     rationing_by_region: BTreeMap<RegionId, u64>,
+    hostility_changes: Vec<(CountryId, CountryId, bool)>,
+
     production_milli: u128,
     traded_milli: u128,
     household_borrowing_minor: i128,
@@ -104,6 +112,11 @@ impl YearSummary {
                         }),
                 );
             }
+            DomainEvent::BilateralHostilityChanged {
+                first,
+                second,
+                active,
+            } => self.hostility_changes.push((*first, *second, *active)),
             DomainEvent::SurvivalRationingApplied {
                 region,
                 requested,
@@ -151,6 +164,7 @@ impl YearSummary {
         self,
         year: i32,
         actor_names: &BTreeMap<ActorId, String>,
+        country_names: &BTreeMap<CountryId, String>,
         region_names: &BTreeMap<RegionId, String>,
     ) -> Option<ChronicleEntry> {
         if self.months == 0 && !self.completed {
@@ -184,6 +198,18 @@ impl YearSummary {
                 self.rationed_available_milli,
                 self.rationed_requested_milli,
                 self.rationing_actions
+            ));
+        }
+        for (first, second, active) in &self.hostility_changes {
+            let first_name = country_names
+                .get(first)
+                .map_or_else(|| first.to_string(), Clone::clone);
+            let second_name = country_names
+                .get(second)
+                .map_or_else(|| second.to_string(), Clone::clone);
+            let verb = if *active { "entered" } else { "ended" };
+            sentences.push(format!(
+                "{first_name} and {second_name} {verb} bilateral hostility."
             ));
         }
         if self.relief_minor > 0 {
@@ -412,6 +438,44 @@ mod tests {
         assert!(chronicle[0].text.contains("spent 700"));
         assert!(chronicle[0].text.contains("200 of public debt"));
         assert!(chronicle[0].text.contains("across 1 countries"));
+    }
+
+    #[test]
+    fn chronicle_records_bilateral_hostility_by_country_name() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        for (country, name) in [(1, "Arcadia"), (2, "Borealia")] {
+            world.events.append(
+                date,
+                DomainEvent::CountryRegistered {
+                    country: CountryId::new(country),
+                    name: name.to_owned(),
+                },
+            );
+        }
+        world.events.append(
+            date,
+            DomainEvent::BilateralHostilityChanged {
+                first: CountryId::new(1),
+                second: CountryId::new(2),
+                active: true,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert!(
+            chronicle[0]
+                .text
+                .contains("Arcadia and Borealia entered bilateral hostility")
+        );
     }
 
     #[test]

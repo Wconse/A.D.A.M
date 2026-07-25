@@ -511,3 +511,17 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: derive a bounded bilateral grievance from observed cross-border material dependence
   and shortage, then make it deterministically propose or activate hostility so conflict has a
   material cause rather than an externally injected flag.
+
+### Hostility chronicle gate (step 032)
+
+- The yearly chronicle now resolves country names from registration events and narrates every
+  typed bilateral-hostility transition in the year, including both escalation and de-escalation.
+  It remains a pure event-log projection: no world rule, persistence layout, or fingerprinted
+  state changed.
+- Gate: a focused chronicle test creates Arcadia and Borealia, journals their hostility entry,
+  and requires the rendered history sentence to name both countries. The full quality gate passes
+  with 103 tests. SIMULATION_VERSION remains 32 and the seed-1/50-year baseline remains
+  `10616160303486040494` because the demo has no hostility transition.
+- Next gate: derive a bounded bilateral grievance from observed cross-border material dependence
+  and shortage, then make it deterministically propose or activate hostility so conflict has a
+  material cause rather than an externally injected flag.
