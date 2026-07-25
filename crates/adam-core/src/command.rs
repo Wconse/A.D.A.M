@@ -111,6 +111,7 @@ pub enum WorldCommand {
         firm: FirmId,
         policy: FirmPolicy,
     },
+    RegisterFirm(crate::Firm),
 }
 impl WorldCommand {
     /// Applies the same deterministic command regardless of player or AI origin.
@@ -239,6 +240,7 @@ impl WorldCommand {
                 firm,
                 policy,
             } => world.set_firm_policy(*actor, *firm, *policy),
+            Self::RegisterFirm(firm) => world.register_firm(firm.clone()),
         }
     }
 }
@@ -269,5 +271,67 @@ mod tests {
         )
         .expect("replay");
         assert_eq!(direct, replayed);
+    }
+    #[test]
+    fn firm_registration_is_replayable_and_atomic() {
+        use crate::{
+            Firm, Good, GoodId, Money, Population, ProductionRecipe, QuantityMilli, RecipeId,
+            Region, RegionId,
+        };
+        let mut direct = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
+        direct
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("register");
+        direct
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "R",
+                    Population::new(1),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        direct
+            .register_good(Good::new(GoodId::new(1), "Grain").expect("good"))
+            .expect("good");
+        direct
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(1),
+                    "Grain recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("recipe");
+        let mut replayed = direct.clone();
+        let firm = Firm::new(
+            FirmId::new(1),
+            "Farm",
+            RegionId::new(1),
+            RecipeId::new(1),
+            1,
+            1,
+            Money::from_minor_units(1),
+            std::collections::BTreeMap::new(),
+        )
+        .expect("firm");
+        direct.register_firm(firm.clone()).expect("direct firm");
+        replay_commands(&mut replayed, &[WorldCommand::RegisterFirm(firm.clone())])
+            .expect("replay firm");
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        let before = replayed.clone();
+        assert!(matches!(
+            WorldCommand::RegisterFirm(firm).apply(&mut replayed),
+            Err(WorldError::DuplicateFirm(_))
+        ));
+        assert_eq!(replayed, before);
     }
 }

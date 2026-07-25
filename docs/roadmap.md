@@ -583,3 +583,25 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   also sour relations; narrate grievance accrual, escalation, and peace in the chronicle so the
   story is visible; or make firm entry a replayable `RegisterFirm` command so structural
   substitution can happen inside the journal instead of beside it.
+
+### Replayable firm registration gate (step 035)
+
+- Firm entry is now a journaled transition. A new `RegisterFirm(Firm)` command variant delegates
+  to the existing validated `World::register_firm` transition, so a producer entering an
+  existing history replays from commands alone instead of being applied beside the journal on
+  both timelines. The variant is appended at the end of the command enum so previously recorded
+  journals keep their encoding. ADR 0084 records the design.
+- No rule or state-schema change: registration validation and atomicity are untouched,
+  SIMULATION_VERSION stays at 34, and the seed-1/50-year baseline fingerprint is unchanged at
+  `8818694516742230572`.
+- Gate coverage: new command-boundary test `firm_registration_is_replayable_and_atomic` proves
+  replay equality of world state and fingerprint plus atomic rejection of a duplicate
+  registration, and the step 034 de-escalation gate now registers its mid-history domestic
+  producer through the command in a real scenario. Full format, check, Clippy, test, and docs
+  gate passes with 111 tests.
+- Deliberate limits (per ADR 0084): firm entry stays exogenous - no entrepreneur model, entry
+  costs, or capital raising - and ownership stakes, appointments, and actor registration still
+  lack command wrappers.
+- Next gate candidates: derive grievance from household-side survival shortage so famines can
+  also sour relations, or narrate grievance accrual, escalation, and peace in the chronicle so
+  the emergent conflict arc is visible in the year-by-year story.

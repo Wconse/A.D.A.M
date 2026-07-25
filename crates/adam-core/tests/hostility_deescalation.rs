@@ -199,9 +199,10 @@ fn deescalation_world() -> World {
 }
 
 /// Registers a governed domestic grain producer in Bakerton on both worlds.
-/// Firm entry is not yet a replayable command, so the test applies the same
-/// journaled registrations to the direct and replayed timelines. The firm is
-/// governed because only firms with an enacted policy plan market offers.
+/// The firm itself enters through the replayable `RegisterFirm` command;
+/// governance registrations are applied identically to both timelines. The
+/// firm is governed because only firms with an enacted policy plan market
+/// offers.
 fn register_domestic_grain_farm(world: &mut World, replayed: &mut World) {
     for target in [world, replayed] {
         target
@@ -215,21 +216,21 @@ fn register_domestic_grain_farm(world: &mut World, replayed: &mut World) {
                 .expect("actor"),
             )
             .expect("register domestic actor");
-        target
-            .register_firm(
-                Firm::new(
-                    FirmId::new(DOMESTIC_FARM),
-                    "Bakerton Farm",
-                    RegionId::new(BAKERTON),
-                    RecipeId::new(GRAIN_RECIPE),
-                    2,
-                    2,
-                    Money::from_minor_units(1_000),
-                    BTreeMap::new(),
-                )
-                .expect("domestic farm"),
+        WorldCommand::RegisterFirm(
+            Firm::new(
+                FirmId::new(DOMESTIC_FARM),
+                "Bakerton Farm",
+                RegionId::new(BAKERTON),
+                RecipeId::new(GRAIN_RECIPE),
+                2,
+                2,
+                Money::from_minor_units(1_000),
+                BTreeMap::new(),
             )
-            .expect("register domestic farm");
+            .expect("domestic farm"),
+        )
+        .apply(target)
+        .expect("register domestic farm");
         target
             .register_ownership_stake(OwnershipStake::new(
                 FirmId::new(DOMESTIC_FARM),
