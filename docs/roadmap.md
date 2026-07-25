@@ -605,3 +605,27 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate candidates: derive grievance from household-side survival shortage so famines can
   also sour relations, or narrate grievance accrual, escalation, and peace in the chronicle so
   the emergent conflict arc is visible in the year-by-year story.
+
+### Grievance arc narration gate (step 036)
+
+- The yearly chronicle now narrates the whole emergent conflict arc by country name. Each
+  directed grievance pair contributes one deterministic sentence per year - "deepened to N
+  basis points", "eased to N basis points", or "resolved its material grievance" when the year
+  ends at zero - placed before the hostility sentences so cause precedes effect. Grievance and
+  hostility narration share one helper, keeping the year-finishing function under the Clippy
+  line budget. ADR 0085 records the design.
+- Importance tiers: any hostility change now ranks the year at 85, and grievance-only diplomacy
+  ranks 50, so conflict years surface above routine production years without displacing
+  survival crises.
+- The chronicle stays a pure derivation from journaled events: no state or event changes,
+  SIMULATION_VERSION stays at 34, and the seed-1/50-year baseline fingerprint is unchanged at
+  `8818694516742230572`.
+- Gate coverage: new test `chronicle_narrates_the_grievance_arc_by_country_name` pins a
+  two-year escalation-then-peace story (deepen to 7500, enter hostility, resolve to zero, end
+  hostility, importance 85 both years). Full format, check, Clippy, test, and docs gate passes
+  with 112 tests.
+- Deliberate limits (per ADR 0085): the chronicle reports first-vs-last level per year rather
+  than intra-year oscillations, and grievance attribution stays at country level.
+- Next gate: derive grievance from household-side survival shortage so famines - not only
+  unmet firm imports - can sour relations between countries through the same journaled
+  grievance ledger.

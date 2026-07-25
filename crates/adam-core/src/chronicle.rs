@@ -50,6 +50,7 @@ struct YearSummary {
     target_changes_by_actor: BTreeMap<ActorId, u64>,
     rationing_by_region: BTreeMap<RegionId, u64>,
     hostility_changes: Vec<(CountryId, CountryId, bool)>,
+    grievances_by_pair: BTreeMap<(CountryId, CountryId), (u16, u16)>,
 
     production_milli: u128,
     traded_milli: u128,
@@ -117,6 +118,17 @@ impl YearSummary {
                 second,
                 active,
             } => self.hostility_changes.push((*first, *second, *active)),
+            DomainEvent::BilateralGrievanceChanged {
+                aggrieved,
+                target,
+                level,
+            } => {
+                let entry = self
+                    .grievances_by_pair
+                    .entry((*aggrieved, *target))
+                    .or_insert((level.get(), level.get()));
+                entry.1 = level.get();
+            }
             DomainEvent::SurvivalRationingApplied {
                 region,
                 requested,
@@ -200,18 +212,7 @@ impl YearSummary {
                 self.rationing_actions
             ));
         }
-        for (first, second, active) in &self.hostility_changes {
-            let first_name = country_names
-                .get(first)
-                .map_or_else(|| first.to_string(), Clone::clone);
-            let second_name = country_names
-                .get(second)
-                .map_or_else(|| second.to_string(), Clone::clone);
-            let verb = if *active { "entered" } else { "ended" };
-            sentences.push(format!(
-                "{first_name} and {second_name} {verb} bilateral hostility."
-            ));
-        }
+        self.push_conflict_narration(&mut sentences, country_names);
         if self.relief_minor > 0 {
             sentences.push(format!(
                 "Political offices transferred {} minor currency units in emergency relief, backed by {} of new public debt.",
@@ -268,6 +269,43 @@ impl YearSummary {
         })
     }
 
+    fn push_conflict_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        country_names: &BTreeMap<CountryId, String>,
+    ) {
+        let name = |country: &CountryId| {
+            country_names
+                .get(country)
+                .map_or_else(|| country.to_string(), Clone::clone)
+        };
+        for ((aggrieved, target), (first_level, last_level)) in &self.grievances_by_pair {
+            let aggrieved_name = name(aggrieved);
+            let target_name = name(target);
+            if *last_level == 0 {
+                sentences.push(format!(
+                    "{aggrieved_name} resolved its material grievance against {target_name}."
+                ));
+            } else if last_level >= first_level {
+                sentences.push(format!(
+                    "{aggrieved_name}'s material grievance against {target_name} deepened to {last_level} basis points."
+                ));
+            } else {
+                sentences.push(format!(
+                    "{aggrieved_name}'s material grievance against {target_name} eased to {last_level} basis points."
+                ));
+            }
+        }
+        for (first, second, active) in &self.hostility_changes {
+            let first_name = name(first);
+            let second_name = name(second);
+            let verb = if *active { "entered" } else { "ended" };
+            sentences.push(format!(
+                "{first_name} and {second_name} {verb} bilateral hostility."
+            ));
+        }
+    }
+
     fn push_named_attributions(
         &self,
         sentences: &mut Vec<String>,
@@ -314,12 +352,16 @@ impl YearSummary {
             100
         } else if self.minimum_survival_bps.is_some_and(|value| value < 5_000) {
             90
+        } else if !self.hostility_changes.is_empty() {
+            85
         } else if self.rationing_actions > 0 {
             80
         } else if self.relief_debt_minor > 0 || self.relief_minor > 0 {
             70
         } else if self.household_borrowing_minor > 0 {
             60
+        } else if !self.grievances_by_pair.is_empty() {
+            50
         } else if self.production_milli > 0 || self.traded_milli > 0 || self.measured_regions > 0 {
             40
         } else {
@@ -476,6 +518,91 @@ mod tests {
                 .text
                 .contains("Arcadia and Borealia entered bilateral hostility")
         );
+    }
+
+    #[test]
+    fn chronicle_narrates_the_grievance_arc_by_country_name() {
+        let escalation = SimDate::new(2025, 1).expect("date");
+        let peace = SimDate::new(2026, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), escalation);
+        for (country, name) in [(1, "Arcadia"), (2, "Borealia")] {
+            world.events.append(
+                escalation,
+                DomainEvent::CountryRegistered {
+                    country: CountryId::new(country),
+                    name: name.to_owned(),
+                },
+            );
+        }
+        world.events.append(
+            escalation,
+            DomainEvent::BilateralGrievanceChanged {
+                aggrieved: CountryId::new(2),
+                target: CountryId::new(1),
+                level: BasisPoints::new(7_500).expect("basis points"),
+            },
+        );
+        world.events.append(
+            escalation,
+            DomainEvent::BilateralHostilityChanged {
+                first: CountryId::new(1),
+                second: CountryId::new(2),
+                active: true,
+            },
+        );
+        world.events.append(
+            escalation,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        world.events.append(
+            peace,
+            DomainEvent::BilateralGrievanceChanged {
+                aggrieved: CountryId::new(2),
+                target: CountryId::new(1),
+                level: BasisPoints::new(0).expect("basis points"),
+            },
+        );
+        world.events.append(
+            peace,
+            DomainEvent::BilateralHostilityChanged {
+                first: CountryId::new(1),
+                second: CountryId::new(2),
+                active: false,
+            },
+        );
+        world.events.append(
+            peace,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2026,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 2);
+        assert!(chronicle[0].text.contains(
+            "Borealia's material grievance against Arcadia deepened to 7500 basis points"
+        ));
+        assert!(
+            chronicle[0]
+                .text
+                .contains("Arcadia and Borealia entered bilateral hostility")
+        );
+        assert_eq!(chronicle[0].importance, 85);
+        assert!(
+            chronicle[1]
+                .text
+                .contains("Borealia resolved its material grievance against Arcadia")
+        );
+        assert!(
+            chronicle[1]
+                .text
+                .contains("Arcadia and Borealia ended bilateral hostility")
+        );
+        assert_eq!(chronicle[1].importance, 85);
     }
 
     #[test]
