@@ -65,6 +65,12 @@ impl World {
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
+        next.update_bilateral_grievances(
+            &procurement.unmet,
+            &procurement.pristine_offers,
+            &clearing.unmet,
+            &offers,
+        )?;
         let firms: Vec<_> = next.firms.keys().copied().collect();
         for firm in firms {
             next.capture_monthly_firm_observation(firm)?;
@@ -167,10 +173,10 @@ mod tests {
         Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget,
         CorporateRole, Country, CountryId, CountryIndicators, DemandBasis, EducationLevel,
         EmergencyReliefStrategy, EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good,
-        GoodId, GovernmentEmergencyPolicy, HouseholdCohort, HouseholdType, Money, NeedProfileId,
-        NeedTier, OwnershipStake, PhysicalShortageStrategy, Population, PowerNode, PowerNodeId,
-        PowerNodeKind, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate,
-        WorldCommand, WorldSeed,
+        GoodId, GovernmentEmergencyPolicy, HouseholdCohort, HouseholdType, LogisticsRoute, Money,
+        NeedProfileId, NeedTier, OwnershipStake, PhysicalShortageStrategy, Population, PowerNode,
+        PowerNodeId, PowerNodeKind, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId,
+        RouteId, SimDate, TransportMode, WorldCommand, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -304,6 +310,157 @@ mod tests {
                 .expect("price");
         }
         world
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn household_shortage_world(with_route: bool) -> World {
+        let mut world = commercial_world(true);
+        world
+            .set_firm_production_target(ActorId::new(1), FirmId::new(1), 0)
+            .expect("suspend local farm");
+        world
+            .register_country(Country::new(CountryId::new(2), "B").expect("country"))
+            .expect("foreign country");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(2),
+                    CountryId::new(2),
+                    "Foreign fields",
+                    Population::new(0),
+                    Money::default(),
+                )
+                .expect("foreign region"),
+            )
+            .expect("foreign region");
+        world
+            .register_actor(
+                Actor::new(ActorId::new(2), "Foreign grower", RegionId::new(2), 1980)
+                    .expect("foreign actor"),
+            )
+            .expect("foreign actor");
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(2),
+                    "Foreign farm",
+                    RegionId::new(2),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::default(),
+                    BTreeMap::new(),
+                )
+                .expect("foreign farm"),
+            )
+            .expect("foreign farm");
+        world
+            .register_ownership_stake(OwnershipStake::new(
+                FirmId::new(2),
+                ActorId::new(2),
+                BasisPoints::new(6_000).expect("rights"),
+                BasisPoints::new(6_000).expect("rights"),
+            ))
+            .expect("foreign ownership");
+        world
+            .register_firm_appointment(FirmAppointment::new(
+                FirmId::new(2),
+                ActorId::new(2),
+                CorporateRole::OperationsManager,
+            ))
+            .expect("foreign appointment");
+        world
+            .set_firm_policy(
+                ActorId::new(2),
+                FirmId::new(2),
+                FirmPolicy::new(
+                    0,
+                    BasisPoints::new(0).expect("markup"),
+                    BasisPoints::new(0).expect("allocation"),
+                    BasisPoints::new(0).expect("allocation"),
+                    BasisPoints::new(0).expect("allocation"),
+                )
+                .expect("foreign policy"),
+            )
+            .expect("foreign policy");
+        world
+            .set_firm_production_target(ActorId::new(2), FirmId::new(2), 1)
+            .expect("foreign target");
+        world
+            .set_regional_price(
+                RegionId::new(2),
+                GoodId::new(1),
+                Money::from_minor_units(10),
+            )
+            .expect("foreign price");
+        if with_route {
+            world
+                .register_logistics_route(
+                    LogisticsRoute::new(
+                        RouteId::new(1),
+                        RegionId::new(2),
+                        RegionId::new(1),
+                        TransportMode::Road,
+                        QuantityMilli::new(1_000_000),
+                        Money::from_minor_units(1),
+                        1,
+                        10_000,
+                    )
+                    .expect("route")
+                    .with_carrier(FirmId::new(2)),
+                )
+                .expect("route");
+        }
+        world
+    }
+
+    #[test]
+    fn household_survival_shortage_against_reachable_foreign_supply_accrues_grievance() {
+        let mut direct = household_shortage_world(true);
+        let mut replayed = direct.clone();
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed economic month");
+
+        assert_eq!(
+            result.commercial.clearing.unmet
+                [&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(1_000)
+        );
+        assert_eq!(
+            direct.bilateral_grievances()[&(CountryId::new(1), CountryId::new(2))].get(),
+            500
+        );
+        assert!(direct.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::BilateralGrievanceChanged {
+                aggrieved,
+                target,
+                level,
+            } if *aggrieved == CountryId::new(1)
+                && *target == CountryId::new(2)
+                && level.get() == 500
+        )));
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn household_survival_shortage_without_route_creates_no_grievance() {
+        let mut world = household_shortage_world(false);
+        let result = world
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+
+        assert_eq!(
+            result.commercial.clearing.unmet
+                [&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(1_000)
+        );
+        assert!(world.bilateral_grievances().is_empty());
     }
 
     #[test]

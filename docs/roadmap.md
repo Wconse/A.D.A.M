@@ -629,3 +629,28 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: derive grievance from household-side survival shortage so famines - not only
   unmet firm imports - can sour relations between countries through the same journaled
   grievance ledger.
+
+### Household survival grievance gate (step 037)
+
+- Household survival shortage now enters the same journaled bilateral grievance ledger as unmet
+  firm imports. After the household market clears, an unmet `NeedTier::Survival` need accrues
+  grievance toward a foreign country only when its firm offered the same good over a direct route
+  that could deliver in peace. Shortage without a route still blames nobody; multiple firm and
+  household shortages union into one canonical country pair, so they cannot double-accrue a month.
+  ADR 0086 records the design.
+- Timing is explicit: firm evidence uses its immutable pre-procurement offer book, while household
+  evidence uses the offer book presented to the household market after firm procurement. This
+  preserves existing firm escalation/de-escalation behaviour while grounding household grievance
+  in the authoritative market shortfall.
+- Gate coverage: two new commercial-cycle tests prove a suspended local farm plus reachable
+  foreign food supplier yields an unmet survival need and a replay-identical 500-bps grievance,
+  while the identical world without a route creates no grievance. Full format, check, Clippy,
+  test, and docs gate passes with 114 tests.
+- No new state schema: `SIMULATION_VERSION` stays at 34; seed-1/50-year baseline remains
+  `8818694516742230572` (32.3 ms per simulated year).
+- Deliberate limits (per ADR 0086): household markets still settle locally; the foreign offer is
+  evidence that peaceful logistics could supply the need, not yet an executed cross-border retail
+  import. Delivered household pricing, tariff, capacity, and shipment mechanics remain separate.
+- Next gate: make household survival imports settle across a direct peaceful route, with delivered
+  price and route cost, so reachable foreign food can avert the shortage rather than only explain
+  its diplomatic consequence.

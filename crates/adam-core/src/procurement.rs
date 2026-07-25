@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    BasisPoints, CountryId, FirmId, GoodId, MarketOffer, Money, QuantityMilli, RegionId, World,
-    WorldError,
+    BasisPoints, CohortId, CountryId, FirmId, GoodId, MarketOffer, Money, NeedTier, QuantityMilli,
+    RegionId, World, WorldError,
 };
 
 /// Monthly grievance accrual applied when a country's firm ends procurement
@@ -37,6 +37,7 @@ pub struct FirmProcurementResult {
     pub orders: Vec<FirmProcurementOrder>,
     pub fills: Vec<FirmProcurementFill>,
     pub unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
+    pub(crate) pristine_offers: Vec<MarketOffer>,
 }
 
 /// Outcome of the settle phase: what moved, what stayed unmet, and the
@@ -354,22 +355,64 @@ impl World {
             .any(|route| route.origin() == origin && route.destination() == destination)
     }
 
+    /// Adds directed grievance evidence from unmet household survival needs.
+    fn collect_household_grievance_evidence(
+        &self,
+        household_unmet: &BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>,
+        household_offers: &[MarketOffer],
+        accrued: &mut BTreeSet<(CountryId, CountryId)>,
+    ) -> Result<(), WorldError> {
+        for &(cohort, good, tier) in household_unmet.keys() {
+            if tier != NeedTier::Survival {
+                continue;
+            }
+            let household = self
+                .cohorts
+                .get(&cohort)
+                .ok_or(WorldError::UnknownCohort(cohort))?;
+            let household_region = household.region();
+            let household_country = self
+                .regions
+                .get(&household_region)
+                .ok_or(WorldError::UnknownRegion(household_region))?
+                .country();
+            for offer in household_offers {
+                if offer.good != good || offer.quantity.get() == 0 {
+                    continue;
+                }
+                let seller_country = self
+                    .regions
+                    .get(&offer.region)
+                    .ok_or(WorldError::UnknownRegion(offer.region))?
+                    .country();
+                if seller_country != household_country
+                    && self.peaceful_direct_route_exists(offer.region, household_region)
+                {
+                    accrued.insert((household_country, seller_country));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Accrues, decays, and escalates bounded bilateral grievances from this
-    /// month's procurement evidence.
+    /// month's firm and household shortage evidence.
     ///
-    /// A country accrues grievance toward a foreign country only when one of
-    /// its firms ends the month with unmet input demand while that country
-    /// offered the good and a direct route could deliver it in peace. Pairs
-    /// without fresh evidence decay toward zero and are dropped at zero.
-    /// Crossing the threshold activates the ordinary journaled hostility
-    /// transition, so conflict keeps a material cause.
-    fn update_bilateral_grievances(
+    /// A country accrues only when a firm input or household survival need
+    /// stayed unmet while a foreign firm offered that good over a direct route
+    /// that could deliver it in peace. Pairs without fresh evidence decay
+    /// toward zero and are dropped at zero. Crossing the threshold activates
+    /// the ordinary journaled hostility transition, so conflict keeps a
+    /// material cause.
+    pub(crate) fn update_bilateral_grievances(
         &mut self,
-        unmet: &BTreeMap<(FirmId, GoodId), QuantityMilli>,
-        pristine_offers: &[MarketOffer],
+        firm_unmet: &BTreeMap<(FirmId, GoodId), QuantityMilli>,
+        firm_offers: &[MarketOffer],
+        household_unmet: &BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>,
+        household_offers: &[MarketOffer],
     ) -> Result<(), WorldError> {
         let mut accrued = BTreeSet::new();
-        for &(buyer, good) in unmet.keys() {
+        for &(buyer, good) in firm_unmet.keys() {
             let buyer_firm = self
                 .firms
                 .get(&buyer)
@@ -380,7 +423,7 @@ impl World {
                 .get(&buyer_region)
                 .ok_or(WorldError::UnknownRegion(buyer_region))?
                 .country();
-            for offer in pristine_offers {
+            for offer in firm_offers {
                 if offer.good != good || offer.seller == buyer || offer.quantity.get() == 0 {
                     continue;
                 }
@@ -397,6 +440,7 @@ impl World {
                 }
             }
         }
+        self.collect_household_grievance_evidence(household_unmet, household_offers, &mut accrued)?;
         let tracked: BTreeSet<(CountryId, CountryId)> = self
             .bilateral_grievances
             .keys()
@@ -475,11 +519,11 @@ impl World {
         let pristine_offers = offers.clone();
         let settlement = self.settle_procurement_orders(&orders, &mut offers)?;
         self.record_procurement_outcomes(&settlement)?;
-        self.update_bilateral_grievances(&settlement.unmet, &pristine_offers)?;
         Ok(FirmProcurementResult {
             orders,
             fills: settlement.fills,
             unmet: settlement.unmet,
+            pristine_offers,
         })
     }
 }
