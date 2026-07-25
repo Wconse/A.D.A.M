@@ -1,6 +1,6 @@
 //! Versioned content loading and validation for A.D.A.M.
 //!
-//! Content schema v6: a scenario is a TOML document (see `assets/demo.toml`)
+//! Content schema v7: a scenario is a TOML document (see `assets/demo.toml`)
 //! loaded into a [`World`] through [`world_from_toml_str`]. The embedded
 //! Stage 0 demo scenario keeps telling two contrasting stories under the 20%
 //! final-sales tax, the only monetary sink of the closed economy:
@@ -8,7 +8,7 @@
 //!   mid-chronicle (wage arrears, deprivation, mortality);
 //! - Southvale carries buffers and wages sized to survive the full 50 years.
 //!
-//! Schema v6 replaces the single country with a countries list: the demo also
+//! Schema v7 replaces the single country with a countries list: the demo also
 //! runs Borealia, a second country with its own region, so a single run
 //! narrates more than one fiscal and demographic path.
 
@@ -18,15 +18,15 @@ use adam_core::{
     Actor, ActorId, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget,
     CorporateRole, Country, CountryId, DemandBasis, EducationLevel, EmploymentAgreement,
     EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort,
-    HouseholdType, Money, NeedProfileId, NeedTier, OwnershipStake, Population, ProductionInput,
-    ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate, World, WorldError,
-    WorldSeed,
+    HouseholdType, LogisticsRoute, Money, NeedProfileId, NeedTier, OwnershipStake, Population,
+    ProductionInput, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, RouteId, SimDate,
+    TransportMode, World, WorldError, WorldSeed,
 };
 
 /// Content schema version understood by this crate.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
-/// The embedded Stage 0 demo scenario in content schema v6.
+/// The embedded Stage 0 demo scenario in content schema v7.
 pub const DEMO_SCENARIO_TOML: &str = include_str!("../assets/demo.toml");
 
 /// Errors raised while loading scenario content.
@@ -68,6 +68,8 @@ struct ScenarioSpec {
     consumption_profiles: Vec<ProfileSpec>,
     recipes: Vec<RecipeSpec>,
     regions: Vec<RegionSpec>,
+    #[serde(default)]
+    routes: Vec<RouteSpec>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -141,6 +143,19 @@ struct RegionSpec {
     firms: Vec<FirmSpec>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RouteSpec {
+    id: u32,
+    origin: u32,
+    destination: u32,
+    mode: String,
+    monthly_capacity_milli: u64,
+    cost_per_unit_minor: i64,
+    transit_days: u16,
+    reliability_bps: u16,
+    carrier: u32,
+}
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OwnerSpec {
@@ -228,7 +243,7 @@ pub fn demo_world(seed: u64) -> Result<World, WorldError> {
     }
 }
 
-/// Builds a [`World`] from a content schema v6 TOML scenario document.
+/// Builds a [`World`] from a content schema v7 TOML scenario document.
 ///
 /// # Errors
 /// Returns [`ContentError`] when the document cannot be parsed, violates the
@@ -248,6 +263,22 @@ pub fn world_from_toml_str(seed: u64, document: &str) -> Result<World, ContentEr
 
     for region in &spec.regions {
         register_region_economy(&mut world, CountryId::new(region.country), region)?;
+    }
+    for route in &spec.routes {
+        world.register_logistics_route(
+            LogisticsRoute::new(
+                RouteId::new(route.id),
+                RegionId::new(route.origin),
+                RegionId::new(route.destination),
+                parse_transport_mode(&route.mode)?,
+                QuantityMilli::new(route.monthly_capacity_milli),
+                Money::from_minor_units(route.cost_per_unit_minor),
+                route.transit_days,
+                route.reliability_bps,
+            )
+            .map_err(|error| ContentError::Schema(format!("invalid logistics route: {error:?}")))?
+            .with_carrier(FirmId::new(route.carrier)),
+        )?;
     }
     Ok(world)
 }
@@ -497,6 +528,15 @@ fn parse_role(value: &str) -> Result<CorporateRole, ContentError> {
     }
 }
 
+fn parse_transport_mode(value: &str) -> Result<TransportMode, ContentError> {
+    match value {
+        "road" => Ok(TransportMode::Road),
+        "rail" => Ok(TransportMode::Rail),
+        "sea" => Ok(TransportMode::Sea),
+        "air" => Ok(TransportMode::Air),
+        other => Err(unsupported("transport mode", other)),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,6 +545,7 @@ mod tests {
     fn demo_world_builds_and_advances_one_economic_year() {
         let mut world = demo_world(1).expect("demo world");
         world.advance_economic_year().expect("first economic year");
+        assert_eq!(world.logistics_routes().len(), 1);
     }
 
     #[test]
@@ -526,7 +567,7 @@ mod tests {
 
     #[test]
     fn wrong_schema_version_is_rejected() {
-        let document = DEMO_SCENARIO_TOML.replace("schema_version = 6", "schema_version = 4");
+        let document = DEMO_SCENARIO_TOML.replace("schema_version = 7", "schema_version = 4");
         assert!(matches!(
             world_from_toml_str(1, &document),
             Err(ContentError::Schema(_))

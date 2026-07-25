@@ -106,6 +106,21 @@ impl World {
         Ok(offers)
     }
 
+    /// Selects the lowest-tariff direct route for a procurement import.
+    /// Equal tariffs resolve by stable route ID. This first commercial slice
+    /// does not reserve physical capacity or create an in-transit shipment.
+    fn direct_procurement_route_cost(
+        &self,
+        origin: RegionId,
+        destination: RegionId,
+    ) -> Option<Money> {
+        self.logistics_routes
+            .values()
+            .filter(|route| route.origin() == origin && route.destination() == destination)
+            .map(|route| (route.cost_per_unit(), route.id()))
+            .min_by_key(|(cost, route)| (cost.minor_units(), *route))
+            .map(|(cost, _)| cost)
+    }
     /// Settle phase: match orders against the offer book and move cash and
     /// inventories. All movement happens on a clone of the firm ledger and is
     /// committed only after the whole month settles, so any error leaves the
@@ -123,19 +138,63 @@ impl World {
         let mut purchases: BTreeMap<(FirmId, GoodId), (u64, i64)> = BTreeMap::new();
         for order in orders {
             let mut remaining = order.quantity.get();
-            for offer in offers.iter_mut().filter(|offer| {
-                offer.region == order.region
-                    && offer.good == order.good
-                    && offer.seller != order.buyer
-            }) {
-                if remaining == 0 || offer.quantity.get() == 0 {
+            // Local offers keep priority in book order (price ascending);
+            // import offers follow, ordered by delivered price (offer price
+            // plus route tariff) with stable region and seller tie-breaks.
+            // Imports only ever see the remainder local sellers cannot fill.
+            let mut candidates: Vec<(usize, Money)> = Vec::new();
+            let mut imports: Vec<(i64, RegionId, FirmId, usize, Money)> = Vec::new();
+            for (index, offer) in offers.iter().enumerate() {
+                if offer.good != order.good
+                    || offer.seller == order.buyer
+                    || offer.quantity.get() == 0
+                {
+                    continue;
+                }
+                if offer.region == order.region {
+                    candidates.push((index, Money::default()));
+                } else if let Some(tariff) =
+                    self.direct_procurement_route_cost(offer.region, order.region)
+                {
+                    let delivered = offer
+                        .unit_price
+                        .minor_units()
+                        .checked_add(tariff.minor_units())
+                        .ok_or(WorldError::ArithmeticOverflow(
+                            "firm procurement delivered price",
+                        ))?;
+                    imports.push((delivered, offer.region, offer.seller, index, tariff));
+                }
+            }
+            imports.sort_by_key(|&(delivered, region, seller, _, _)| (delivered, region, seller));
+            candidates.extend(
+                imports
+                    .into_iter()
+                    .map(|(_, _, _, index, tariff)| (index, tariff)),
+            );
+            for (index, tariff) in candidates {
+                if remaining == 0 {
                     break;
+                }
+                let offer = &mut offers[index];
+                if offer.quantity.get() == 0 {
+                    continue;
                 }
                 let buyer_cash = firms[&order.buyer].cash().minor_units().max(0);
-                let price = offer.unit_price.minor_units();
-                if price <= 0 || buyer_cash == 0 {
+                if buyer_cash == 0 {
                     break;
                 }
+                let price = offer
+                    .unit_price
+                    .minor_units()
+                    .checked_add(tariff.minor_units())
+                    .ok_or(WorldError::ArithmeticOverflow(
+                        "firm procurement delivered price",
+                    ))?;
+                if price <= 0 {
+                    continue;
+                }
+                let unit_price = Money::from_minor_units(price);
                 let affordable = i128::from(buyer_cash)
                     .checked_mul(i128::from(QuantityMilli::SCALE))
                     .ok_or(WorldError::ArithmeticOverflow("firm procurement budget"))?
@@ -171,7 +230,7 @@ impl World {
                     .ok_or(WorldError::UnknownFirm(offer.seller))?
                     .apply_cash_delta(spend)?;
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
-                trade_prices.insert((offer.seller, order.good), offer.unit_price);
+                trade_prices.insert((offer.seller, order.good), unit_price);
                 let purchase = purchases.entry((order.buyer, order.good)).or_default();
                 purchase.0 =
                     purchase

@@ -467,3 +467,25 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: first causal war slice - a concrete material grievance between two countries
   becomes a typed hostility state that disrupts cross-border trade, resolved deterministically
   inside the monthly tick.
+
+### Cross-border intermediate procurement gate (step 030)
+
+- A firm can now buy a recipe input from another region only when a directed logistics route
+  connects the seller to the buyer. Local offers retain strict priority; reachable imports are
+  then ordered by delivered price (offer price plus the direct-route tariff), region, and seller.
+  No route leaves demand visibly unmet.
+- Content schema v7 adds strict `[[routes]]` declarations, including carrier ownership. The demo
+  removes Eastport's grain producer and supplies its bakery through the Northreach-to-Eastport
+  road, making the second country materially dependent on external grain rather than merely
+  adjacent in the chronicle.
+- This is deliberately a narrow commercial bridge, not a duplicate shipment system: procurement
+  does not reserve transport capacity or create in-transit stock, and its tariff remains part of
+  the seller's settled delivered-price revenue. Carrier cash settlement, route capacity, delay,
+  reliability, borders, and disruption remain authoritative logistics work for later slices.
+- Gate coverage: `cross_region_procurement.rs` proves delivered pricing, local-first priority,
+  unmet demand without a route, and replay through the shared annual command boundary. Full
+  format, check, Clippy, test, and docs gate passes with 101 tests. This rule and content change
+  advances SIMULATION_VERSION 30 -> 31; the new seed-1/50-year baseline is
+  `7045927566456398391`, with release self-comparison byte-identical.
+- Next gate: first causal war slice - a concrete bilateral hostility state severs cross-border
+  procurement and makes foreign material dependence a readable conflict pressure.
