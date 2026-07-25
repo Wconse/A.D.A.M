@@ -680,3 +680,26 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: make household demand reserve against the cheapest reachable delivered survival price
   rather than only the local reference price, so a solvent household can correctly budget for an
   import that costs more than its local benchmark.
+
+### Delivered-price survival budgeting gate (step 039)
+
+- Household survival demand now reserves against the current priority supply rather than blindly
+  against its local reference price. With a local offer it quotes the cheapest local offer; with
+  no local offer it quotes the cheapest peaceful direct foreign offer plus route tariff. The
+  public no-offer planner remains a local-reference wrapper, and participation-plus tiers remain
+  local-reference priced. ADR 0088 records the design.
+- The commercial cycle passes its current offer book to the new offer-aware planner before it
+  creates market orders, so the reserve matches the same survival import the market can settle.
+  This removes the artificial partial fulfillment of a solvent household facing a pricier import.
+- Gate coverage: the household import scenario now gives the cohort exactly 11 minor units and
+  proves that it reserves 11 for foreign offer 10 + route tariff 1, buys the full unit, leaves no
+  unmet survival demand or grievance, and replays bit-identically. Full format, check, Clippy,
+  test, and docs gate passes with 114 tests.
+- No state schema or version change: SIMULATION_VERSION stays at 34; the seed-1/50-year release
+  baseline stays `12100901864703017553` (40.9 ms per simulated year).
+- Deliberate limits (per ADR 0088): local offer priority can still beat a cheaper foreign offer,
+  partial local supply is not yet quoted as a blended source price, offers are not reserved during
+  planning, and emergency-relief costing still uses local reference prices.
+- Next gate: quote partial local survival supply plus reachable imports as an explicit deterministic
+  multi-source budget, so households can reserve the true local-first blended cost when the local
+  market can cover only part of a basic need.

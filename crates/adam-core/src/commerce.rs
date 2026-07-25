@@ -45,7 +45,7 @@ impl World {
             .iter()
             .filter_map(|plan| plan.market_offer())
             .collect();
-        let demand_intents = next.plan_monthly_household_demand()?;
+        let demand_intents = next.plan_monthly_household_demand_against_offers(&offers)?;
         let mut orders: Vec<_> = demand_intents
             .iter()
             .map(|intent| {
@@ -317,6 +317,24 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     fn household_shortage_world(with_route: bool) -> World {
         let mut world = commercial_world(true);
+        world.cohorts.insert(
+            CohortId::new(1),
+            HouseholdCohort::new(
+                CohortId::new(1),
+                RegionId::new(1),
+                NeedProfileId::new(1),
+                Population::new(1),
+                1,
+                AgeBand::Adult,
+                HouseholdType::WorkingAge,
+                EducationLevel::Secondary,
+                EmploymentStatus::Employed,
+                Money::from_minor_units(132),
+                Money::default(),
+                Money::default(),
+            )
+            .expect("importing cohort"),
+        );
         world
             .set_firm_production_target(ActorId::new(1), FirmId::new(1), 0)
             .expect("suspend local farm");
@@ -389,7 +407,11 @@ mod tests {
             .set_firm_production_target(ActorId::new(2), FirmId::new(2), 1)
             .expect("foreign target");
         world
-            .set_regional_price(RegionId::new(2), GoodId::new(1), Money::from_minor_units(9))
+            .set_regional_price(
+                RegionId::new(2),
+                GoodId::new(1),
+                Money::from_minor_units(10),
+            )
             .expect("foreign price");
         if with_route {
             world
@@ -423,6 +445,11 @@ mod tests {
             .apply(&mut replayed)
             .expect("replayed economic month");
 
+        assert_eq!(
+            result.commercial.demand_intents[0].reserved_spend(),
+            Money::from_minor_units(11),
+            "survival demand reserves the foreign offer 10 plus route tariff 1"
+        );
         assert_eq!(result.commercial.clearing.fills.len(), 1);
         let fill = result.commercial.clearing.fills[0];
         assert_eq!(fill.buyer, CohortId::new(1));
@@ -430,8 +457,8 @@ mod tests {
         assert_eq!(fill.quantity, QuantityMilli::new(1_000));
         assert_eq!(
             fill.spend,
-            Money::from_minor_units(10),
-            "foreign offer 9 plus road tariff 1"
+            Money::from_minor_units(11),
+            "foreign offer 10 plus road tariff 1"
         );
         assert!(result.commercial.clearing.unmet.is_empty());
         assert!(direct.bilateral_grievances().is_empty());

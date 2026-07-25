@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    CohortId, DomainEvent, GoodId, Money, NeedProfileId, QuantityMilli, RegionId, World, WorldError,
+    CohortId, DomainEvent, GoodId, MarketOffer, Money, NeedProfileId, QuantityMilli, RegionId,
+    World, WorldError,
 };
 
 #[derive(
@@ -302,6 +303,21 @@ impl World {
     ///
     /// Returns [`WorldError`] for missing profiles/prices or arithmetic overflow.
     pub fn plan_monthly_household_demand(&self) -> Result<Vec<DemandIntent>, WorldError> {
+        self.plan_monthly_household_demand_against_offers(&[])
+    }
+
+    /// Forms monthly household demand against the current market offer book.
+    ///
+    /// Survival targets quote the local offer price when one exists; otherwise
+    /// they use the cheapest peaceful direct foreign delivery price.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError`] for missing profiles/prices or arithmetic overflow.
+    pub(crate) fn plan_monthly_household_demand_against_offers(
+        &self,
+        offers: &[MarketOffer],
+    ) -> Result<Vec<DemandIntent>, WorldError> {
         let mut intents = Vec::new();
         for cohort in self.cohorts.values() {
             let profile = self
@@ -315,7 +331,7 @@ impl World {
                 NeedTier::Development,
                 NeedTier::Discretionary,
             ] {
-                let rows = self.price_targets(cohort, profile, tier)?;
+                let rows = self.price_targets(cohort, profile, tier, offers)?;
                 let tier_cost: i128 = rows.iter().map(|row| row.cost).sum();
                 let available = remaining.min(tier_cost);
                 let spends = proportional_spends(&rows, available)?;
@@ -350,7 +366,7 @@ impl World {
             .get(&cohort.need_profile())
             .ok_or(WorldError::UnknownNeedProfile(cohort.need_profile()))?;
         let cost = self
-            .price_targets(cohort, profile, NeedTier::Survival)?
+            .price_targets(cohort, profile, NeedTier::Survival, &[])?
             .into_iter()
             .try_fold(0_i128, |sum, row| {
                 sum.checked_add(row.cost)
@@ -366,6 +382,7 @@ impl World {
         cohort: &crate::HouseholdCohort,
         profile: &ConsumptionProfile,
         tier: NeedTier,
+        offers: &[MarketOffer],
     ) -> Result<Vec<PricedTarget>, WorldError> {
         profile
             .targets()
@@ -379,12 +396,7 @@ impl World {
                 };
                 let quantity = i128::from(target.monthly_quantity().get()) * i128::from(count);
                 let price = i128::from(
-                    self.regional_prices
-                        .get(&(cohort.region(), target.good()))
-                        .ok_or(WorldError::MissingRegionalPrice {
-                            region: cohort.region(),
-                            good: target.good(),
-                        })?
+                    self.household_target_price(cohort.region(), target.good(), tier, offers)?
                         .minor_units(),
                 );
                 let cost = quantity * price / i128::from(QuantityMilli::SCALE);
@@ -396,6 +408,53 @@ impl World {
                 })
             })
             .collect()
+    }
+
+    fn household_target_price(
+        &self,
+        region: RegionId,
+        good: GoodId,
+        tier: NeedTier,
+        offers: &[MarketOffer],
+    ) -> Result<Money, WorldError> {
+        let reference = self
+            .regional_prices
+            .get(&(region, good))
+            .copied()
+            .ok_or(WorldError::MissingRegionalPrice { region, good })?;
+        if tier != NeedTier::Survival {
+            return Ok(reference);
+        }
+        if let Some(local) = offers
+            .iter()
+            .filter(|offer| {
+                offer.region == region && offer.good == good && offer.quantity.get() > 0
+            })
+            .map(|offer| offer.unit_price)
+            .min_by_key(|price| price.minor_units())
+        {
+            return Ok(local);
+        }
+        let mut imported = None;
+        for offer in offers {
+            if offer.region == region || offer.good != good || offer.quantity.get() == 0 {
+                continue;
+            }
+            if let Some(tariff) = self.direct_market_route_cost(offer.region, region) {
+                let delivered = offer
+                    .unit_price
+                    .minor_units()
+                    .checked_add(tariff.minor_units())
+                    .ok_or(WorldError::ArithmeticOverflow("household delivered price"))?;
+                let delivered = Money::from_minor_units(delivered);
+                if imported
+                    .is_none_or(|current: Money| delivered.minor_units() < current.minor_units())
+                {
+                    imported = Some(delivered);
+                }
+            }
+        }
+        Ok(imported.unwrap_or(reference))
     }
 }
 
