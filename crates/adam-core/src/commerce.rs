@@ -329,7 +329,7 @@ mod tests {
                 HouseholdType::WorkingAge,
                 EducationLevel::Secondary,
                 EmploymentStatus::Employed,
-                Money::from_minor_units(132),
+                Money::from_minor_units(144),
                 Money::default(),
                 Money::default(),
             )
@@ -462,6 +462,51 @@ mod tests {
         );
         assert!(result.commercial.clearing.unmet.is_empty());
         assert!(direct.bilateral_grievances().is_empty());
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn household_survival_budget_blends_local_supply_and_delivered_imports() {
+        let mut direct = household_shortage_world(true);
+        direct
+            .set_regional_price(
+                RegionId::new(2),
+                GoodId::new(1),
+                Money::from_minor_units(12),
+            )
+            .expect("higher foreign price");
+        direct
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("local farm")
+            .credit_inventory(GoodId::new(1), QuantityMilli::new(500))
+            .expect("partial local food");
+        let mut replayed = direct.clone();
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed economic month");
+
+        assert_eq!(
+            result.commercial.demand_intents[0].reserved_spend(),
+            Money::from_minor_units(12),
+            "ceil(500 local at 10) plus ceil(500 imported at 13)"
+        );
+        assert_eq!(result.commercial.clearing.fills.len(), 2);
+        assert_eq!(
+            result
+                .commercial
+                .clearing
+                .fills
+                .iter()
+                .map(|fill| fill.spend.minor_units())
+                .sum::<i64>(),
+            11
+        );
+        assert!(result.commercial.clearing.unmet.is_empty());
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
     }

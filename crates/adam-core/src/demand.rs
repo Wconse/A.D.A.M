@@ -336,10 +336,10 @@ impl World {
                 let available = remaining.min(tier_cost);
                 let spends = proportional_spends(&rows, available)?;
                 for (row, spend) in rows.into_iter().zip(spends) {
-                    let budgeted = if row.price == 0 {
+                    let budgeted = if row.cost == 0 {
                         0
                     } else {
-                        spend * i128::from(QuantityMilli::SCALE) / row.price
+                        spend * row.quantity / row.cost
                     };
                     intents.push(DemandIntent {
                         cohort: cohort.id(),
@@ -395,66 +395,92 @@ impl World {
                     DemandBasis::PerHousehold => cohort.households(),
                 };
                 let quantity = i128::from(target.monthly_quantity().get()) * i128::from(count);
-                let price = i128::from(
-                    self.household_target_price(cohort.region(), target.good(), tier, offers)?
-                        .minor_units(),
-                );
-                let cost = quantity * price / i128::from(QuantityMilli::SCALE);
+                let cost = self.household_target_cost(
+                    cohort.region(),
+                    target.good(),
+                    tier,
+                    quantity,
+                    offers,
+                )?;
                 Ok(PricedTarget {
                     good: target.good(),
                     quantity,
-                    price,
                     cost,
                 })
             })
             .collect()
     }
 
-    fn household_target_price(
+    fn household_target_cost(
         &self,
         region: RegionId,
         good: GoodId,
         tier: NeedTier,
+        quantity: i128,
         offers: &[MarketOffer],
-    ) -> Result<Money, WorldError> {
+    ) -> Result<i128, WorldError> {
         let reference = self
             .regional_prices
             .get(&(region, good))
             .copied()
             .ok_or(WorldError::MissingRegionalPrice { region, good })?;
         if tier != NeedTier::Survival {
-            return Ok(reference);
+            return Ok(
+                quantity * i128::from(reference.minor_units()) / i128::from(QuantityMilli::SCALE)
+            );
         }
-        if let Some(local) = offers
-            .iter()
-            .filter(|offer| {
-                offer.region == region && offer.good == good && offer.quantity.get() > 0
-            })
-            .map(|offer| offer.unit_price)
-            .min_by_key(|price| price.minor_units())
-        {
-            return Ok(local);
-        }
-        let mut imported = None;
+        let mut candidates = Vec::new();
         for offer in offers {
-            if offer.region == region || offer.good != good || offer.quantity.get() == 0 {
+            if offer.good != good || offer.quantity.get() == 0 {
                 continue;
             }
-            if let Some(tariff) = self.direct_market_route_cost(offer.region, region) {
+            if offer.region == region {
+                candidates.push((
+                    false,
+                    offer.unit_price,
+                    offer.region,
+                    offer.seller,
+                    offer.quantity,
+                ));
+            } else if let Some(tariff) = self.direct_market_route_cost(offer.region, region) {
                 let delivered = offer
                     .unit_price
                     .minor_units()
                     .checked_add(tariff.minor_units())
                     .ok_or(WorldError::ArithmeticOverflow("household delivered price"))?;
-                let delivered = Money::from_minor_units(delivered);
-                if imported
-                    .is_none_or(|current: Money| delivered.minor_units() < current.minor_units())
-                {
-                    imported = Some(delivered);
-                }
+                candidates.push((
+                    true,
+                    Money::from_minor_units(delivered),
+                    offer.region,
+                    offer.seller,
+                    offer.quantity,
+                ));
             }
         }
-        Ok(imported.unwrap_or(reference))
+        candidates.sort_by_key(|(imported, price, origin, seller, _)| {
+            (*imported, price.minor_units(), *origin, *seller)
+        });
+        let mut remaining = to_u64(quantity, "survival target quantity")?;
+        let mut cost = 0_i128;
+        for (_, price, _, _, available) in candidates {
+            let purchased = remaining.min(available.get());
+            cost = cost
+                .checked_add(
+                    (i128::from(price.minor_units()) * i128::from(purchased)
+                        + i128::from(QuantityMilli::SCALE - 1))
+                        / i128::from(QuantityMilli::SCALE),
+                )
+                .ok_or(WorldError::ArithmeticOverflow("household survival cost"))?;
+            remaining -= purchased;
+            if remaining == 0 {
+                return Ok(cost);
+            }
+        }
+        cost.checked_add(
+            i128::from(reference.minor_units()) * i128::from(remaining)
+                / i128::from(QuantityMilli::SCALE),
+        )
+        .ok_or(WorldError::ArithmeticOverflow("household survival cost"))
     }
 }
 
@@ -462,7 +488,6 @@ impl World {
 struct PricedTarget {
     good: GoodId,
     quantity: i128,
-    price: i128,
     cost: i128,
 }
 

@@ -703,3 +703,20 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: quote partial local survival supply plus reachable imports as an explicit deterministic
   multi-source budget, so households can reserve the true local-first blended cost when the local
   market can cover only part of a basic need.
+
+### Blended local-first survival budgeting gate (step 040)
+
+- Survival targets now quote a deterministic source basket: local offers by price and seller first,
+  then peaceful direct imports by delivered price, origin, and seller. `PricedTarget` carries the
+  resulting basket cost directly, so proportional budgeting no longer assumes one fictitious price.
+- Source-segment order limits round up, matching the minimum cash ceiling required by market
+  affordability for fractional quantities; market settlement remains unchanged and rounds actual
+  spending down. ADR 0089 records the decision.
+- Gate coverage: 500 milli-units local at 10 plus 500 imported at 13 reserves 12 (5 + ceil(6.5)),
+  buys both portions, settles 11 actual units, leaves no survival shortage, and replays exactly.
+  Full format, check, Clippy, test, and docs gate passes with 115 tests.
+- No schema or version change: SIMULATION_VERSION remains 34 and the seed-1/50-year baseline stays
+  `12100901864703017553` (39.8 ms per simulated year).
+- Deliberate limit: concurrent cohorts still quote shared supply independently before canonical
+  clearing; a future gate should allocate planning-time source capacity across ordered household
+  intents so aggregate reservation cannot overstate a scarce offer.
