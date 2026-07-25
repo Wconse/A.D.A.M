@@ -745,8 +745,8 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 
 - Household survival imports are now capped by the remaining uncontracted
   monthly capacity of the selected route: monthly capacity minus active
-  freight-contract reservations, spot freight usage, and in-transit shipment
-  reservations (ADR 0091).
+  freight-contract reservations and spot freight usage; in-transit shipments
+  already occupy one of those pools (ADR 0091).
 - `clear_market_with_delivery` consumes a shared per-route capacity map across
   all orders of the month; the demand planner mirrors the same cap so reserved
   budgets anticipate capped fills plus the reference-priced fallback.
@@ -758,3 +758,15 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Known limits: firm-to-firm procurement imports are not capacity-capped yet;
   the proportional-rationing planning path caps quotes without sharing
   capacity between cohorts; relief purchasing still uses reference prices.
+
+### Import capacity audit gate (step 043)
+
+- Fixed a double count in the market import capacity pool: in-transit
+  shipments were subtracted on top of the contract and spot freight pools
+  that already carry them, understating the capacity available to household
+  imports (ADR 0091 formula corrected).
+- Concrete gate: with route capacity 1000 and a 400-unit spot shipment in
+  transit, the market pool is 600 (not 200); after delivery it returns to
+  1000, and an idle active 300-unit freight contract lowers it to 700.
+- Demo history is unchanged (fingerprint 12100901864703017553,
+  SIMULATION_VERSION 34).

@@ -19,8 +19,9 @@ household market imports were the one flow that ignored the physical network.
 
 - `World::market_spot_route_capacity` derives, per route, the uncontracted
   spot capacity available to immediate market imports this month:
-  monthly route capacity minus active freight-contract reservations, minus
-  spot freight already used, minus in-transit shipment reservations.
+  monthly route capacity minus active freight-contract reservations and minus
+  spot freight already used. In-transit shipments already occupy one of those
+  two pools (contract or spot), so they are not subtracted again.
 - `World::direct_market_route` returns the selected route identity together
   with its tariff (lowest tariff, ties by stable route ID);
   `direct_market_route_cost` delegates to it.

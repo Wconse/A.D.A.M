@@ -370,8 +370,9 @@ impl World {
     }
     /// Remaining uncontracted spot capacity per route available to immediate
     /// market imports this month: monthly capacity minus active freight
-    /// contract reservations, spot freight usage, and in-transit shipment
-    /// reservations.
+    /// contract reservations and spot freight usage. In-transit shipments
+    /// already occupy one of those two pools (contract or spot), so they are
+    /// not subtracted again.
     #[must_use]
     pub(crate) fn market_spot_route_capacity(&self) -> BTreeMap<RouteId, u64> {
         self.logistics_routes
@@ -393,19 +394,11 @@ impl World {
                     .copied()
                     .unwrap_or_default()
                     .get();
-                let in_transit = self
-                    .route_capacity
-                    .reserved()
-                    .get(&route.id())
-                    .copied()
-                    .unwrap_or_default()
-                    .get();
                 let available = route
                     .capacity()
                     .get()
                     .saturating_sub(contracted)
-                    .saturating_sub(spot_used)
-                    .saturating_sub(in_transit);
+                    .saturating_sub(spot_used);
                 (route.id(), available)
             })
             .collect()
@@ -528,6 +521,11 @@ mod tests {
             world.route_capacity().reserved()[&RouteId::new(1)].get(),
             400
         );
+        assert_eq!(
+            world.market_spot_route_capacity()[&RouteId::new(1)],
+            600,
+            "in-transit spot shipment must not be double counted"
+        );
         world
             .advance_inventory_shipment(ShipmentId::new(1), 2)
             .expect("deliver");
@@ -537,9 +535,28 @@ mod tests {
         );
         assert!(world.route_capacity().reserved().is_empty());
         assert!(world.freight_capacity().spot_used().is_empty());
+        assert_eq!(world.market_spot_route_capacity()[&RouteId::new(1)], 1000);
         assert_eq!(
             world.inventory_shipments()[&ShipmentId::new(1)].status(),
             ShipmentStatus::Delivered
         );
+        let contract = crate::FreightContract::new(
+            ContractId::new(1),
+            FirmId::new(1),
+            FirmId::new(2),
+            RouteId::new(1),
+            QuantityMilli::new(300),
+            crate::BasisPoints::new(0).expect("discount"),
+            1,
+            12,
+        )
+        .expect("contract");
+        world
+            .register_freight_contract(contract)
+            .expect("register contract");
+        world
+            .activate_freight_contract(ContractId::new(1))
+            .expect("activate contract");
+        assert_eq!(world.market_spot_route_capacity()[&RouteId::new(1)], 700);
     }
 }
