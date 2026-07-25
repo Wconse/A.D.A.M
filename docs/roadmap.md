@@ -770,3 +770,23 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   1000, and an idle active 300-unit freight contract lowers it to 700.
 - Demo history is unchanged (fingerprint 12100901864703017553,
   SIMULATION_VERSION 34).
+
+### Shared route capacity pool for B2B and household imports (step 044)
+
+- B2B firm procurement imports and household survival imports now compete for
+  the same physical monthly route capacity pool. A single `market_spot_route_capacity`
+  map is computed once per commercial cycle; firm procurement fills consume from
+  it first, then market clearing bounds household import fills by whatever
+  remains. Demand planning receives a clone for first-canonical-buyer reservation
+  logic independently of clearing. ADR 0092 records the design.
+- Concrete gate: route capacity 1000, B2B demand 1000 milli-units of grain.
+  Ample capacity (10 000): both flows coexist freely.
+  Tight capacity (1 000 == B2B demand): B2B fills in full; zero route capacity
+  remains for household imports on the same route.
+  Insufficient capacity (500): B2B import capped at 500; unmet procurement
+  500 milli-Grain recorded.
+  Year replayability confirmed.
+- `direct_market_route_cost` removed (dead code after procurement switched to
+  `direct_market_route` directly).
+- Demo history unchanged: fingerprint 12100901864703017553,
+  SIMULATION_VERSION 34 (32.3 ms per simulated year).

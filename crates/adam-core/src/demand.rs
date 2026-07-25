@@ -303,7 +303,8 @@ impl World {
     ///
     /// Returns [`WorldError`] for missing profiles/prices or arithmetic overflow.
     pub fn plan_monthly_household_demand(&self) -> Result<Vec<DemandIntent>, WorldError> {
-        self.plan_monthly_household_demand_against_offers(&[])
+        let mut cap = self.market_spot_route_capacity();
+        self.plan_monthly_household_demand_against_offers(&[], &mut cap)
     }
 
     /// Forms monthly household demand against the current market offer book.
@@ -323,6 +324,7 @@ impl World {
     pub(crate) fn plan_monthly_household_demand_against_offers(
         &self,
         offers: &[MarketOffer],
+        route_capacity: &mut BTreeMap<RouteId, u64>,
     ) -> Result<Vec<DemandIntent>, WorldError> {
         let mut supply = offers.to_vec();
         supply.sort_by_key(|offer| {
@@ -335,11 +337,10 @@ impl World {
         });
         let mut remaining_supply: Vec<u64> =
             supply.iter().map(|offer| offer.quantity.get()).collect();
-        let mut route_capacity = self.market_spot_route_capacity();
         let mut ledger = SurvivalSupplyLedger {
             supply: &supply,
             remaining: &mut remaining_supply,
-            routes: &mut route_capacity,
+            routes: route_capacity,
             consume: self.all_shortage_policies_use_market_allocation(),
         };
         let mut intents = Vec::new();

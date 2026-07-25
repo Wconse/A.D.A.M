@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     BasisPoints, CohortId, CountryId, FirmId, GoodId, MarketOffer, Money, NeedTier, QuantityMilli,
-    RegionId, World, WorldError,
+    RegionId, RouteId, World, WorldError,
 };
 
 /// Monthly grievance accrual applied when a country's firm ends procurement
@@ -120,18 +120,6 @@ impl World {
         Ok(offers)
     }
 
-    /// Selects the lowest-tariff direct peaceful route for an immediate market import.
-    /// Equal tariffs resolve by stable route ID. This commercial slice does not
-    /// reserve physical capacity or create an in-transit shipment.
-    pub(crate) fn direct_market_route_cost(
-        &self,
-        origin: RegionId,
-        destination: RegionId,
-    ) -> Option<Money> {
-        self.direct_market_route(origin, destination)
-            .map(|(_, cost)| cost)
-    }
-
     /// Selects the lowest-tariff direct peaceful route identity and tariff for
     /// an immediate market import. Equal tariffs resolve by stable route ID.
     pub(crate) fn direct_market_route(
@@ -160,6 +148,7 @@ impl World {
         &mut self,
         orders: &[FirmProcurementOrder],
         offers: &mut [MarketOffer],
+        route_capacity: &mut BTreeMap<RouteId, u64>,
     ) -> Result<ProcurementSettlement, WorldError> {
         let mut firms = self.firms().clone();
         let mut fills = Vec::new();
@@ -172,8 +161,10 @@ impl World {
             // import offers follow, ordered by delivered price (offer price
             // plus route tariff) with stable region and seller tie-breaks.
             // Imports only ever see the remainder local sellers cannot fill.
-            let mut candidates: Vec<(usize, Money)> = Vec::new();
-            let mut imports: Vec<(i64, RegionId, FirmId, usize, Money)> = Vec::new();
+            // Import fills are capped by the shared monthly spot route
+            // capacity pool that firms and households compete over together.
+            let mut candidates: Vec<(usize, Money, Option<RouteId>)> = Vec::new();
+            let mut imports: Vec<(i64, RegionId, FirmId, usize, Money, RouteId)> = Vec::new();
             for (index, offer) in offers.iter().enumerate() {
                 if offer.good != order.good
                     || offer.seller == order.buyer
@@ -182,9 +173,9 @@ impl World {
                     continue;
                 }
                 if offer.region == order.region {
-                    candidates.push((index, Money::default()));
-                } else if let Some(tariff) =
-                    self.direct_market_route_cost(offer.region, order.region)
+                    candidates.push((index, Money::default(), None));
+                } else if let Some((route, tariff)) =
+                    self.direct_market_route(offer.region, order.region)
                 {
                     let delivered = offer
                         .unit_price
@@ -193,16 +184,17 @@ impl World {
                         .ok_or(WorldError::ArithmeticOverflow(
                             "firm procurement delivered price",
                         ))?;
-                    imports.push((delivered, offer.region, offer.seller, index, tariff));
+                    imports.push((delivered, offer.region, offer.seller, index, tariff, route));
                 }
             }
-            imports.sort_by_key(|&(delivered, region, seller, _, _)| (delivered, region, seller));
+            imports
+                .sort_by_key(|&(delivered, region, seller, _, _, _)| (delivered, region, seller));
             candidates.extend(
                 imports
                     .into_iter()
-                    .map(|(_, _, _, index, tariff)| (index, tariff)),
+                    .map(|(_, _, _, index, tariff, route)| (index, tariff, Some(route))),
             );
-            for (index, tariff) in candidates {
+            for (index, tariff, route) in candidates {
                 if remaining == 0 {
                     break;
                 }
@@ -229,9 +221,13 @@ impl World {
                     .checked_mul(i128::from(QuantityMilli::SCALE))
                     .ok_or(WorldError::ArithmeticOverflow("firm procurement budget"))?
                     / i128::from(price);
+                let route_limit = route.map_or(u64::MAX, |id| {
+                    route_capacity.get(&id).copied().unwrap_or(u64::MAX)
+                });
                 let quantity = remaining
                     .min(offer.quantity.get())
-                    .min(u64::try_from(affordable).unwrap_or(u64::MAX));
+                    .min(u64::try_from(affordable).unwrap_or(u64::MAX))
+                    .min(route_limit);
                 if quantity == 0 {
                     continue;
                 }
@@ -260,6 +256,9 @@ impl World {
                     .ok_or(WorldError::UnknownFirm(offer.seller))?
                     .apply_cash_delta(spend)?;
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
+                if let Some(cap) = route.and_then(|id| route_capacity.get_mut(&id)) {
+                    *cap -= quantity;
+                }
                 trade_prices.insert((offer.seller, order.good), unit_price);
                 let purchase = purchases.entry((order.buyer, order.good)).or_default();
                 purchase.0 =
@@ -524,11 +523,12 @@ impl World {
     /// against it, record the evidence trail, then update material grievances.
     pub(crate) fn execute_monthly_firm_procurement(
         &mut self,
+        route_capacity: &mut BTreeMap<RouteId, u64>,
     ) -> Result<FirmProcurementResult, WorldError> {
         let orders = self.plan_monthly_firm_procurement()?;
         let mut offers = self.plan_procurement_offer_book()?;
         let pristine_offers = offers.clone();
-        let settlement = self.settle_procurement_orders(&orders, &mut offers)?;
+        let settlement = self.settle_procurement_orders(&orders, &mut offers, route_capacity)?;
         self.record_procurement_outcomes(&settlement)?;
         Ok(FirmProcurementResult {
             orders,

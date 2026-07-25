@@ -39,13 +39,23 @@ impl World {
         }
         let mut next = self.clone();
         let production_plans = next.execute_monthly_production()?;
-        let procurement = next.execute_monthly_firm_procurement()?;
+        // One shared route-capacity pool for the whole commercial cycle:
+        // B2B firm procurement fills consume it first, then household survival
+        // imports compete for the remainder, and market clearing uses what is
+        // left. All import flows are bounded by the same physical monthly cap.
+        let mut route_capacity = next.market_spot_route_capacity();
+        let procurement = next.execute_monthly_firm_procurement(&mut route_capacity)?;
         let offer_plans = next.plan_firm_market_offers()?;
         let offers: Vec<_> = offer_plans
             .iter()
             .filter_map(|plan| plan.market_offer())
             .collect();
-        let demand_intents = next.plan_monthly_household_demand_against_offers(&offers)?;
+        // Demand planning receives a clone: it consumes capacity internally to model
+        // first-canonical-buyer reservation during budgeting. The original
+        // post-procurement route_capacity is kept intact for market clearing,
+        // where actual import fills are bounded by whatever procurement left unused.
+        let demand_intents = next
+            .plan_monthly_household_demand_against_offers(&offers, &mut route_capacity.clone())?;
         let mut orders: Vec<_> = demand_intents
             .iter()
             .map(|intent| {
@@ -61,11 +71,10 @@ impl World {
             })
             .collect();
         let rationing = next.apply_survival_rationing(&mut orders, &offers)?;
-        let mut market_route_capacity = next.market_spot_route_capacity();
         let mut clearing = clear_market_with_delivery(
             &orders,
             &offers,
-            &mut market_route_capacity,
+            &mut route_capacity,
             |origin, destination| next.direct_market_route(origin, destination),
         )?;
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
