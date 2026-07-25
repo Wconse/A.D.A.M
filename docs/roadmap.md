@@ -720,3 +720,23 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Deliberate limit: concurrent cohorts still quote shared supply independently before canonical
   clearing; a future gate should allocate planning-time source capacity across ordered household
   intents so aggregate reservation cannot overstate a scarce offer.
+
+### Shared survival supply planning gate (step 041)
+
+- Household survival planning now consumes a shared planning copy of market offer quantities in
+  the exact canonical market order (offers by region, good, price, seller; cohorts by region and
+  id), so one scarce offer can no longer be reserved by several cohorts at once.
+- The shared ledger is active only while every stored government emergency policy keeps the
+  default `MarketAllocation` shortage strategy; under `ProportionalRationing` planning keeps
+  independent per-cohort quotes because rationing applies proportional quotas separately before
+  clearing. ADR 0090 records the decision.
+- Gate coverage: with one scarce foreign offer (1000 milli-units at delivered price 11) and two
+  identical cohorts, the first canonical buyer reserves 11 and settles the full unit, the second
+  cohort falls back to the reference price 10 and leaves explicit unmet demand, and the month
+  replays bit-identically; the proportional-rationing gate is unchanged. Full format, check,
+  Clippy, test, and docs gate passes with 116 tests.
+- No state schema or version change: SIMULATION_VERSION stays at 34 and the seed-1/50-year
+  release baseline stays `12100901864703017553` (35.7 ms per simulated year).
+- Deliberate limits: only survival tiers consume the planning ledger, emergency-relief costing
+  remains reference-priced, and routes remain immediate accounting links without capacity
+  constraints.

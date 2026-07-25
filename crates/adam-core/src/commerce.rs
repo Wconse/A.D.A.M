@@ -512,6 +512,74 @@ mod tests {
     }
 
     #[test]
+    fn scarce_survival_import_is_reserved_by_only_the_first_canonical_buyer() {
+        let mut direct = household_shortage_world(true);
+        direct
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    CohortId::new(2),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(1),
+                    1,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::from_minor_units(144),
+                    Money::default(),
+                    Money::default(),
+                )
+                .expect("second cohort"),
+            )
+            .expect("second cohort");
+        direct
+            .regions
+            .get_mut(&RegionId::new(1))
+            .expect("region")
+            .set_population(Population::new(2));
+        let mut replayed = direct.clone();
+        let result = direct
+            .execute_monthly_economic_cycle()
+            .expect("economic month");
+        WorldCommand::ExecuteMonthlyEconomicCycle
+            .apply(&mut replayed)
+            .expect("replayed economic month");
+
+        let survival: Vec<_> = result
+            .commercial
+            .demand_intents
+            .iter()
+            .filter(|intent| intent.tier() == NeedTier::Survival)
+            .collect();
+        assert_eq!(survival.len(), 2);
+        assert_eq!(survival[0].cohort(), CohortId::new(1));
+        assert_eq!(
+            survival[0].reserved_spend(),
+            Money::from_minor_units(11),
+            "first canonical buyer reserves the scarce delivered import"
+        );
+        assert_eq!(survival[1].cohort(), CohortId::new(2));
+        assert_eq!(
+            survival[1].reserved_spend(),
+            Money::from_minor_units(10),
+            "second buyer falls back to the regional reference price"
+        );
+        assert_eq!(result.commercial.clearing.fills.len(), 1);
+        let fill = result.commercial.clearing.fills[0];
+        assert_eq!(fill.buyer, CohortId::new(1));
+        assert_eq!(fill.seller, FirmId::new(2));
+        assert_eq!(fill.spend, Money::from_minor_units(11));
+        assert_eq!(
+            result.commercial.clearing.unmet
+                [&(CohortId::new(2), GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(1_000)
+        );
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
     fn household_survival_shortage_without_route_creates_no_grievance() {
         let mut world = household_shortage_world(false);
         let result = world

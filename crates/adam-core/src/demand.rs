@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    CohortId, DomainEvent, GoodId, MarketOffer, Money, NeedProfileId, QuantityMilli, RegionId,
-    World, WorldError,
+    CohortId, DomainEvent, GoodId, MarketOffer, Money, NeedProfileId, PhysicalShortageStrategy,
+    QuantityMilli, RegionId, World, WorldError,
 };
 
 #[derive(
@@ -308,8 +308,12 @@ impl World {
 
     /// Forms monthly household demand against the current market offer book.
     ///
-    /// Survival targets quote the local offer price when one exists; otherwise
-    /// they use the cheapest peaceful direct foreign delivery price.
+    /// Survival targets quote local offers first and then the cheapest peaceful
+    /// direct foreign delivered prices. Under market allocation the planning
+    /// copy of offer quantities is shared across cohorts in canonical market
+    /// order, so one scarce offer is never reserved twice; under proportional
+    /// rationing planning keeps independent per-cohort quotes because rationing
+    /// quotas are applied separately before clearing.
     ///
     /// # Errors
     ///
@@ -318,6 +322,22 @@ impl World {
         &self,
         offers: &[MarketOffer],
     ) -> Result<Vec<DemandIntent>, WorldError> {
+        let mut supply = offers.to_vec();
+        supply.sort_by_key(|offer| {
+            (
+                offer.region,
+                offer.good,
+                offer.unit_price.minor_units(),
+                offer.seller,
+            )
+        });
+        let mut remaining_supply: Vec<u64> =
+            supply.iter().map(|offer| offer.quantity.get()).collect();
+        let mut ledger = SurvivalSupplyLedger {
+            supply: &supply,
+            remaining: &mut remaining_supply,
+            consume: self.all_shortage_policies_use_market_allocation(),
+        };
         let mut intents = Vec::new();
         let mut cohorts: Vec<_> = self.cohorts.values().collect();
         cohorts.sort_by_key(|cohort| (cohort.region(), cohort.id()));
@@ -333,7 +353,7 @@ impl World {
                 NeedTier::Development,
                 NeedTier::Discretionary,
             ] {
-                let rows = self.price_targets(cohort, profile, tier, offers)?;
+                let rows = self.price_targets(cohort, profile, tier, &mut ledger)?;
                 let tier_cost: i128 = rows.iter().map(|row| row.cost).sum();
                 let available = remaining.min(tier_cost);
                 let spends = proportional_spends(&rows, available)?;
@@ -367,8 +387,13 @@ impl World {
             .consumption_profiles
             .get(&cohort.need_profile())
             .ok_or(WorldError::UnknownNeedProfile(cohort.need_profile()))?;
+        let mut ledger = SurvivalSupplyLedger {
+            supply: &[],
+            remaining: &mut [],
+            consume: false,
+        };
         let cost = self
-            .price_targets(cohort, profile, NeedTier::Survival, &[])?
+            .price_targets(cohort, profile, NeedTier::Survival, &mut ledger)?
             .into_iter()
             .try_fold(0_i128, |sum, row| {
                 sum.checked_add(row.cost)
@@ -384,7 +409,7 @@ impl World {
         cohort: &crate::HouseholdCohort,
         profile: &ConsumptionProfile,
         tier: NeedTier,
-        offers: &[MarketOffer],
+        ledger: &mut SurvivalSupplyLedger<'_>,
     ) -> Result<Vec<PricedTarget>, WorldError> {
         profile
             .targets()
@@ -402,7 +427,7 @@ impl World {
                     target.good(),
                     tier,
                     quantity,
-                    offers,
+                    ledger,
                 )?;
                 Ok(PricedTarget {
                     good: target.good(),
@@ -419,7 +444,7 @@ impl World {
         good: GoodId,
         tier: NeedTier,
         quantity: i128,
-        offers: &[MarketOffer],
+        ledger: &mut SurvivalSupplyLedger<'_>,
     ) -> Result<i128, WorldError> {
         let reference = self
             .regional_prices
@@ -432,18 +457,12 @@ impl World {
             );
         }
         let mut candidates = Vec::new();
-        for offer in offers {
-            if offer.good != good || offer.quantity.get() == 0 {
+        for (index, offer) in ledger.supply.iter().enumerate() {
+            if offer.good != good || ledger.remaining[index] == 0 {
                 continue;
             }
             if offer.region == region {
-                candidates.push((
-                    false,
-                    offer.unit_price,
-                    offer.region,
-                    offer.seller,
-                    offer.quantity,
-                ));
+                candidates.push((false, offer.unit_price, offer.region, offer.seller, index));
             } else if let Some(tariff) = self.direct_market_route_cost(offer.region, region) {
                 let delivered = offer
                     .unit_price
@@ -455,17 +474,17 @@ impl World {
                     Money::from_minor_units(delivered),
                     offer.region,
                     offer.seller,
-                    offer.quantity,
+                    index,
                 ));
             }
         }
         candidates.sort_by_key(|(imported, price, origin, seller, _)| {
             (*imported, price.minor_units(), *origin, *seller)
         });
-        let mut remaining = to_u64(quantity, "survival target quantity")?;
+        let mut needed = to_u64(quantity, "survival target quantity")?;
         let mut cost = 0_i128;
-        for (_, price, _, _, available) in candidates {
-            let purchased = remaining.min(available.get());
+        for (_, price, _, _, index) in candidates {
+            let purchased = needed.min(ledger.remaining[index]);
             cost = cost
                 .checked_add(
                     (i128::from(price.minor_units()) * i128::from(purchased)
@@ -473,17 +492,32 @@ impl World {
                         / i128::from(QuantityMilli::SCALE),
                 )
                 .ok_or(WorldError::ArithmeticOverflow("household survival cost"))?;
-            remaining -= purchased;
-            if remaining == 0 {
+            needed -= purchased;
+            if ledger.consume {
+                ledger.remaining[index] -= purchased;
+            }
+            if needed == 0 {
                 return Ok(cost);
             }
         }
         cost.checked_add(
-            i128::from(reference.minor_units()) * i128::from(remaining)
+            i128::from(reference.minor_units()) * i128::from(needed)
                 / i128::from(QuantityMilli::SCALE),
         )
         .ok_or(WorldError::ArithmeticOverflow("household survival cost"))
     }
+
+    fn all_shortage_policies_use_market_allocation(&self) -> bool {
+        self.government_emergency_policies.values().all(|policy| {
+            policy.physical_shortage_strategy() == PhysicalShortageStrategy::MarketAllocation
+        })
+    }
+}
+
+struct SurvivalSupplyLedger<'a> {
+    supply: &'a [MarketOffer],
+    remaining: &'a mut [u64],
+    consume: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
