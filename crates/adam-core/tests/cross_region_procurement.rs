@@ -410,6 +410,21 @@ fn route_capacity_shortage_does_not_accrue_bilateral_grievance() {
         direct.bilateral_grievances().is_empty(),
         "route-capacity scarcity must not blame the foreign supplier"
     );
+    assert!(direct.events().events().iter().any(|event| matches!(
+        event.event(),
+        DomainEvent::FirmProcurementRouteCapacityShortfall {
+            buyer,
+            good,
+            quantity,
+        } if *buyer == FirmId::new(BAKERY)
+            && *good == GoodId::new(GRAIN)
+            && *quantity == QuantityMilli::new(600)
+    )));
+    assert!(!direct.events().events().iter().any(|event| matches!(
+        event.event(),
+        DomainEvent::FirmProcurementShortfall { buyer, good, .. }
+            if *buyer == FirmId::new(BAKERY) && *good == GoodId::new(GRAIN)
+    )));
     assert!(
         !direct
             .events()

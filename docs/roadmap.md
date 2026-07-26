@@ -822,3 +822,18 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   400, leaves 600 explicitly unmet, creates no grievance against the Farm's
   country, and replays identically. Full validation and release fingerprint
   recorded with the commit.
+
+### Capacity-specific procurement evidence gate (step 047)
+
+- Capacity-limited B2B shortages now emit the dedicated appended event
+  `FirmProcurementRouteCapacityShortfall` instead of the generic procurement
+  shortfall event. The existing event shape is unchanged, preserving the
+  serialized contract for earlier journal entries.
+- The yearly chronicle carries the settlement cause into named narration:
+  `Route capacity prevented Bakery from procuring 500 milli-units of Grain.`
+  Generic shortages keep their previous wording and both retain importance 75.
+- This is an observability-only slice: resource movement, allocation,
+  diplomacy, world state, SIMULATION_VERSION, and fingerprint inputs are
+  unchanged. ADR 0095 records the decision. The full gate passes with 123
+  tests; the seed-1/50-year fingerprint remains `12100901864703017553`
+  (34.7 ms per simulated year, SIMULATION_VERSION 34).

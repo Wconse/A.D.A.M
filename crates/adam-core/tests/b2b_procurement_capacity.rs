@@ -355,7 +355,7 @@ fn insufficient_capacity_caps_b2b_procurement_fill() {
     assert!(
         chronicle[0]
             .text
-            .contains("Bakery could not procure 500 milli-units of Grain")
+            .contains("Route capacity prevented Bakery from procuring 500 milli-units of Grain")
     );
 
     assert_eq!(world, replayed);

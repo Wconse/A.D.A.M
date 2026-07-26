@@ -2,6 +2,12 @@ use std::collections::BTreeMap;
 
 use crate::{ActorId, CountryId, DomainEvent, RegionId, World};
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ProcurementShortfallCause {
+    Other,
+    RouteCapacity,
+}
+
 /// One deterministic yearly narrative summary derived only from authoritative domain events.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChronicleEntry {
@@ -58,7 +64,8 @@ struct YearSummary {
     rationing_by_region: BTreeMap<RegionId, u64>,
     hostility_changes: Vec<(CountryId, CountryId, bool)>,
     grievances_by_pair: BTreeMap<(CountryId, CountryId), (u16, u16)>,
-    procurement_shortfalls: BTreeMap<(crate::FirmId, crate::GoodId), u128>,
+    procurement_shortfalls:
+        BTreeMap<(crate::FirmId, crate::GoodId, ProcurementShortfallCause), u128>,
 
     production_milli: u128,
     traded_milli: u128,
@@ -86,6 +93,9 @@ struct YearSummary {
 
 impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
+        if self.observe_procurement_event(event) {
+            return;
+        }
         match event {
             DomainEvent::MonthlyEconomicCycleCompleted { .. } => self.months += 1,
             DomainEvent::FirmProductionTargetSet { actor, .. } => {
@@ -121,11 +131,6 @@ impl YearSummary {
                         }),
                 );
             }
-            DomainEvent::FirmProcurementShortfall {
-                buyer,
-                good,
-                quantity,
-            } => self.observe_procurement_shortfall(*buyer, *good, *quantity),
             DomainEvent::BilateralHostilityChanged {
                 first,
                 second,
@@ -185,15 +190,39 @@ impl YearSummary {
         }
     }
 
+    fn observe_procurement_event(&mut self, event: &DomainEvent) -> bool {
+        let (buyer, good, quantity, cause) = match event {
+            DomainEvent::FirmProcurementShortfall {
+                buyer,
+                good,
+                quantity,
+            } => (*buyer, *good, *quantity, ProcurementShortfallCause::Other),
+            DomainEvent::FirmProcurementRouteCapacityShortfall {
+                buyer,
+                good,
+                quantity,
+            } => (
+                *buyer,
+                *good,
+                *quantity,
+                ProcurementShortfallCause::RouteCapacity,
+            ),
+            _ => return false,
+        };
+        self.observe_procurement_shortfall(buyer, good, quantity, cause);
+        true
+    }
+
     fn observe_procurement_shortfall(
         &mut self,
         buyer: crate::FirmId,
         good: crate::GoodId,
         quantity: crate::QuantityMilli,
+        cause: ProcurementShortfallCause,
     ) {
         let total = self
             .procurement_shortfalls
-            .entry((buyer, good))
+            .entry((buyer, good, cause))
             .or_default();
         *total = total.saturating_add(u128::from(quantity.get()));
     }
@@ -341,7 +370,7 @@ impl YearSummary {
         firms: &BTreeMap<crate::FirmId, crate::Firm>,
         goods: &BTreeMap<crate::GoodId, crate::Good>,
     ) {
-        for (&(buyer, good), &quantity) in &self.procurement_shortfalls {
+        for (&(buyer, good, cause), &quantity) in &self.procurement_shortfalls {
             let buyer_name = firms
                 .get(&buyer)
                 .map_or_else(|| buyer.to_string(), |firm| firm.name().to_owned());
@@ -349,9 +378,15 @@ impl YearSummary {
                 || good.to_string(),
                 |definition| definition.name().to_owned(),
             );
-            sentences.push(format!(
-                "{buyer_name} could not procure {quantity} milli-units of {good_name}."
-            ));
+            let sentence = match cause {
+                ProcurementShortfallCause::Other => {
+                    format!("{buyer_name} could not procure {quantity} milli-units of {good_name}.")
+                }
+                ProcurementShortfallCause::RouteCapacity => format!(
+                    "Route capacity prevented {buyer_name} from procuring {quantity} milli-units of {good_name}."
+                ),
+            };
+            sentences.push(sentence);
         }
     }
 

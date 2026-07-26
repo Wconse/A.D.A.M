@@ -322,6 +322,13 @@ pub enum DomainEvent {
     YearAdvanced {
         year: i32,
     },
+    /// Input demand left unfilled specifically because a reachable import
+    /// route exhausted its shared monthly capacity while foreign stock remained.
+    FirmProcurementRouteCapacityShortfall {
+        buyer: FirmId,
+        good: GoodId,
+        quantity: QuantityMilli,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

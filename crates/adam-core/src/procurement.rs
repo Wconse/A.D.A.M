@@ -344,14 +344,20 @@ impl World {
             );
         }
         for (&(buyer, good), &quantity) in &settlement.unmet {
-            self.events.append(
-                self.date,
+            let event = if settlement.capacity_limited.contains(&(buyer, good)) {
+                crate::DomainEvent::FirmProcurementRouteCapacityShortfall {
+                    buyer,
+                    good,
+                    quantity,
+                }
+            } else {
                 crate::DomainEvent::FirmProcurementShortfall {
                     buyer,
                     good,
                     quantity,
-                },
-            );
+                }
+            };
+            self.events.append(self.date, event);
         }
         for ((firm, good), quantity) in sold {
             let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
