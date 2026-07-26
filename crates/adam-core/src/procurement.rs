@@ -37,6 +37,9 @@ pub struct FirmProcurementResult {
     pub orders: Vec<FirmProcurementOrder>,
     pub fills: Vec<FirmProcurementFill>,
     pub unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
+    /// Unmet inputs for which a reachable foreign offer remained, but the
+    /// monthly route-capacity pool was exhausted before it could fill.
+    pub(crate) capacity_limited: BTreeSet<(FirmId, GoodId)>,
     pub(crate) pristine_offers: Vec<MarketOffer>,
 }
 
@@ -46,6 +49,7 @@ pub struct FirmProcurementResult {
 struct ProcurementSettlement {
     fills: Vec<FirmProcurementFill>,
     unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
+    capacity_limited: BTreeSet<(FirmId, GoodId)>,
     trade_prices: BTreeMap<(FirmId, GoodId), Money>,
     purchases: BTreeMap<(FirmId, GoodId), (u64, i64)>,
 }
@@ -153,6 +157,7 @@ impl World {
         let mut firms = self.firms().clone();
         let mut fills = Vec::new();
         let mut unmet = BTreeMap::new();
+        let mut capacity_limited = BTreeSet::new();
         let mut trade_prices: BTreeMap<(FirmId, GoodId), Money> = BTreeMap::new();
         let mut purchases: BTreeMap<(FirmId, GoodId), (u64, i64)> = BTreeMap::new();
         for order in orders {
@@ -194,6 +199,7 @@ impl World {
                     .into_iter()
                     .map(|(_, _, _, index, tariff, route)| (index, tariff, Some(route))),
             );
+            let mut exhausted_route_capacity = false;
             for (index, tariff, route) in candidates {
                 if remaining == 0 {
                     break;
@@ -228,6 +234,9 @@ impl World {
                     .min(offer.quantity.get())
                     .min(u64::try_from(affordable).unwrap_or(u64::MAX))
                     .min(route_limit);
+                if route.is_some() && route_limit == 0 {
+                    exhausted_route_capacity = true;
+                }
                 if quantity == 0 {
                     continue;
                 }
@@ -256,8 +265,14 @@ impl World {
                     .ok_or(WorldError::UnknownFirm(offer.seller))?
                     .apply_cash_delta(spend)?;
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
-                if let Some(cap) = route.and_then(|id| route_capacity.get_mut(&id)) {
-                    *cap -= quantity;
+                if let Some(id) = route {
+                    if let Some(cap) = route_capacity.get_mut(&id) {
+                        *cap -= quantity;
+                    }
+                    exhausted_route_capacity |= route_capacity
+                        .get(&id)
+                        .is_some_and(|capacity| *capacity == 0)
+                        && offer.quantity.get() > 0;
                 }
                 trade_prices.insert((offer.seller, order.good), unit_price);
                 let purchase = purchases.entry((order.buyer, order.good)).or_default();
@@ -281,6 +296,9 @@ impl World {
                 });
             }
             if remaining > 0 {
+                if exhausted_route_capacity {
+                    capacity_limited.insert((order.buyer, order.good));
+                }
                 unmet.insert((order.buyer, order.good), QuantityMilli::new(remaining));
             }
         }
@@ -288,6 +306,7 @@ impl World {
         Ok(ProcurementSettlement {
             fills,
             unmet,
+            capacity_limited,
             trade_prices,
             purchases,
         })
@@ -427,12 +446,18 @@ impl World {
     pub(crate) fn update_bilateral_grievances(
         &mut self,
         firm_unmet: &BTreeMap<(FirmId, GoodId), QuantityMilli>,
+        firm_capacity_limited: &BTreeSet<(FirmId, GoodId)>,
         firm_offers: &[MarketOffer],
         household_unmet: &BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>,
         household_offers: &[MarketOffer],
     ) -> Result<(), WorldError> {
         let mut accrued = BTreeSet::new();
         for &(buyer, good) in firm_unmet.keys() {
+            // An exhausted shared route pool is a domestic/logistics scarcity,
+            // not evidence that the foreign supplier withheld a deliverable good.
+            if firm_capacity_limited.contains(&(buyer, good)) {
+                continue;
+            }
             let buyer_firm = self
                 .firms
                 .get(&buyer)
@@ -544,6 +569,7 @@ impl World {
             orders,
             fills: settlement.fills,
             unmet: settlement.unmet,
+            capacity_limited: settlement.capacity_limited,
             pristine_offers,
         })
     }

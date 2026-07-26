@@ -806,3 +806,19 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   narration and preserves command-boundary replay. Full quality gate passes
   with 122 tests; the seed-1/50-year release fingerprint remains
   `12100901864703017553` (34.7 ms per simulated year, SIMULATION_VERSION 34).
+
+### Capacity-aware bilateral grievance gate (step 046)
+
+- Firm procurement now classifies a remaining input shortage as route-capacity
+  limited only when an eligible foreign offer still has stock while its selected
+  direct route has exhausted the shared monthly capacity pool. This transient
+  settlement evidence distinguishes infrastructure scarcity from a supplier
+  withholding a deliverable good.
+- Capacity-limited shortages do not accrue new bilateral grievance toward the
+  foreign supplier; existing grievance still follows its normal decay path.
+  Missing routes, hostile borders, and non-capacity shortage evidence retain
+  their previous behavior. ADR 0094 records the decision.
+- Gate: a cross-border Bakery demand of 1,000 through a 400-capacity road fills
+  400, leaves 600 explicitly unmet, creates no grievance against the Farm's
+  country, and replays identically. Full validation and release fingerprint
+  recorded with the commit.

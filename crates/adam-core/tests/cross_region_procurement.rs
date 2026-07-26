@@ -71,7 +71,11 @@ fn install_governance(world: &mut World, firm: FirmId, owner: ActorId) {
 }
 
 #[allow(clippy::too_many_lines)]
-fn two_region_world(route_tariff_minor: Option<i64>, with_local_farm: bool) -> World {
+fn two_region_world(
+    route_tariff_minor: Option<i64>,
+    with_local_farm: bool,
+    route_capacity: u64,
+) -> World {
     let mut world = World::new(WorldSeed::new(7_070), SimDate::new(2025, 1).expect("date"));
     world
         .register_country(Country::new(CountryId::new(1), "A").expect("country"))
@@ -304,7 +308,7 @@ fn two_region_world(route_tariff_minor: Option<i64>, with_local_farm: bool) -> W
                     RegionId::new(FARMLAND),
                     RegionId::new(BAKERTON),
                     TransportMode::Road,
-                    QuantityMilli::new(1_000_000),
+                    QuantityMilli::new(route_capacity),
                     Money::from_minor_units(tariff),
                     7,
                     9_500,
@@ -319,7 +323,7 @@ fn two_region_world(route_tariff_minor: Option<i64>, with_local_farm: bool) -> W
 
 #[test]
 fn imports_settle_at_delivered_price_when_no_local_supply() {
-    let mut world = two_region_world(Some(2), false);
+    let mut world = two_region_world(Some(2), false, 1_000_000);
     let result = world
         .execute_monthly_economic_cycle()
         .expect("first economic month");
@@ -366,7 +370,7 @@ fn imports_settle_at_delivered_price_when_no_local_supply() {
 
 #[test]
 fn missing_route_leaves_import_demand_unmet() {
-    let mut world = two_region_world(None, false);
+    let mut world = two_region_world(None, false, 1_000_000);
     let result = world
         .execute_monthly_economic_cycle()
         .expect("first economic month");
@@ -382,8 +386,44 @@ fn missing_route_leaves_import_demand_unmet() {
 }
 
 #[test]
+fn route_capacity_shortage_does_not_accrue_bilateral_grievance() {
+    let mut direct = two_region_world(Some(2), false, 400);
+    let mut replayed = direct.clone();
+    let result = direct
+        .execute_monthly_economic_cycle()
+        .expect("capacity-limited economic month");
+    WorldCommand::ExecuteMonthlyEconomicCycle
+        .apply(&mut replayed)
+        .expect("replayed capacity-limited month");
+
+    assert_eq!(result.commercial.procurement.fills.len(), 1);
+    assert_eq!(
+        result.commercial.procurement.fills[0].quantity,
+        QuantityMilli::new(400),
+        "the foreign farm still has grain, but the road can carry only 400"
+    );
+    assert_eq!(
+        result.commercial.procurement.unmet[&(FirmId::new(BAKERY), GoodId::new(GRAIN))],
+        QuantityMilli::new(600)
+    );
+    assert!(
+        direct.bilateral_grievances().is_empty(),
+        "route-capacity scarcity must not blame the foreign supplier"
+    );
+    assert!(
+        !direct
+            .events()
+            .events()
+            .iter()
+            .any(|event| matches!(event.event(), DomainEvent::BilateralGrievanceChanged { .. }))
+    );
+    assert_eq!(direct, replayed);
+    assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+}
+
+#[test]
 fn bilateral_hostility_severs_cross_border_procurement() {
-    let mut world = two_region_world(Some(2), false);
+    let mut world = two_region_world(Some(2), false, 1_000_000);
     WorldCommand::SetCountryHostility {
         first: CountryId::new(1),
         second: CountryId::new(2),
@@ -420,7 +460,7 @@ fn bilateral_hostility_severs_cross_border_procurement() {
 
 #[test]
 fn local_offers_keep_priority_over_cheaper_delivered_imports() {
-    let mut world = two_region_world(Some(1), true);
+    let mut world = two_region_world(Some(1), true, 1_000_000);
     let result = world
         .execute_monthly_economic_cycle()
         .expect("first economic month");
@@ -442,7 +482,7 @@ fn local_offers_keep_priority_over_cheaper_delivered_imports() {
 
 #[test]
 fn cross_region_trade_year_is_replayable() {
-    let mut direct = two_region_world(Some(2), false);
+    let mut direct = two_region_world(Some(2), false, 1_000_000);
     let mut replayed = direct.clone();
     direct.advance_economic_year().expect("economic year");
     WorldCommand::AdvanceEconomicYear

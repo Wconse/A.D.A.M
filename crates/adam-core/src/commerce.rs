@@ -82,6 +82,7 @@ impl World {
         next.settle_local_market(&clearing)?;
         next.update_bilateral_grievances(
             &procurement.unmet,
+            &procurement.capacity_limited,
             &procurement.pristine_offers,
             &clearing.unmet,
             &offers,
