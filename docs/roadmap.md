@@ -790,3 +790,19 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   `direct_market_route` directly).
 - Demo history unchanged: fingerprint 12100901864703017553,
   SIMULATION_VERSION 34 (32.3 ms per simulated year).
+
+### Procurement-shortfall chronicle gate (step 045)
+
+- Firm procurement shortages are now journaled as canonical
+  `FirmProcurementShortfall { buyer, good, quantity }` evidence once per
+  unmet buyer/input pair and month. The event records a material fact only:
+  it neither moves resources nor changes the grievance rule or world state.
+- The yearly chronicle aggregates the evidence by firm and input, resolves
+  current names, and reports the causal fact directly — for example,
+  `Bakery could not procure 500 milli-units of Grain.` B2B-only shortage years
+  receive importance 75, while existing survival/death tiers remain stronger.
+  ADR 0093 records the decision.
+- Gate: the 500-capacity B2B route scenario produces named Bakery/Grain/500
+  narration and preserves command-boundary replay. Full quality gate passes
+  with 122 tests; the seed-1/50-year release fingerprint remains
+  `12100901864703017553` (34.7 ms per simulated year, SIMULATION_VERSION 34).

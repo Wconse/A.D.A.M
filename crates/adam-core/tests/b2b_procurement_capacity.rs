@@ -346,6 +346,18 @@ fn insufficient_capacity_caps_b2b_procurement_fill() {
         QuantityMilli::new(500)
     );
 
+    // The new journal event gives the chronicle an explainable, named cause.
+    let chronicle = world.chronicle();
+    assert_eq!(chronicle.len(), 1);
+    // Household survival shortage already ranks this month above the B2B-only
+    // importance tier; the procurement sentence must still be present.
+    assert_eq!(chronicle[0].importance, 90);
+    assert!(
+        chronicle[0]
+            .text
+            .contains("Bakery could not procure 500 milli-units of Grain")
+    );
+
     assert_eq!(world, replayed);
     assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
 }

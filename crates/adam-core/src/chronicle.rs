@@ -37,7 +37,14 @@ impl World {
         years
             .into_iter()
             .filter_map(|(year, summary)| {
-                summary.finish(year, &actor_names, &country_names, &region_names)
+                summary.finish(
+                    year,
+                    &actor_names,
+                    &country_names,
+                    &region_names,
+                    self.firms(),
+                    self.goods(),
+                )
             })
             .collect()
     }
@@ -51,6 +58,7 @@ struct YearSummary {
     rationing_by_region: BTreeMap<RegionId, u64>,
     hostility_changes: Vec<(CountryId, CountryId, bool)>,
     grievances_by_pair: BTreeMap<(CountryId, CountryId), (u16, u16)>,
+    procurement_shortfalls: BTreeMap<(crate::FirmId, crate::GoodId), u128>,
 
     production_milli: u128,
     traded_milli: u128,
@@ -113,6 +121,11 @@ impl YearSummary {
                         }),
                 );
             }
+            DomainEvent::FirmProcurementShortfall {
+                buyer,
+                good,
+                quantity,
+            } => self.observe_procurement_shortfall(*buyer, *good, *quantity),
             DomainEvent::BilateralHostilityChanged {
                 first,
                 second,
@@ -172,12 +185,27 @@ impl YearSummary {
         }
     }
 
+    fn observe_procurement_shortfall(
+        &mut self,
+        buyer: crate::FirmId,
+        good: crate::GoodId,
+        quantity: crate::QuantityMilli,
+    ) {
+        let total = self
+            .procurement_shortfalls
+            .entry((buyer, good))
+            .or_default();
+        *total = total.saturating_add(u128::from(quantity.get()));
+    }
+
     fn finish(
         self,
         year: i32,
         actor_names: &BTreeMap<ActorId, String>,
         country_names: &BTreeMap<CountryId, String>,
         region_names: &BTreeMap<RegionId, String>,
+        firms: &BTreeMap<crate::FirmId, crate::Firm>,
+        goods: &BTreeMap<crate::GoodId, crate::Good>,
     ) -> Option<ChronicleEntry> {
         if self.months == 0 && !self.completed {
             return None;
@@ -213,6 +241,7 @@ impl YearSummary {
             ));
         }
         self.push_conflict_narration(&mut sentences, country_names);
+        self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
         if self.relief_minor > 0 {
             sentences.push(format!(
                 "Political offices transferred {} minor currency units in emergency relief, backed by {} of new public debt.",
@@ -306,6 +335,26 @@ impl YearSummary {
         }
     }
 
+    fn push_procurement_shortfall_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        firms: &BTreeMap<crate::FirmId, crate::Firm>,
+        goods: &BTreeMap<crate::GoodId, crate::Good>,
+    ) {
+        for (&(buyer, good), &quantity) in &self.procurement_shortfalls {
+            let buyer_name = firms
+                .get(&buyer)
+                .map_or_else(|| buyer.to_string(), |firm| firm.name().to_owned());
+            let good_name = goods.get(&good).map_or_else(
+                || good.to_string(),
+                |definition| definition.name().to_owned(),
+            );
+            sentences.push(format!(
+                "{buyer_name} could not procure {quantity} milli-units of {good_name}."
+            ));
+        }
+    }
+
     fn push_named_attributions(
         &self,
         sentences: &mut Vec<String>,
@@ -356,6 +405,8 @@ impl YearSummary {
             85
         } else if self.rationing_actions > 0 {
             80
+        } else if !self.procurement_shortfalls.is_empty() {
+            75
         } else if self.relief_debt_minor > 0 || self.relief_minor > 0 {
             70
         } else if self.household_borrowing_minor > 0 {

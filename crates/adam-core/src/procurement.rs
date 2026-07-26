@@ -324,6 +324,16 @@ impl World {
                 },
             );
         }
+        for (&(buyer, good), &quantity) in &settlement.unmet {
+            self.events.append(
+                self.date,
+                crate::DomainEvent::FirmProcurementShortfall {
+                    buyer,
+                    good,
+                    quantity,
+                },
+            );
+        }
         for ((firm, good), quantity) in sold {
             let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
             let unit_price = settlement

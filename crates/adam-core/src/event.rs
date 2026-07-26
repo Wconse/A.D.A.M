@@ -123,6 +123,13 @@ pub enum DomainEvent {
         quantity: QuantityMilli,
         spend: Money,
     },
+    /// Input demand that remained unfilled after the monthly B2B offer book
+    /// settled. This is journal evidence only: it does not change world state.
+    FirmProcurementShortfall {
+        buyer: FirmId,
+        good: GoodId,
+        quantity: QuantityMilli,
+    },
     BilateralHostilityChanged {
         first: CountryId,
         second: CountryId,
