@@ -362,6 +362,80 @@ fn insufficient_capacity_caps_b2b_procurement_fill() {
     assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
 }
 
+/// A partial input delivery must not push the Bakery target to zero,
+/// because zero would suppress next month's procurement order permanently.
+/// Keeping the one-batch floor lets two 500-unit deliveries accumulate and
+/// restores one batch of Bread production in the third month.
+#[test]
+fn capacity_shortage_keeps_procurement_alive_until_production_recovers() {
+    let mut direct = shared_route_world(500);
+    let mut replayed = direct.clone();
+
+    let first = direct
+        .execute_monthly_commercial_cycle()
+        .expect("first constrained month");
+    WorldCommand::ExecuteMonthlyCommercialCycle
+        .apply(&mut replayed)
+        .expect("replayed first commercial month");
+    direct
+        .execute_observed_firm_management()
+        .expect("first management pass");
+    WorldCommand::ExecuteObservedFirmManagement
+        .apply(&mut replayed)
+        .expect("replayed first management pass");
+    assert_eq!(
+        first.procurement.unmet[&(FirmId::new(BAKERY), GoodId::new(GRAIN))],
+        QuantityMilli::new(500)
+    );
+    assert_eq!(
+        direct.firm_production_targets()[&FirmId::new(BAKERY)],
+        1,
+        "temporary input scarcity must not extinguish future procurement"
+    );
+    direct.advance_month().expect("advance after first month");
+    WorldCommand::AdvanceMonth
+        .apply(&mut replayed)
+        .expect("replayed first advance");
+
+    let second = direct
+        .execute_monthly_commercial_cycle()
+        .expect("second constrained month");
+    WorldCommand::ExecuteMonthlyCommercialCycle
+        .apply(&mut replayed)
+        .expect("replayed second commercial month");
+    direct
+        .execute_observed_firm_management()
+        .expect("second management pass");
+    WorldCommand::ExecuteObservedFirmManagement
+        .apply(&mut replayed)
+        .expect("replayed second management pass");
+    assert!(second.procurement.unmet.is_empty());
+    assert_eq!(direct.firm_production_targets()[&FirmId::new(BAKERY)], 1);
+    assert_eq!(
+        direct.firms()[&FirmId::new(BAKERY)].inventories()[&GoodId::new(GRAIN)],
+        QuantityMilli::new(1_000)
+    );
+    direct.advance_month().expect("advance after second month");
+    WorldCommand::AdvanceMonth
+        .apply(&mut replayed)
+        .expect("replayed second advance");
+
+    let third = direct
+        .execute_monthly_commercial_cycle()
+        .expect("recovery month");
+    WorldCommand::ExecuteMonthlyCommercialCycle
+        .apply(&mut replayed)
+        .expect("replayed recovery month");
+    assert!(
+        third
+            .production_plans
+            .iter()
+            .any(|plan| plan.firm() == FirmId::new(BAKERY) && plan.batches() == 1)
+    );
+    assert_eq!(direct, replayed);
+    assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+}
+
 /// A year of shared-capacity trade is replayable.
 #[test]
 fn shared_capacity_year_is_replayable() {

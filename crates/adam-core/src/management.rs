@@ -62,20 +62,25 @@ impl World {
                 .get(&firm)
                 .copied()
                 .unwrap_or(next.firms[&firm].capacity_batches());
-            if previous == proposal.advisory_batches {
+            let target = next.bound_target_for_procurement_shortfall(
+                firm,
+                previous,
+                proposal.advisory_batches,
+            );
+            if previous == target {
                 continue;
             }
             WorldCommand::SetFirmProductionTarget {
                 actor,
                 firm,
-                batches: proposal.advisory_batches,
+                batches: target,
             }
             .apply(&mut next)?;
             decisions.push(FirmManagementDecision {
                 actor,
                 firm,
                 previous_batches: previous,
-                target_batches: proposal.advisory_batches,
+                target_batches: target,
             });
         }
         next.last_firm_management_date = Some(next.date);
@@ -90,6 +95,32 @@ impl World {
         );
         *self = next;
         Ok(decisions)
+    }
+
+    /// A current input shortfall forbids expansion and limits contraction
+    /// to one batch, with a one-batch floor for an already active target. The
+    /// floor keeps next month's procurement order alive instead of trapping the
+    /// firm at zero after a temporary logistics or supplier disruption.
+    fn bound_target_for_procurement_shortfall(
+        &self,
+        firm: FirmId,
+        previous: u64,
+        advisory: u64,
+    ) -> u64 {
+        let shortfall = self.events.events().iter().rev().any(|envelope| {
+            envelope.date() == self.date
+                && matches!(
+                    envelope.event(),
+                    DomainEvent::FirmProcurementShortfall { buyer, .. }
+                        | DomainEvent::FirmProcurementRouteCapacityShortfall { buyer, .. }
+                        if *buyer == firm
+                )
+        });
+        if !shortfall || previous == 0 {
+            return advisory;
+        }
+        let floor = previous.saturating_sub(1).max(1);
+        advisory.clamp(floor, previous)
     }
 
     fn operations_actor(&self, firm: FirmId) -> Option<ActorId> {

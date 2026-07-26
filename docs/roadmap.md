@@ -837,3 +837,21 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   unchanged. ADR 0095 records the decision. The full gate passes with 123
   tests; the seed-1/50-year fingerprint remains `12100901864703017553`
   (34.7 ms per simulated year, SIMULATION_VERSION 34).
+
+
+### Bounded input-shortage management gate (step 048)
+
+- Procurement shortages now constrain the ordinary observed-management target:
+  a firm with a positive target cannot expand during the shortage, contracts by
+  at most one batch per month, and keeps a one-batch floor. This prevents a
+  temporary partial delivery from setting target zero and suppressing the very
+  procurement order required for recovery.
+- The response reads the current month's typed generic or route-capacity
+  procurement-shortfall event; no parallel shortage state is introduced.
+  Ordinary unsold-output contraction without an input shortfall is unchanged.
+- Gate: with a 500-unit route cap and a 1,000-unit Grain requirement, the Bakery
+  keeps target one, accumulates two partial deliveries across isolated replayed
+  commercial months, and resumes one Bread batch in the third month. ADR 0096
+  records the rule. This changes target history, so SIMULATION_VERSION advances
+  34 -> 35. Full gate: 124 tests; seed-1/50-year fingerprint
+  `12134027468760220507`; 35.9 ms/year.
