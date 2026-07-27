@@ -66,6 +66,8 @@ struct YearSummary {
     grievances_by_pair: BTreeMap<(CountryId, CountryId), (u16, u16)>,
     procurement_shortfalls:
         BTreeMap<(crate::FirmId, crate::GoodId, ProcurementShortfallCause), u128>,
+    freight_payments: u64,
+    freight_revenue_minor: i128,
 
     production_milli: u128,
     traded_milli: u128,
@@ -93,7 +95,7 @@ struct YearSummary {
 
 impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
-        if self.observe_procurement_event(event) {
+        if self.observe_procurement_event(event) || self.observe_freight_event(event) {
             return;
         }
         match event {
@@ -190,6 +192,17 @@ impl YearSummary {
         }
     }
 
+    fn observe_freight_event(&mut self, event: &DomainEvent) -> bool {
+        let (DomainEvent::MarketFreightPaid { amount, .. }
+        | DomainEvent::FirmProcurementFreightPaid { amount, .. }) = event
+        else {
+            return false;
+        };
+        self.freight_payments = self.freight_payments.saturating_add(1);
+        self.freight_revenue_minor += i128::from(amount.minor_units());
+        true
+    }
+
     fn observe_procurement_event(&mut self, event: &DomainEvent) -> bool {
         let (buyer, good, quantity, cause) = match event {
             DomainEvent::FirmProcurementShortfall {
@@ -271,6 +284,17 @@ impl YearSummary {
         }
         self.push_conflict_narration(&mut sentences, country_names);
         self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
+        if self.freight_payments > 0 {
+            let leg_word = if self.freight_payments == 1 {
+                "leg"
+            } else {
+                "legs"
+            };
+            sentences.push(format!(
+                "Imported trade paid {} minor currency units to route carriers across {} freight {leg_word}.",
+                self.freight_revenue_minor, self.freight_payments
+            ));
+        }
         if self.relief_minor > 0 {
             sentences.push(format!(
                 "Political offices transferred {} minor currency units in emergency relief, backed by {} of new public debt.",
@@ -756,5 +780,42 @@ mod tests {
             text.contains("Mara Voss led firm management with 1 production target adjustments")
         );
         assert!(text.contains("Shortages pressed hardest on Northreach, with 1 rationing actions"));
+    }
+    #[test]
+    fn chronicle_reports_import_freight_revenue() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::FirmProcurementFreightPaid {
+                buyer: crate::FirmId::new(1),
+                seller: crate::FirmId::new(2),
+                carrier: crate::FirmId::new(3),
+                route: crate::RouteId::new(1),
+                amount: Money::from_minor_units(7),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::MarketFreightPaid {
+                buyer: CohortId::new(1),
+                seller: crate::FirmId::new(2),
+                carrier: crate::FirmId::new(3),
+                route: crate::RouteId::new(1),
+                amount: Money::from_minor_units(3),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert!(chronicle[0].text.contains("paid 10 minor currency units"));
+        assert!(chronicle[0].text.contains("across 2 freight legs"));
     }
 }

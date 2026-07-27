@@ -855,3 +855,23 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   records the rule. This changes target history, so SIMULATION_VERSION advances
   34 -> 35. Full gate: 124 tests; seed-1/50-year fingerprint
   `12134027468760220507`; 35.9 ms/year.
+
+
+### Market-import carrier revenue gate (step 049)
+
+- Immediate household and B2B imports now split one delivered payment into goods revenue for the
+  supplier and freight revenue for the selected route carrier. The buyer still pays the exact
+  delivered total; fixed-point rounding assigns the residual to freight so buyer outflow always
+  equals the two credited legs.
+- Household goods revenue remains taxable final sales. Carrier freight is ordinary non-final firm
+  revenue, while B2B goods and freight remain non-final. Firm buyers observe the full delivered
+  input price; supplier-side market outcomes retain the actual goods offer price.
+- Appended `MarketFreightPaid` and `FirmProcurementFreightPaid` events expose the carrier leg without
+  changing existing trade-event semantics. The yearly chronicle aggregates freight payments into
+  auditable route-carrier revenue. ADR 0097 records the contract.
+- Separate-carrier gates prove seller/carrier cash allocation, accounting classification, delivered
+  buyer prices, seller goods prices, typed evidence, money conservation, and command replay. Full
+  workspace validation passes 125 tests. The authoritative cash and accounting change advances
+  SIMULATION_VERSION 35 -> 36; seed-1/50-year fingerprint is `6856032423052036241` at 27.6 ms/year.
+- Next gate: use observed carrier revenue, margin, and exhausted route capacity as evidence for a
+  bounded, financed route-capacity investment response rather than an artificial expansion rule.

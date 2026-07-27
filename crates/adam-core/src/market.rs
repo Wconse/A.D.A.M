@@ -52,7 +52,13 @@ pub struct MarketFill {
     pub seller: FirmId,
     pub good: GoodId,
     pub quantity: QuantityMilli,
+    /// Total delivered payment debited from the household.
     pub spend: Money,
+    /// Goods-price component credited to the seller.
+    pub goods_spend: Money,
+    /// Route-tariff component credited to the carrier.
+    pub freight_spend: Money,
+    pub route: Option<RouteId>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketOfferOutcome {
@@ -296,6 +302,14 @@ where
             i128::from(price) * i128::from(quantity) / i128::from(QuantityMilli::SCALE),
         )
         .map_err(|_| WorldError::ArithmeticOverflow("market spend"))?;
+        let goods_spend = i64::try_from(
+            i128::from(offer.unit_price.minor_units()) * i128::from(quantity)
+                / i128::from(QuantityMilli::SCALE),
+        )
+        .map_err(|_| WorldError::ArithmeticOverflow("market goods spend"))?;
+        let freight_spend = spend
+            .checked_sub(goods_spend)
+            .ok_or(WorldError::ArithmeticOverflow("market freight spend"))?;
         need -= quantity;
         remaining[index] -= quantity;
         budget -= spend;
@@ -311,6 +325,9 @@ where
             good: order.good,
             quantity: QuantityMilli::new(quantity),
             spend: Money::from_minor_units(spend),
+            goods_spend: Money::from_minor_units(goods_spend),
+            freight_spend: Money::from_minor_units(freight_spend),
+            route,
         });
     }
     Ok(need)
@@ -394,21 +411,42 @@ fn record_market_settlement_evidence(
             .or_default()
             .push(*outcome);
     }
-    let mut revenues: std::collections::BTreeMap<FirmId, Money> = std::collections::BTreeMap::new();
+    let mut goods_revenue: std::collections::BTreeMap<FirmId, i128> =
+        std::collections::BTreeMap::new();
+    let mut freight_revenue: std::collections::BTreeMap<FirmId, i128> =
+        std::collections::BTreeMap::new();
     for fill in &clearing.fills {
-        let current = revenues.get(&fill.seller).copied().unwrap_or_default();
-        revenues.insert(
-            fill.seller,
-            Money::from_minor_units(
-                current
-                    .minor_units()
-                    .checked_add(fill.spend.minor_units())
-                    .ok_or(WorldError::ArithmeticOverflow("seller revenue aggregation"))?,
-            ),
-        );
+        *goods_revenue.entry(fill.seller).or_default() +=
+            i128::from(fill.goods_spend.minor_units());
+        if let Some(route) = fill.route {
+            let carrier = world
+                .logistics_routes
+                .get(&route)
+                .and_then(crate::LogisticsRoute::carrier)
+                .ok_or(WorldError::InvalidLogistics(
+                    "market import route requires a carrier",
+                ))?;
+            *freight_revenue.entry(carrier).or_default() +=
+                i128::from(fill.freight_spend.minor_units());
+        }
     }
-    for (firm, revenue) in revenues {
-        world.record_firm_final_sale(firm, revenue)?;
+    for (firm, revenue) in goods_revenue {
+        world.record_firm_final_sale(
+            firm,
+            Money::from_minor_units(
+                i64::try_from(revenue).map_err(|_| {
+                    WorldError::ArithmeticOverflow("seller goods revenue aggregation")
+                })?,
+            ),
+        )?;
+    }
+    for (firm, revenue) in freight_revenue {
+        world.record_firm_sale(
+            firm,
+            Money::from_minor_units(i64::try_from(revenue).map_err(|_| {
+                WorldError::ArithmeticOverflow("carrier freight revenue aggregation")
+            })?),
+        )?;
     }
     for fill in &clearing.fills {
         world.events.append(
@@ -421,6 +459,25 @@ fn record_market_settlement_evidence(
                 spend: fill.spend,
             },
         );
+        if let Some(route) = fill.route {
+            let carrier = world
+                .logistics_routes
+                .get(&route)
+                .and_then(crate::LogisticsRoute::carrier)
+                .ok_or(WorldError::InvalidLogistics(
+                    "market import route requires a carrier",
+                ))?;
+            world.events.append(
+                world.date,
+                crate::DomainEvent::MarketFreightPaid {
+                    buyer: fill.buyer,
+                    seller: fill.seller,
+                    carrier,
+                    route,
+                    amount: fill.freight_spend,
+                },
+            );
+        }
     }
     Ok(())
 }
@@ -490,7 +547,20 @@ impl crate::World {
                 .get_mut(&fill.seller)
                 .ok_or(WorldError::UnknownFirm(fill.seller))?;
             firm.debit_inventory(fill.good, fill.quantity)?;
-            firm.apply_cash_delta(fill.spend)?;
+            firm.apply_cash_delta(fill.goods_spend)?;
+            if let Some(route) = fill.route {
+                let carrier = self
+                    .logistics_routes
+                    .get(&route)
+                    .and_then(crate::LogisticsRoute::carrier)
+                    .ok_or(WorldError::InvalidLogistics(
+                        "market import route requires a carrier",
+                    ))?;
+                firms
+                    .get_mut(&carrier)
+                    .ok_or(WorldError::UnknownFirm(carrier))?
+                    .apply_cash_delta(fill.freight_spend)?;
+            }
         }
         let mut consumption: std::collections::BTreeMap<
             (CohortId, GoodId, NeedTier),

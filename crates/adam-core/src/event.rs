@@ -329,6 +329,22 @@ pub enum DomainEvent {
         good: GoodId,
         quantity: QuantityMilli,
     },
+    /// Freight component of a delivered household import paid to the route carrier.
+    MarketFreightPaid {
+        buyer: CohortId,
+        seller: FirmId,
+        carrier: FirmId,
+        route: RouteId,
+        amount: Money,
+    },
+    /// Freight component of a delivered B2B import paid to the route carrier.
+    FirmProcurementFreightPaid {
+        buyer: FirmId,
+        seller: FirmId,
+        carrier: FirmId,
+        route: RouteId,
+        amount: Money,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -28,6 +28,7 @@ use adam_core::{
 const FARM: u32 = 1;
 const BAKERY: u32 = 2;
 const LOCAL_FARM: u32 = 3;
+const CARRIER: u32 = 4;
 const GRAIN: u32 = 1;
 const BREAD: u32 = 2;
 const FARMLAND: u32 = 1;
@@ -194,6 +195,21 @@ fn two_region_world(
             .expect("bakery"),
         )
         .expect("register bakery");
+    world
+        .register_firm(
+            Firm::new(
+                FirmId::new(CARRIER),
+                "Road Carrier",
+                RegionId::new(FARMLAND),
+                RecipeId::new(GRAIN_RECIPE),
+                0,
+                0,
+                Money::from_minor_units(1_000),
+                BTreeMap::new(),
+            )
+            .expect("carrier"),
+        )
+        .expect("register carrier");
     if with_local_farm {
         world
             .register_firm(
@@ -314,7 +330,7 @@ fn two_region_world(
                     9_500,
                 )
                 .expect("route")
-                .with_carrier(FirmId::new(FARM)),
+                .with_carrier(FirmId::new(CARRIER)),
             )
             .expect("register route");
     }
@@ -340,6 +356,9 @@ fn imports_settle_at_delivered_price_when_no_local_supply() {
         Money::from_minor_units(7),
         "grain offer 5 plus road tariff 2"
     );
+    assert_eq!(fill.goods_spend, Money::from_minor_units(5));
+    assert_eq!(fill.freight_spend, Money::from_minor_units(2));
+    assert_eq!(fill.route, Some(RouteId::new(1)));
     assert!(result.commercial.procurement.unmet.is_empty());
 
     // Physical delivery happened: the grain crossed regions.
@@ -351,11 +370,38 @@ fn imports_settle_at_delivered_price_when_no_local_supply() {
         QuantityMilli::new(1_000)
     );
 
-    // Both cash legs of the delivered price:
-    // farm 1000 - 50 payroll + 7 delivered grain sale = 957
+    // The delivered payment is split rather than gifted to the supplier:
+    // farm 1000 - 50 payroll + 5 grain sale = 955
+    // carrier 1000 + 2 freight tariff = 1002
     // bakery 1000 - 50 payroll - 7 grain import + 20 bread sales = 963
-    assert_eq!(farm.cash(), Money::from_minor_units(957));
+    assert_eq!(farm.cash(), Money::from_minor_units(955));
     assert_eq!(bakery.cash(), Money::from_minor_units(963));
+    assert_eq!(
+        world.firms()[&FirmId::new(CARRIER)].cash(),
+        Money::from_minor_units(1_002)
+    );
+    let carrier_observation = world.firm_operating_history()[&FirmId::new(CARRIER)]
+        .last()
+        .expect("carrier observation");
+    assert_eq!(
+        carrier_observation.sales_revenue(),
+        Money::from_minor_units(2)
+    );
+    assert_eq!(carrier_observation.final_sales_revenue(), Money::default());
+    assert!(world.events().events().iter().any(|event| matches!(
+        event.event(),
+        DomainEvent::FirmProcurementFreightPaid {
+            buyer,
+            seller,
+            carrier,
+            route,
+            amount,
+        } if *buyer == FirmId::new(BAKERY)
+            && *seller == FirmId::new(FARM)
+            && *carrier == FirmId::new(CARRIER)
+            && *route == RouteId::new(1)
+            && *amount == Money::from_minor_units(2)
+    )));
 
     // The buyer's observation carries the actually paid delivered price.
     let observation = world.firm_operating_history()[&FirmId::new(BAKERY)]

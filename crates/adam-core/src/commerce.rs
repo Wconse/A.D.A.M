@@ -429,6 +429,21 @@ mod tests {
             .expect("foreign price");
         if with_route {
             world
+                .register_firm(
+                    Firm::new(
+                        FirmId::new(3),
+                        "Foreign carrier",
+                        RegionId::new(2),
+                        RecipeId::new(1),
+                        0,
+                        0,
+                        Money::default(),
+                        BTreeMap::new(),
+                    )
+                    .expect("foreign carrier"),
+                )
+                .expect("foreign carrier");
+            world
                 .register_logistics_route(
                     LogisticsRoute::new(
                         RouteId::new(1),
@@ -441,7 +456,7 @@ mod tests {
                         10_000,
                     )
                     .expect("route")
-                    .with_carrier(FirmId::new(2)),
+                    .with_carrier(FirmId::new(3)),
                 )
                 .expect("route");
         }
@@ -526,6 +541,38 @@ mod tests {
             Money::from_minor_units(11),
             "foreign offer 10 plus road tariff 1"
         );
+        assert_eq!(fill.goods_spend, Money::from_minor_units(10));
+        assert_eq!(fill.freight_spend, Money::from_minor_units(1));
+        assert_eq!(fill.route, Some(RouteId::new(1)));
+        assert_eq!(
+            direct.firms()[&FirmId::new(2)].cash(),
+            Money::from_minor_units(10)
+        );
+        assert_eq!(
+            direct.firms()[&FirmId::new(3)].cash(),
+            Money::from_minor_units(1)
+        );
+        assert_eq!(
+            direct.firm_operating_history()[&FirmId::new(3)]
+                .last()
+                .expect("carrier observation")
+                .sales_revenue(),
+            Money::from_minor_units(1)
+        );
+        assert!(direct.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::MarketFreightPaid {
+                buyer,
+                seller,
+                carrier,
+                route,
+                amount,
+            } if *buyer == CohortId::new(1)
+                && *seller == FirmId::new(2)
+                && *carrier == FirmId::new(3)
+                && *route == RouteId::new(1)
+                && *amount == Money::from_minor_units(1)
+        )));
         assert!(result.commercial.clearing.unmet.is_empty());
         assert!(direct.bilateral_grievances().is_empty());
         assert_eq!(direct, replayed);

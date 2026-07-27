@@ -29,7 +29,13 @@ pub struct FirmProcurementFill {
     pub seller: FirmId,
     pub good: GoodId,
     pub quantity: QuantityMilli,
+    /// Total delivered payment debited from the buyer.
     pub spend: Money,
+    /// Goods-price component credited to the supplier.
+    pub goods_spend: Money,
+    /// Route-tariff component credited to the carrier.
+    pub freight_spend: Money,
+    pub route: Option<RouteId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,6 +58,12 @@ struct ProcurementSettlement {
     capacity_limited: BTreeSet<(FirmId, GoodId)>,
     trade_prices: BTreeMap<(FirmId, GoodId), Money>,
     purchases: BTreeMap<(FirmId, GoodId), (u64, i64)>,
+}
+
+struct RecordedProcurementFills {
+    goods_revenue: BTreeMap<FirmId, i128>,
+    freight_revenue: BTreeMap<FirmId, i128>,
+    sold: BTreeMap<(FirmId, GoodId), u64>,
 }
 
 impl World {
@@ -222,7 +234,6 @@ impl World {
                 if price <= 0 {
                     continue;
                 }
-                let unit_price = Money::from_minor_units(price);
                 let affordable = i128::from(buyer_cash)
                     .checked_mul(i128::from(QuantityMilli::SCALE))
                     .ok_or(WorldError::ArithmeticOverflow("firm procurement budget"))?
@@ -248,6 +259,25 @@ impl World {
                     i64::try_from(spend)
                         .map_err(|_| WorldError::ArithmeticOverflow("firm procurement spend"))?,
                 );
+                let goods_spend = Money::from_minor_units(
+                    i64::try_from(
+                        i128::from(offer.unit_price.minor_units())
+                            .checked_mul(i128::from(quantity))
+                            .ok_or(WorldError::ArithmeticOverflow(
+                                "firm procurement goods spend",
+                            ))?
+                            / i128::from(QuantityMilli::SCALE),
+                    )
+                    .map_err(|_| WorldError::ArithmeticOverflow("firm procurement goods spend"))?,
+                );
+                let freight_spend = Money::from_minor_units(
+                    spend
+                        .minor_units()
+                        .checked_sub(goods_spend.minor_units())
+                        .ok_or(WorldError::ArithmeticOverflow(
+                            "firm procurement freight spend",
+                        ))?,
+                );
                 firms
                     .get_mut(&order.buyer)
                     .ok_or(WorldError::UnknownFirm(order.buyer))?
@@ -263,7 +293,20 @@ impl World {
                 firms
                     .get_mut(&offer.seller)
                     .ok_or(WorldError::UnknownFirm(offer.seller))?
-                    .apply_cash_delta(spend)?;
+                    .apply_cash_delta(goods_spend)?;
+                if let Some(route_id) = route {
+                    let carrier = self
+                        .logistics_routes
+                        .get(&route_id)
+                        .and_then(crate::LogisticsRoute::carrier)
+                        .ok_or(WorldError::InvalidLogistics(
+                            "procurement import route requires a carrier",
+                        ))?;
+                    firms
+                        .get_mut(&carrier)
+                        .ok_or(WorldError::UnknownFirm(carrier))?
+                        .apply_cash_delta(freight_spend)?;
+                }
                 offer.quantity = QuantityMilli::new(offer.quantity.get() - quantity);
                 if let Some(id) = route {
                     if let Some(cap) = route_capacity.get_mut(&id) {
@@ -274,7 +317,7 @@ impl World {
                         .is_some_and(|capacity| *capacity == 0)
                         && offer.quantity.get() > 0;
                 }
-                trade_prices.insert((offer.seller, order.good), unit_price);
+                trade_prices.insert((offer.seller, order.good), offer.unit_price);
                 let purchase = purchases.entry((order.buyer, order.good)).or_default();
                 purchase.0 =
                     purchase
@@ -293,6 +336,9 @@ impl World {
                     good: order.good,
                     quantity: QuantityMilli::new(quantity),
                     spend,
+                    goods_spend,
+                    freight_spend,
+                    route,
                 });
             }
             if remaining > 0 {
@@ -312,22 +358,27 @@ impl World {
         })
     }
 
-    /// Record phase: persist purchase aggregates, append trade events, and
-    /// fold settled sales into firm observations and revenue.
-    fn record_procurement_outcomes(
+    fn record_procurement_fills(
         &mut self,
-        settlement: &ProcurementSettlement,
-    ) -> Result<(), WorldError> {
-        for (&(buyer, good), &(quantity, spend)) in &settlement.purchases {
-            self.monthly_firm_procurement_purchases.insert(
-                (buyer, good),
-                (QuantityMilli::new(quantity), Money::from_minor_units(spend)),
-            );
-        }
-        let mut revenue = BTreeMap::<FirmId, i128>::new();
+        fills: &[FirmProcurementFill],
+    ) -> Result<RecordedProcurementFills, WorldError> {
+        let mut goods_revenue = BTreeMap::<FirmId, i128>::new();
+        let mut freight_revenue = BTreeMap::<FirmId, i128>::new();
         let mut sold = BTreeMap::<(FirmId, GoodId), u64>::new();
-        for fill in &settlement.fills {
-            *revenue.entry(fill.seller).or_default() += i128::from(fill.spend.minor_units());
+        for fill in fills {
+            *goods_revenue.entry(fill.seller).or_default() +=
+                i128::from(fill.goods_spend.minor_units());
+            if let Some(route) = fill.route {
+                let carrier = self
+                    .logistics_routes
+                    .get(&route)
+                    .and_then(crate::LogisticsRoute::carrier)
+                    .ok_or(WorldError::InvalidLogistics(
+                        "procurement import route requires a carrier",
+                    ))?;
+                *freight_revenue.entry(carrier).or_default() +=
+                    i128::from(fill.freight_spend.minor_units());
+            }
             let quantity = sold.entry((fill.seller, fill.good)).or_default();
             *quantity = quantity
                 .checked_add(fill.quantity.get())
@@ -342,7 +393,46 @@ impl World {
                     spend: fill.spend,
                 },
             );
+            if let Some(route) = fill.route {
+                let carrier = self
+                    .logistics_routes
+                    .get(&route)
+                    .and_then(crate::LogisticsRoute::carrier)
+                    .ok_or(WorldError::InvalidLogistics(
+                        "procurement import route requires a carrier",
+                    ))?;
+                self.events.append(
+                    self.date,
+                    crate::DomainEvent::FirmProcurementFreightPaid {
+                        buyer: fill.buyer,
+                        seller: fill.seller,
+                        carrier,
+                        route,
+                        amount: fill.freight_spend,
+                    },
+                );
+            }
         }
+        Ok(RecordedProcurementFills {
+            goods_revenue,
+            freight_revenue,
+            sold,
+        })
+    }
+
+    /// Record phase: persist purchase aggregates, append trade events, and
+    /// fold settled sales into firm observations and revenue.
+    fn record_procurement_outcomes(
+        &mut self,
+        settlement: &ProcurementSettlement,
+    ) -> Result<(), WorldError> {
+        for (&(buyer, good), &(quantity, spend)) in &settlement.purchases {
+            self.monthly_firm_procurement_purchases.insert(
+                (buyer, good),
+                (QuantityMilli::new(quantity), Money::from_minor_units(spend)),
+            );
+        }
+        let recorded = self.record_procurement_fills(&settlement.fills)?;
         for (&(buyer, good), &quantity) in &settlement.unmet {
             let event = if settlement.capacity_limited.contains(&(buyer, good)) {
                 crate::DomainEvent::FirmProcurementRouteCapacityShortfall {
@@ -359,7 +449,7 @@ impl World {
             };
             self.events.append(self.date, event);
         }
-        for ((firm, good), quantity) in sold {
+        for ((firm, good), quantity) in recorded.sold {
             let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
             let unit_price = settlement
                 .trade_prices
@@ -380,13 +470,20 @@ impl World {
                     unmet_market_demand: QuantityMilli::default(),
                 });
         }
-        for (firm, value) in revenue {
+        for (firm, value) in recorded.goods_revenue {
             self.record_firm_sale(
                 firm,
-                Money::from_minor_units(
-                    i64::try_from(value)
-                        .map_err(|_| WorldError::ArithmeticOverflow("firm procurement revenue"))?,
-                ),
+                Money::from_minor_units(i64::try_from(value).map_err(|_| {
+                    WorldError::ArithmeticOverflow("firm procurement goods revenue")
+                })?),
+            )?;
+        }
+        for (firm, value) in recorded.freight_revenue {
+            self.record_firm_sale(
+                firm,
+                Money::from_minor_units(i64::try_from(value).map_err(|_| {
+                    WorldError::ArithmeticOverflow("firm procurement freight revenue")
+                })?),
             )?;
         }
         Ok(())
