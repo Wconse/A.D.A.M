@@ -46,6 +46,7 @@ pub struct FirmProcurementResult {
     /// Unmet inputs for which a reachable foreign offer remained, but the
     /// monthly route-capacity pool was exhausted before it could fill.
     pub(crate) capacity_limited: BTreeSet<(FirmId, GoodId)>,
+    pub(crate) constrained_routes: BTreeSet<RouteId>,
     pub(crate) pristine_offers: Vec<MarketOffer>,
 }
 
@@ -56,6 +57,7 @@ struct ProcurementSettlement {
     fills: Vec<FirmProcurementFill>,
     unmet: BTreeMap<(FirmId, GoodId), QuantityMilli>,
     capacity_limited: BTreeSet<(FirmId, GoodId)>,
+    constrained_routes: BTreeSet<RouteId>,
     trade_prices: BTreeMap<(FirmId, GoodId), Money>,
     purchases: BTreeMap<(FirmId, GoodId), (u64, i64)>,
 }
@@ -170,6 +172,7 @@ impl World {
         let mut fills = Vec::new();
         let mut unmet = BTreeMap::new();
         let mut capacity_limited = BTreeSet::new();
+        let mut constrained_routes = BTreeSet::new();
         let mut trade_prices: BTreeMap<(FirmId, GoodId), Money> = BTreeMap::new();
         let mut purchases: BTreeMap<(FirmId, GoodId), (u64, i64)> = BTreeMap::new();
         for order in orders {
@@ -241,10 +244,15 @@ impl World {
                 let route_limit = route.map_or(u64::MAX, |id| {
                     route_capacity.get(&id).copied().unwrap_or(u64::MAX)
                 });
-                let quantity = remaining
+                let unconstrained = remaining
                     .min(offer.quantity.get())
-                    .min(u64::try_from(affordable).unwrap_or(u64::MAX))
-                    .min(route_limit);
+                    .min(u64::try_from(affordable).unwrap_or(u64::MAX));
+                if let Some(route_id) = route {
+                    if route_limit < unconstrained {
+                        constrained_routes.insert(route_id);
+                    }
+                }
+                let quantity = unconstrained.min(route_limit);
                 if route.is_some() && route_limit == 0 {
                     exhausted_route_capacity = true;
                 }
@@ -353,6 +361,7 @@ impl World {
             fills,
             unmet,
             capacity_limited,
+            constrained_routes,
             trade_prices,
             purchases,
         })
@@ -673,6 +682,7 @@ impl World {
             fills: settlement.fills,
             unmet: settlement.unmet,
             capacity_limited: settlement.capacity_limited,
+            constrained_routes: settlement.constrained_routes,
             pristine_offers,
         })
     }

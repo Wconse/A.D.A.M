@@ -345,6 +345,13 @@ pub enum DomainEvent {
         route: RouteId,
         amount: Money,
     },
+    RouteCapacityExpanded {
+        route: RouteId,
+        carrier: FirmId,
+        previous_capacity: QuantityMilli,
+        added_capacity: QuantityMilli,
+        cost: Money,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

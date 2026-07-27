@@ -99,6 +99,20 @@ impl LogisticsRoute {
         self.cost_per_unit = cost;
         self
     }
+    pub(crate) fn add_capacity(&mut self, added: QuantityMilli) -> Result<(), WorldError> {
+        if added.get() == 0 {
+            return Err(WorldError::InvalidLogistics(
+                "route capacity addition must be positive",
+            ));
+        }
+        self.monthly_capacity = QuantityMilli::new(
+            self.monthly_capacity
+                .get()
+                .checked_add(added.get())
+                .ok_or(WorldError::ArithmeticOverflow("route capacity expansion"))?,
+        );
+        Ok(())
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShipmentOrder {

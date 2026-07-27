@@ -68,6 +68,9 @@ struct YearSummary {
         BTreeMap<(crate::FirmId, crate::GoodId, ProcurementShortfallCause), u128>,
     freight_payments: u64,
     freight_revenue_minor: i128,
+    route_expansions: u64,
+    route_capacity_added_milli: u128,
+    route_investment_minor: i128,
 
     production_milli: u128,
     traded_milli: u128,
@@ -95,7 +98,10 @@ struct YearSummary {
 
 impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
-        if self.observe_procurement_event(event) || self.observe_freight_event(event) {
+        if self.observe_procurement_event(event)
+            || self.observe_freight_event(event)
+            || self.observe_route_expansion_event(event)
+        {
             return;
         }
         match event {
@@ -192,6 +198,23 @@ impl YearSummary {
         }
     }
 
+    fn observe_route_expansion_event(&mut self, event: &DomainEvent) -> bool {
+        let DomainEvent::RouteCapacityExpanded {
+            added_capacity,
+            cost,
+            ..
+        } = event
+        else {
+            return false;
+        };
+        self.route_expansions = self.route_expansions.saturating_add(1);
+        self.route_capacity_added_milli = self
+            .route_capacity_added_milli
+            .saturating_add(u128::from(added_capacity.get()));
+        self.route_investment_minor += i128::from(cost.minor_units());
+        true
+    }
+
     fn observe_freight_event(&mut self, event: &DomainEvent) -> bool {
         let (DomainEvent::MarketFreightPaid { amount, .. }
         | DomainEvent::FirmProcurementFreightPaid { amount, .. }) = event
@@ -284,17 +307,7 @@ impl YearSummary {
         }
         self.push_conflict_narration(&mut sentences, country_names);
         self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
-        if self.freight_payments > 0 {
-            let leg_word = if self.freight_payments == 1 {
-                "leg"
-            } else {
-                "legs"
-            };
-            sentences.push(format!(
-                "Imported trade paid {} minor currency units to route carriers across {} freight {leg_word}.",
-                self.freight_revenue_minor, self.freight_payments
-            ));
-        }
+        self.push_transport_narration(&mut sentences);
         if self.relief_minor > 0 {
             sentences.push(format!(
                 "Political offices transferred {} minor currency units in emergency relief, backed by {} of new public debt.",
@@ -349,6 +362,28 @@ impl YearSummary {
             importance: self.importance(),
             text: sentences.join(" "),
         })
+    }
+
+    fn push_transport_narration(&self, sentences: &mut Vec<String>) {
+        if self.freight_payments > 0 {
+            let leg_word = if self.freight_payments == 1 {
+                "leg"
+            } else {
+                "legs"
+            };
+            sentences.push(format!(
+                "Imported trade paid {} minor currency units to route carriers across {} freight {leg_word}.",
+                self.freight_revenue_minor, self.freight_payments
+            ));
+        }
+        if self.route_expansions > 0 {
+            sentences.push(format!(
+                "Carriers invested {} minor currency units to add {} milli-units of monthly capacity across {} routes.",
+                self.route_investment_minor,
+                self.route_capacity_added_milli,
+                self.route_expansions
+            ));
+        }
     }
 
     fn push_conflict_narration(
@@ -781,6 +816,39 @@ mod tests {
         );
         assert!(text.contains("Shortages pressed hardest on Northreach, with 1 rationing actions"));
     }
+    #[test]
+    fn chronicle_reports_route_capacity_investment() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::RouteCapacityExpanded {
+                route: crate::RouteId::new(1),
+                carrier: crate::FirmId::new(1),
+                previous_capacity: crate::QuantityMilli::new(1_000),
+                added_capacity: crate::QuantityMilli::new(100),
+                cost: Money::from_minor_units(12),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert!(
+            chronicle[0]
+                .text
+                .contains("invested 12 minor currency units")
+        );
+        assert!(chronicle[0].text.contains("add 100 milli-units"));
+        assert!(chronicle[0].text.contains("across 1 routes"));
+    }
+
     #[test]
     fn chronicle_reports_import_freight_revenue() {
         let date = SimDate::new(2025, 1).expect("date");

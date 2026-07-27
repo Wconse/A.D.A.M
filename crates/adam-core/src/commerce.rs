@@ -1,8 +1,8 @@
 use crate::{
     DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
     FirmProcurementResult, HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing,
-    MarketOrder, PayrollRecord, ProductionPlan, SimDate, SurvivalRationingOutcome, World,
-    WorldError, clear_market_with_delivery,
+    MarketOrder, PayrollRecord, ProductionPlan, RouteCapacityExpansion, SimDate,
+    SurvivalRationingOutcome, World, WorldError, clear_market_with_delivery,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,6 +13,7 @@ pub struct MonthlyCommercialCycleResult {
     pub demand_intents: Vec<DemandIntent>,
     pub rationing: Vec<SurvivalRationingOutcome>,
     pub clearing: MarketClearing,
+    pub route_expansions: Vec<RouteCapacityExpansion>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +81,12 @@ impl World {
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
+        let constrained_routes = procurement
+            .constrained_routes
+            .union(&clearing.constrained_routes)
+            .copied()
+            .collect();
+        let route_expansions = next.respond_to_route_capacity_pressure(&constrained_routes)?;
         next.update_bilateral_grievances(
             &procurement.unmet,
             &procurement.capacity_limited,
@@ -118,6 +125,7 @@ impl World {
             demand_intents,
             rationing,
             clearing,
+            route_expansions,
         };
         *self = next;
         Ok(result)
@@ -511,6 +519,12 @@ mod tests {
                 [&(CohortId::new(1), GoodId::new(1), NeedTier::Survival)],
             QuantityMilli::new(400)
         );
+        assert_eq!(
+            direct.route_capacity_pressure()[&RouteId::new(1)],
+            1,
+            "a revenue-producing capacity shortfall starts persistent route pressure"
+        );
+        assert!(result.commercial.route_expansions.is_empty());
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
     }

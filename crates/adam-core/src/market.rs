@@ -82,6 +82,7 @@ pub struct MarketClearing {
     pub fills: Vec<MarketFill>,
     pub unmet: BTreeUnmet,
     pub offer_outcomes: Vec<MarketOfferOutcome>,
+    pub(crate) constrained_routes: std::collections::BTreeSet<RouteId>,
 }
 pub type BTreeUnmet = std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli>;
 impl crate::World {
@@ -204,6 +205,7 @@ where
     let mut remaining: Vec<u64> = supply.iter().map(|o| o.quantity.get()).collect();
     let mut fills = Vec::new();
     let mut unmet = BTreeUnmet::new();
+    let mut constrained_routes = std::collections::BTreeSet::new();
     let mut unmet_by_market: std::collections::BTreeMap<(RegionId, GoodId), u64> =
         std::collections::BTreeMap::new();
     for order in orders {
@@ -214,6 +216,7 @@ where
             route_capacity,
             &mut delivery,
             &mut fills,
+            &mut constrained_routes,
         )?;
         if need > 0 {
             unmet.insert(
@@ -251,6 +254,7 @@ where
         fills,
         unmet,
         offer_outcomes,
+        constrained_routes,
     })
 }
 
@@ -265,6 +269,7 @@ fn fill_market_order<F>(
     route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
     delivery: &mut F,
     fills: &mut Vec<MarketFill>,
+    constrained_routes: &mut std::collections::BTreeSet<RouteId>,
 ) -> Result<u64, WorldError>
 where
     F: FnMut(RegionId, RegionId) -> Option<(RouteId, Money)>,
@@ -294,7 +299,13 @@ where
         let route_limit = route.map_or(u64::MAX, |id| {
             route_capacity.get(&id).copied().unwrap_or(u64::MAX)
         });
-        let quantity = need.min(remaining[index]).min(affordable).min(route_limit);
+        let unconstrained = need.min(remaining[index]).min(affordable);
+        if let Some(route_id) = route {
+            if route_limit < unconstrained {
+                constrained_routes.insert(route_id);
+            }
+        }
+        let quantity = unconstrained.min(route_limit);
         if quantity == 0 {
             continue;
         }

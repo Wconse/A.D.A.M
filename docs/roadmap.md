@@ -875,3 +875,26 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
   SIMULATION_VERSION 35 -> 36; seed-1/50-year fingerprint is `6856032423052036241` at 27.6 ms/year.
 - Next gate: use observed carrier revenue, margin, and exhausted route capacity as evidence for a
   bounded, financed route-capacity investment response rather than an artificial expansion rule.
+
+
+### Carrier-funded route-capacity expansion gate (step 050)
+
+- Household and B2B matching now retain a route-specific constrained signal only when the shared
+  route limit cuts an otherwise feasible fill after demand, stock, and affordability are considered.
+  The commercial cycle unions both flows after settlement, so one authoritative response sees the
+  whole month without double counting shared capacity.
+- A route must be constrained and earn positive typed freight revenue for three consecutive months.
+  Its registered carrier may then spend cash equal to twelve months of tariff revenue on a bounded
+  10% capacity increment. Missing revenue clears the streak; insufficient cash preserves capped
+  pressure without mutating cash or capacity. Successful construction clears pressure and emits
+  `RouteCapacityExpanded`. ADR 0098 records the rule and Stage-0 capital-expenditure treatment.
+- Pressure is persisted and fingerprinted, while the route remains the single authoritative capacity
+  location read by every market and freight consumer. Existing commercial/economic commands replay
+  the automatic response. The yearly chronicle aggregates installed capacity and carrier spending.
+- Gates prove pressure and revenue requirements, exact carrier debit, exact capacity growth,
+  insufficient-cash atomicity, typed evidence, command replay, and stable fingerprints. Full
+  workspace validation passes 128 tests. The causal state change advances SIMULATION_VERSION
+  36 -> 37; seed-1/50-year fingerprint is `8785785093042010742` at 27.4 ms/year.
+- Next gate: audit the demo's long-run production collapse and public-debt spiral, then choose a
+  larger causal slice that connects firm exit/recovery, credit, or fiscal default to existing
+  accounting evidence rather than adding isolated surface mechanics.

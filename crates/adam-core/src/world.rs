@@ -690,6 +690,7 @@ pub struct World {
     pub(crate) committed_investments: BTreeMap<FirmId, Money>,
     pub(crate) investment_projects: BTreeMap<ProjectId, InvestmentProject>,
     pub(crate) logistics_routes: BTreeMap<RouteId, LogisticsRoute>,
+    pub(crate) route_capacity_pressure: BTreeMap<RouteId, u8>,
     pub(crate) route_capacity: RouteCapacityLedger,
     pub(crate) freight_capacity: FreightCapacityLedger,
     pub(crate) inventory_shipments: BTreeMap<ShipmentId, InventoryShipment>,
@@ -761,6 +762,7 @@ impl World {
             committed_investments: BTreeMap::new(),
             investment_projects: BTreeMap::new(),
             logistics_routes: BTreeMap::new(),
+            route_capacity_pressure: BTreeMap::new(),
             route_capacity: RouteCapacityLedger::default(),
             freight_capacity: FreightCapacityLedger::default(),
             inventory_shipments: BTreeMap::new(),
@@ -1291,6 +1293,11 @@ impl World {
             hash.write_u16(route.transit_days());
             hash.write_u16(route.reliability_bps());
             hash.write_u32(route.carrier().map_or(0, FirmId::get));
+        }
+        hash.write_u64(self.route_capacity_pressure.len() as u64);
+        for (route, pressure) in &self.route_capacity_pressure {
+            hash.write_u32(route.get());
+            hash.write_u8(*pressure);
         }
         hash.write_u64(self.route_capacity.reserved().len() as u64);
         for (id, quantity) in self.route_capacity.reserved() {
