@@ -6,6 +6,10 @@ All notable project changes are documented here. The format follows Keep a Chang
 
 ### Added
 
+- Firm insolvency administration after prolonged zero-workforce distress, freezing ordinary operations while preserving cash, inventory, and worker claims.
+
+- Evidence-driven owner recapitalization after three consecutive months of wage arrears, preserving worker claims and journaling the transfer.
+- Governed 25% distress downsizing when owners lack liquidity, with terminated workers retaining payable wage claims.
 - Rust workspace foundation with headless `adam-core` and console `adam-cli`.
 - Deterministic clock, typed IDs, RNG streams, event log, and state fingerprint.
 - Architecture, determinism contract, ADRs, quality scripts, and CI.

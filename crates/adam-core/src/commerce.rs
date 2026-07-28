@@ -154,6 +154,7 @@ impl World {
         let mut next = self.clone();
         let completed_date = next.date;
         let payroll = next.execute_monthly_payroll()?;
+        next.execute_observed_firm_distress_response()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
         let household_borrowing = next.execute_monthly_household_coping()?;
         let commercial = next.execute_monthly_commercial_cycle()?;

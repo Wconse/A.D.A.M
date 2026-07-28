@@ -352,6 +352,29 @@ pub enum DomainEvent {
         added_capacity: QuantityMilli,
         cost: Money,
     },
+    /// Ordinary firm operations entered insolvency with an auditable asset-and-claim snapshot.
+    FirmInsolvencyDeclared {
+        firm: FirmId,
+        administrator: ActorId,
+        cash: Money,
+        wage_arrears: Money,
+        inventory: Vec<(GoodId, QuantityMilli)>,
+    },
+    /// Authorized management reduced employment after owners could not finance persistent distress.
+    FirmDownsizedForDistress {
+        firm: FirmId,
+        actor: ActorId,
+        previous_workers: u64,
+        current_workers: u64,
+        wage_arrears: Money,
+    },
+    /// Owner cash transferred into a distressed firm after persistent wage arrears.
+    FirmRecapitalized {
+        firm: FirmId,
+        owner: ActorId,
+        amount: Money,
+        wage_arrears: Money,
+    },
     /// Sovereign debt reduced through an involuntary restructuring after debt
     /// service became unsustainable relative to output and tax revenue.
     PublicDebtRestructured {

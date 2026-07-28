@@ -189,7 +189,10 @@ impl World {
         let mut cohorts = self.cohorts.clone();
         let mut agreements = self.employment_agreements.clone();
         let mut records = Vec::new();
-        for agreement in agreements.values_mut().filter(|a| a.active) {
+        for agreement in agreements
+            .values_mut()
+            .filter(|agreement| agreement.active || agreement.arrears().minor_units() > 0)
+        {
             let current =
                 i128::from(agreement.wage().minor_units()) * i128::from(agreement.workers());
             let current = i64::try_from(current)

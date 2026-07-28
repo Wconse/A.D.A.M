@@ -9,10 +9,12 @@ pub mod command;
 pub mod commerce;
 pub mod coping;
 pub mod demand;
+pub mod distress;
 pub mod event;
 pub mod freight;
 pub mod health;
 pub mod ids;
+pub mod insolvency;
 pub mod investment;
 pub mod labor;
 pub mod logistics;
@@ -48,6 +50,7 @@ pub use coping::HouseholdSurvivalBorrowing;
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
+pub use distress::{FirmDistressAction, FirmDistressDownsizing, FirmRecapitalization};
 pub use event::{DomainEvent, EventEnvelope, EventLog};
 pub use freight::{
     ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics,
@@ -58,6 +61,7 @@ pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
     ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
 };
+pub use insolvency::FirmInsolvency;
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use labor::{EmploymentAgreement, PayrollRecord};
 pub use logistics::{
@@ -95,4 +99,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 38;
+pub const SIMULATION_VERSION: u32 = 41;

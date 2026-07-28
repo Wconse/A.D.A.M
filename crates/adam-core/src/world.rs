@@ -677,6 +677,8 @@ pub struct World {
     pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
+    pub(crate) firm_distress_months: BTreeMap<FirmId, u8>,
+    pub(crate) firm_insolvencies: BTreeMap<FirmId, crate::FirmInsolvency>,
     pub(crate) monthly_firm_procurement_purchases:
         BTreeMap<(FirmId, GoodId), (crate::QuantityMilli, Money)>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
@@ -750,6 +752,8 @@ impl World {
             firm_production_targets: BTreeMap::new(),
             firm_monthly_accounts: BTreeMap::new(),
             firm_expectations: BTreeMap::new(),
+            firm_distress_months: BTreeMap::new(),
+            firm_insolvencies: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
             monthly_firm_procurement_purchases: BTreeMap::new(),
@@ -1454,6 +1458,25 @@ impl World {
     }
 
     fn write_production_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.firm_insolvencies.len() as u64);
+        for (firm, insolvency) in &self.firm_insolvencies {
+            hash.write_u32(firm.get());
+            hash.write_u32(insolvency.administrator().get());
+            hash.write_i32(insolvency.declared_on().year());
+            hash.write_u16(insolvency.declared_on().day_of_year());
+            hash.write_i64(insolvency.cash_at_declaration().minor_units());
+            hash.write_i64(insolvency.wage_arrears().minor_units());
+            hash.write_u64(insolvency.inventories_at_declaration().len() as u64);
+            for (good, quantity) in insolvency.inventories_at_declaration() {
+                hash.write_u32(good.get());
+                hash.write_u64(quantity.get());
+            }
+        }
+        hash.write_u64(self.firm_distress_months.len() as u64);
+        for (firm, months) in &self.firm_distress_months {
+            hash.write_u32(firm.get());
+            hash.write_u8(*months);
+        }
         hash.write_u64(self.firm_production_targets.len() as u64);
         for (firm, batches) in &self.firm_production_targets {
             hash.write_u32(firm.get());

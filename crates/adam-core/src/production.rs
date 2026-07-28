@@ -419,6 +419,15 @@ impl World {
             .values()
             .map(|firm| {
                 let recipe = &self.production_recipes[&firm.recipe()];
+                if self.is_firm_insolvent(firm.id()) {
+                    return Ok(ProductionPlan {
+                        firm: firm.id(),
+                        batches: 0,
+                        output_good: recipe.output_good(),
+                        output: QuantityMilli::default(),
+                        limiting_factor: "insolvency",
+                    });
+                }
                 let contracted_workers = self
                     .employment_agreements
                     .values()

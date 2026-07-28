@@ -92,6 +92,7 @@ impl crate::World {
     pub fn plan_firm_market_offers(&self) -> Result<Vec<FirmMarketOfferPlan>, WorldError> {
         self.firms
             .values()
+            .filter(|firm| !self.is_firm_insolvent(firm.id()))
             .filter_map(|firm| {
                 self.firm_policies
                     .get(&firm.id())

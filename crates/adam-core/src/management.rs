@@ -34,6 +34,7 @@ impl World {
         let managed: Vec<_> = self
             .firms
             .keys()
+            .filter(|firm| !self.is_firm_insolvent(**firm))
             .filter_map(|firm| {
                 let observed = self
                     .firm_operating_history
@@ -123,7 +124,7 @@ impl World {
         advisory.clamp(floor, previous)
     }
 
-    fn operations_actor(&self, firm: FirmId) -> Option<ActorId> {
+    pub(crate) fn operations_actor(&self, firm: FirmId) -> Option<ActorId> {
         for role in [
             CorporateRole::OperationsManager,
             CorporateRole::ChiefExecutive,

@@ -919,3 +919,56 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: introduce evidence-driven firm distress and owner/creditor recapitalization. Repeated
   wage arrears and exhausted cash should force a governed choice among fresh owner capital,
   downsizing, insolvency, or closure, while preserving inventories, worker claims, and replayability.
+
+
+### Owner-funded firm recapitalization gate (step 052)
+
+- Persistent payroll failure now creates authoritative firm distress: each post-payroll month with
+  outstanding wage arrears advances a canonical per-firm counter, while a clean payroll clears it.
+- After three consecutive distressed payrolls, the largest economic owner injects personal cash
+  up to the smaller of available owner liquidity and total worker claims. Equal ownership resolves
+  by stable actor id. The transfer debits owner cash and credits firm cash without cancelling wage
+  arrears, so workers remain owed and receive the rescue only through ordinary future payroll.
+- Missing owner liquidity creates no money and keeps distress at the threshold for reconsideration.
+  `FirmRecapitalized` journals the owner, firm, amount, and preserved arrears; the yearly chronicle
+  reports aggregate recapitalizations. ADR 0100 records the rule.
+- Gate coverage proves the exact three-month trigger, bounded owner debit, firm credit, preserved
+  worker claim, distress reset, typed evidence, and deterministic replay. The full workspace test
+  suite passes 131 tests. The new fingerprinted distress state advances SIMULATION_VERSION 38 -> 39;
+  seed-1/50-year fingerprint is `10583892862554856218`, with identical self-comparison and 42.0 ms/year.
+- Deliberate limits: recapitalization is automatic once evidence and liquidity bind; there is no
+  dilution, board vote, creditor hierarchy, or closure yet. Next gate: convert unrecoverable distress
+  into governed downsizing and eventual insolvency/closure while preserving inventories and worker
+  claims, rather than letting cashless firms persist forever.
+
+
+### Governed distress downsizing gate (step 053)
+
+- A firm that reaches the three-month wage-arrears threshold without owner liquidity now follows a
+  second causal branch instead of remaining permanently overstaffed. Its authorized operations actor
+  reduces each active employment agreement by 25%, rounded up to at least one worker. The bounded
+  response can repeat while distress persists, trading productive capacity for a lower future wage bill.
+- Downsizing uses the ordinary employment transition, so production labor, cohort employment, and the
+  journal stay coherent. `FirmDownsizedForDistress` records the responsible actor, workers before and
+  after, and outstanding claims; the yearly chronicle reports workers released by distressed firms.
+- Fixed a prerequisite accounting gap: inactive employment agreements with arrears now remain in
+  payroll settlement. Terminated workers accrue no new wages but retain their existing claim, which a
+  late recapitalization can fund and ordinary payroll can subsequently pay. ADR 0101 records the rule.
+- Gate coverage proves the cashless branch, exact bounded reduction, preserved post-layoff arrears, late
+  owner rescue, eventual worker payment, typed chronicle evidence, and deterministic monthly replay.
+  The workspace now passes 132 tests. The rule change advances SIMULATION_VERSION 39 -> 40; the
+  seed-1/50-year fingerprint is `14265164837894074090`, self-comparison is identical, and runtime is
+  40.8 ms/year.
+- Deliberate limit: a zero-workforce firm still owns its cash, inventories, capacity, contracts, and
+  claims. Next gate: explicit insolvency after prolonged zero-workforce distress, with frozen operations,
+  an auditable asset-and-claim snapshot, and a recovery path that cannot silently destroy inventories
+  or unpaid wages.
+
+
+### Firm insolvency administration gate (step 054)
+
+- Six consecutive months of wage-arrears distress now declare a zero-workforce firm insolvent when no owner rescue is available. The ordinary operations actor becomes administrator.
+- Declaration preserves and fingerprints an immutable cash, inventory, and wage-claim snapshot. Insolvent firms cannot produce, offer goods, procure inputs, change autonomous targets, or finance route expansion; estate assets and terminated-worker claims remain intact.
+- `FirmInsolvencyDeclared` makes the transition auditable, and the chronicle reports preserved claims and inventory. ADR 0102 records the boundary.
+- Full format, check, Clippy, test, and docs gate passes with 132 workspace tests. SIMULATION_VERSION advances 40 -> 41. The seed-1 50-year fingerprint is `6714888034744335345`; self-comparison is identical at 42.0 ms/year. The demo reaches one insolvency in 2041 after six downsizing actions, preserving 36,432 minor units of unpaid wages.
+- Next gate: governed reorganization. An administrator should be able to reopen only after worker claims are funded and a viable staffing/production plan exists; otherwise a later creditor-priority and asset-sale gate should liquidate transparently.

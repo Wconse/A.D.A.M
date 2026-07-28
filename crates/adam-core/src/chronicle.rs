@@ -71,6 +71,13 @@ struct YearSummary {
     route_expansions: u64,
     route_capacity_added_milli: u128,
     route_investment_minor: i128,
+    firm_recapitalizations: u64,
+    firm_recapitalization_minor: i128,
+    firm_distress_downsizings: u64,
+    distress_workers_released: u64,
+    firm_insolvencies: u64,
+    insolvent_wage_claims_minor: i128,
+    insolvent_inventory_milli: u128,
 
     production_milli: u128,
     traded_milli: u128,
@@ -103,6 +110,7 @@ impl YearSummary {
         if self.observe_procurement_event(event)
             || self.observe_freight_event(event)
             || self.observe_route_expansion_event(event)
+            || self.observe_firm_distress_event(event)
             || self.observe_fiscal_event(event)
         {
             return;
@@ -183,6 +191,41 @@ impl YearSummary {
             DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
             _ => {}
         }
+    }
+
+    fn observe_firm_distress_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::FirmRecapitalized { amount, .. } => {
+                self.firm_recapitalizations = self.firm_recapitalizations.saturating_add(1);
+                self.firm_recapitalization_minor += i128::from(amount.minor_units());
+            }
+            DomainEvent::FirmDownsizedForDistress {
+                previous_workers,
+                current_workers,
+                ..
+            } => {
+                self.firm_distress_downsizings = self.firm_distress_downsizings.saturating_add(1);
+                self.distress_workers_released = self
+                    .distress_workers_released
+                    .saturating_add(previous_workers.saturating_sub(*current_workers));
+            }
+            DomainEvent::FirmInsolvencyDeclared {
+                wage_arrears,
+                inventory,
+                ..
+            } => {
+                self.firm_insolvencies = self.firm_insolvencies.saturating_add(1);
+                self.insolvent_wage_claims_minor += i128::from(wage_arrears.minor_units());
+                self.insolvent_inventory_milli = self.insolvent_inventory_milli.saturating_add(
+                    inventory
+                        .iter()
+                        .map(|(_, quantity)| u128::from(quantity.get()))
+                        .sum(),
+                );
+            }
+            _ => return false,
+        }
+        true
     }
 
     fn observe_fiscal_event(&mut self, event: &DomainEvent) -> bool {
@@ -326,6 +369,7 @@ impl YearSummary {
         self.push_conflict_narration(&mut sentences, country_names);
         self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
         self.push_transport_narration(&mut sentences);
+        self.push_firm_distress_narration(&mut sentences);
         if self.relief_minor > 0 {
             sentences.push(format!(
                 "Political offices transferred {} minor currency units in emergency relief, backed by {} of new public debt.",
@@ -381,6 +425,34 @@ impl YearSummary {
             importance: self.importance(),
             text: sentences.join(" "),
         })
+    }
+
+    fn push_firm_distress_narration(&self, sentences: &mut Vec<String>) {
+        if self.firm_recapitalizations > 0 {
+            sentences.push(format!(
+                "Owners injected {} minor currency units into {} firms after persistent wage arrears.",
+                self.firm_recapitalization_minor, self.firm_recapitalizations
+            ));
+        }
+        if self.firm_distress_downsizings > 0 {
+            sentences.push(format!(
+                "Cashless firms released {} workers across {} distress downsizings while preserving unpaid wage claims.",
+                self.distress_workers_released, self.firm_distress_downsizings
+            ));
+        }
+        if self.firm_insolvencies > 0 {
+            let firm_word = if self.firm_insolvencies == 1 {
+                "firm"
+            } else {
+                "firms"
+            };
+            sentences.push(format!(
+                "{} {firm_word} entered insolvency administration with {} minor currency units of unpaid wages and {} milli-units of inventory preserved for resolution.",
+                self.firm_insolvencies,
+                self.insolvent_wage_claims_minor,
+                self.insolvent_inventory_milli
+            ));
+        }
     }
 
     fn push_debt_restructuring_narration(&self, sentences: &mut Vec<String>) {
@@ -535,8 +607,12 @@ impl YearSummary {
             85
         } else if self.rationing_actions > 0 {
             80
+        } else if self.firm_insolvencies > 0 {
+            78
         } else if !self.procurement_shortfalls.is_empty() {
             75
+        } else if self.firm_distress_downsizings > 0 {
+            72
         } else if self.relief_debt_minor > 0 || self.relief_minor > 0 {
             70
         } else if self.household_borrowing_minor > 0 {

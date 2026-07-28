@@ -83,6 +83,9 @@ impl World {
         let carrier = route.carrier().ok_or(WorldError::InvalidLogistics(
             "route expansion requires a carrier",
         ))?;
+        if self.is_firm_insolvent(carrier) {
+            return Ok(None);
+        }
         let previous = route.capacity();
         let added_raw = previous.get().div_ceil(EXPANSION_SHARE_DIVISOR).max(1);
         let added = QuantityMilli::new(added_raw);
