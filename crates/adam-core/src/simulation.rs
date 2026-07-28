@@ -14,6 +14,11 @@ const DEBT_BRAKE_RATIO_DIVISOR: i128 = 10;
 const DEBT_BRAKE_MAX_BPS: i128 = 600;
 const SPENDING_FLOOR_BPS: i128 = 1_200;
 const DEBT_INTEREST_BPS: i128 = 300;
+const DEBT_RESTRUCTURING_OUTPUT_MULTIPLE: i128 = 2;
+const DEBT_RESTRUCTURING_INTEREST_REVENUE_MULTIPLE: i128 = 3;
+const DEBT_RESTRUCTURING_HAIRCUT_BPS: i128 = 4_000;
+const DEBT_RESTRUCTURING_LEGITIMACY_SHOCK: i32 = -800;
+const DEBT_RESTRUCTURING_COHESION_SHOCK: i32 = -500;
 
 #[derive(Clone, Debug)]
 struct RegionUpdate {
@@ -44,6 +49,8 @@ struct CountryUpdate {
     debt: Money,
     opening_debt: Money,
     interest: Money,
+    debt_before_restructuring: Money,
+    principal_written_off: Money,
     legitimacy: BasisPoints,
     cohesion: BasisPoints,
 }
@@ -477,6 +484,57 @@ impl World {
         );
     }
 
+    fn apply_country_update(&mut self, close_date: crate::SimDate, update: &CountryUpdate) {
+        let country = self
+            .countries
+            .get_mut(&update.id)
+            .expect("planned country exists");
+        let indicators = country.indicators_mut();
+        indicators.set_treasury(update.treasury);
+        indicators.set_public_debt(update.debt);
+        indicators.set_legitimacy(update.legitimacy);
+        indicators.set_elite_cohesion(update.cohesion);
+        if update.interest.minor_units() > 0 {
+            self.events.append(
+                close_date,
+                DomainEvent::PublicDebtInterestCharged {
+                    country: update.id,
+                    opening_debt: update.opening_debt,
+                    interest: update.interest,
+                },
+            );
+        }
+        if update.principal_written_off.minor_units() > 0 {
+            self.events.append(
+                close_date,
+                DomainEvent::PublicDebtRestructured {
+                    country: update.id,
+                    debt_before: update.debt_before_restructuring,
+                    debt_after: update.debt,
+                    principal_written_off: update.principal_written_off,
+                },
+            );
+        }
+        self.events.append(
+            close_date,
+            DomainEvent::CountryFiscalYearClosed {
+                country: update.id,
+                revenue: update.revenue,
+                spending: update.spending,
+                treasury: update.treasury,
+                debt: update.debt,
+            },
+        );
+        self.events.append(
+            close_date,
+            DomainEvent::CountryPoliticsChanged {
+                country: update.id,
+                legitimacy: update.legitimacy,
+                elite_cohesion: update.cohesion,
+            },
+        );
+    }
+
     fn apply_year(
         &mut self,
         simulated_year: i32,
@@ -533,43 +591,7 @@ impl World {
             }
         }
         for update in country_updates {
-            let country = self
-                .countries
-                .get_mut(&update.id)
-                .expect("planned country exists");
-            let indicators = country.indicators_mut();
-            indicators.set_treasury(update.treasury);
-            indicators.set_public_debt(update.debt);
-            indicators.set_legitimacy(update.legitimacy);
-            indicators.set_elite_cohesion(update.cohesion);
-            if update.interest.minor_units() > 0 {
-                self.events.append(
-                    close_date,
-                    DomainEvent::PublicDebtInterestCharged {
-                        country: update.id,
-                        opening_debt: update.opening_debt,
-                        interest: update.interest,
-                    },
-                );
-            }
-            self.events.append(
-                close_date,
-                DomainEvent::CountryFiscalYearClosed {
-                    country: update.id,
-                    revenue: update.revenue,
-                    spending: update.spending,
-                    treasury: update.treasury,
-                    debt: update.debt,
-                },
-            );
-            self.events.append(
-                close_date,
-                DomainEvent::CountryPoliticsChanged {
-                    country: update.id,
-                    legitimacy: update.legitimacy,
-                    elite_cohesion: update.cohesion,
-                },
-            );
+            self.apply_country_update(close_date, update);
         }
         self.date = close_date;
         self.last_annual_closure_year = Some(simulated_year);
@@ -661,7 +683,15 @@ fn plan_material_country(
         "fiscal spending",
     )?;
     let balance = i128::from(revenue.minor_units()) - i128::from(spending.minor_units());
-    let (treasury, debt) = close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
+    let (treasury, debt_before_restructuring) =
+        close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
+    let interest_money = money_from_i128(interest, "public debt interest")?;
+    let (debt, principal_written_off) = plan_public_debt_restructuring(
+        debt_before_restructuring,
+        new_output,
+        revenue,
+        interest_money,
+    )?;
     let growth_ppm = if old_output == 0 {
         0
     } else {
@@ -671,12 +701,16 @@ fn plan_material_country(
     let mut random = seed.stream_for(POLITICS_DOMAIN, id.get(), year);
     let political_shock = centered(&mut random, 90);
     let growth_signal = i32::try_from(growth_ppm / 250).expect("growth signal fits i32");
-    let legitimacy = indicators
+    let mut legitimacy = indicators
         .legitimacy()
         .shifted(growth_signal + fiscal_signal + political_shock);
-    let cohesion = indicators
+    let mut cohesion = indicators
         .elite_cohesion()
         .shifted(fiscal_signal / 2 + political_shock / 3);
+    if principal_written_off.minor_units() > 0 {
+        legitimacy = legitimacy.shifted(DEBT_RESTRUCTURING_LEGITIMACY_SHOCK);
+        cohesion = cohesion.shifted(DEBT_RESTRUCTURING_COHESION_SHOCK);
+    }
     Ok(CountryUpdate {
         id,
         revenue,
@@ -684,7 +718,9 @@ fn plan_material_country(
         treasury,
         debt,
         opening_debt: indicators.public_debt(),
-        interest: money_from_i128(interest, "public debt interest")?,
+        interest: interest_money,
+        debt_before_restructuring,
+        principal_written_off,
         legitimacy,
         cohesion,
     })
@@ -719,7 +755,15 @@ fn plan_country(
         "fiscal spending",
     )?;
     let balance = i128::from(revenue.minor_units()) - i128::from(spending.minor_units());
-    let (treasury, debt) = close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
+    let (treasury, debt_before_restructuring) =
+        close_budget(indicators.treasury(), indicators.public_debt(), balance)?;
+    let interest_money = money_from_i128(interest, "public debt interest")?;
+    let (debt, principal_written_off) = plan_public_debt_restructuring(
+        debt_before_restructuring,
+        new_output,
+        revenue,
+        interest_money,
+    )?;
     let growth_ppm = if old_output == 0 {
         0
     } else {
@@ -729,12 +773,16 @@ fn plan_country(
     let mut random = seed.stream_for(POLITICS_DOMAIN, id.get(), year);
     let political_shock = centered(&mut random, 90);
     let growth_signal = i32::try_from(growth_ppm / 250).expect("growth signal fits i32");
-    let legitimacy = indicators
+    let mut legitimacy = indicators
         .legitimacy()
         .shifted(growth_signal + fiscal_signal + political_shock);
-    let cohesion = indicators
+    let mut cohesion = indicators
         .elite_cohesion()
         .shifted(fiscal_signal / 2 + political_shock / 3);
+    if principal_written_off.minor_units() > 0 {
+        legitimacy = legitimacy.shifted(DEBT_RESTRUCTURING_LEGITIMACY_SHOCK);
+        cohesion = cohesion.shifted(DEBT_RESTRUCTURING_COHESION_SHOCK);
+    }
     Ok(CountryUpdate {
         id,
         revenue,
@@ -742,10 +790,43 @@ fn plan_country(
         treasury,
         debt,
         opening_debt: indicators.public_debt(),
-        interest: money_from_i128(interest, "public debt interest")?,
+        interest: interest_money,
+        debt_before_restructuring,
+        principal_written_off,
         legitimacy,
         cohesion,
     })
+}
+
+fn plan_public_debt_restructuring(
+    debt: Money,
+    annual_output: i128,
+    revenue: Money,
+    interest: Money,
+) -> Result<(Money, Money), WorldError> {
+    let debt_value = i128::from(debt.minor_units()).max(0);
+    let output_value = annual_output.max(0);
+    let revenue_value = i128::from(revenue.minor_units()).max(0);
+    let interest_value = i128::from(interest.minor_units()).max(0);
+    let debt_exceeds_capacity =
+        debt_value > output_value.saturating_mul(DEBT_RESTRUCTURING_OUTPUT_MULTIPLE);
+    let service_exceeds_revenue = interest_value
+        .saturating_mul(DEBT_RESTRUCTURING_INTEREST_REVENUE_MULTIPLE)
+        >= revenue_value.max(1);
+    if !debt_exceeds_capacity || !service_exceeds_revenue {
+        return Ok((debt, Money::default()));
+    }
+    let written_off = debt_value
+        .checked_mul(DEBT_RESTRUCTURING_HAIRCUT_BPS)
+        .ok_or(WorldError::ArithmeticOverflow("public debt restructuring"))?
+        / 10_000;
+    let remaining = debt_value
+        .checked_sub(written_off)
+        .ok_or(WorldError::ArithmeticOverflow("public debt restructuring"))?;
+    Ok((
+        money_from_i128(remaining, "restructured public debt")?,
+        money_from_i128(written_off, "public debt principal written off")?,
+    ))
 }
 
 fn close_budget(treasury: Money, debt: Money, balance: i128) -> Result<(Money, Money), WorldError> {
@@ -1077,5 +1158,92 @@ mod tests {
         let (indebted_revenue, indebted_spending) = fiscal(&indebted);
         assert_eq!(lean_revenue.minor_units(), indebted_revenue.minor_units());
         assert!(indebted_spending.minor_units() < lean_spending.minor_units());
+    }
+
+    #[test]
+    fn unsustainable_public_debt_is_restructured_with_a_political_cost() {
+        let build = |debt: i64| {
+            let indicators = CountryIndicators::new(
+                Money::default(),
+                Money::from_minor_units(debt),
+                BasisPoints::new(7_000).expect("valid legitimacy"),
+                BasisPoints::new(7_000).expect("valid cohesion"),
+            );
+            let mut world = World::new(
+                WorldSeed::new(47),
+                SimDate::new(2025, 1).expect("valid date"),
+            );
+            world
+                .register_country(
+                    Country::new(CountryId::new(1), "A")
+                        .expect("country")
+                        .with_indicators(indicators),
+                )
+                .expect("country");
+            world
+                .register_region(
+                    Region::new(
+                        RegionId::new(1),
+                        CountryId::new(1),
+                        "Capital",
+                        Population::new(1_000_000),
+                        Money::from_minor_units(4_000_000_000_000),
+                    )
+                    .expect("region"),
+                )
+                .expect("region");
+            world
+        };
+        let mut crisis = build(15_000_000_000_000);
+        let mut sustainable = build(100_000_000_000);
+
+        crisis.advance_one_year().expect("crisis year closes");
+        sustainable
+            .advance_one_year()
+            .expect("sustainable year closes");
+
+        let restructuring = crisis
+            .events()
+            .events()
+            .iter()
+            .find_map(|envelope| match envelope.event() {
+                DomainEvent::PublicDebtRestructured {
+                    debt_before,
+                    debt_after,
+                    principal_written_off,
+                    ..
+                } => Some((*debt_before, *debt_after, *principal_written_off)),
+                _ => None,
+            })
+            .expect("restructuring event");
+        assert_eq!(
+            restructuring.0.minor_units() - restructuring.2.minor_units(),
+            restructuring.1.minor_units()
+        );
+        assert_eq!(
+            i128::from(restructuring.2.minor_units()) * 10_000,
+            i128::from(restructuring.0.minor_units()) * DEBT_RESTRUCTURING_HAIRCUT_BPS
+        );
+        assert_eq!(
+            crisis.countries()[&CountryId::new(1)]
+                .indicators()
+                .public_debt(),
+            restructuring.1
+        );
+        assert!(
+            crisis.countries()[&CountryId::new(1)]
+                .indicators()
+                .legitimacy()
+                < sustainable.countries()[&CountryId::new(1)]
+                    .indicators()
+                    .legitimacy()
+        );
+        assert!(
+            !sustainable
+                .events()
+                .events()
+                .iter()
+                .any(|event| matches!(event.event(), DomainEvent::PublicDebtRestructured { .. }))
+        );
     }
 }

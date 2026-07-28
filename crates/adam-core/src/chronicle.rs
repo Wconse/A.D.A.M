@@ -89,6 +89,8 @@ struct YearSummary {
     closed_countries: u64,
     debt_interest_minor: i128,
     indebted_countries: u64,
+    debt_restructuring_count: u64,
+    debt_principal_written_off_minor: i128,
     measured_regions: u64,
     final_consumption_minor: i128,
     inventory_change_minor: i128,
@@ -101,6 +103,7 @@ impl YearSummary {
         if self.observe_procurement_event(event)
             || self.observe_freight_event(event)
             || self.observe_route_expansion_event(event)
+            || self.observe_fiscal_event(event)
         {
             return;
         }
@@ -177,9 +180,24 @@ impl YearSummary {
                 self.inventory_change_minor += i128::from(inventory_change.minor_units());
                 self.measured_output_minor += i128::from(annual_output.minor_units());
             }
+            DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
+            _ => {}
+        }
+    }
+
+    fn observe_fiscal_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
             DomainEvent::PublicDebtInterestCharged { interest, .. } => {
                 self.indebted_countries += 1;
                 self.debt_interest_minor += i128::from(interest.minor_units());
+            }
+            DomainEvent::PublicDebtRestructured {
+                principal_written_off,
+                ..
+            } => {
+                self.debt_restructuring_count += 1;
+                self.debt_principal_written_off_minor +=
+                    i128::from(principal_written_off.minor_units());
             }
             DomainEvent::CountryFiscalYearClosed {
                 revenue,
@@ -193,9 +211,9 @@ impl YearSummary {
                 self.closed_countries += 1;
             }
             DomainEvent::CountryPoliticsChanged { .. } => self.politics_changes += 1,
-            DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     fn observe_route_expansion_event(&mut self, event: &DomainEvent) -> bool {
@@ -335,6 +353,7 @@ impl YearSummary {
                 self.debt_interest_minor, self.indebted_countries
             ));
         }
+        self.push_debt_restructuring_narration(&mut sentences);
         if self.closed_countries > 0 {
             sentences.push(format!(
                 "Treasuries collected {} and spent {} minor currency units, closing the year with {} of public debt across {} countries.",
@@ -362,6 +381,21 @@ impl YearSummary {
             importance: self.importance(),
             text: sentences.join(" "),
         })
+    }
+
+    fn push_debt_restructuring_narration(&self, sentences: &mut Vec<String>) {
+        if self.debt_restructuring_count == 0 {
+            return;
+        }
+        let restructuring_word = if self.debt_restructuring_count == 1 {
+            "restructuring"
+        } else {
+            "restructurings"
+        };
+        sentences.push(format!(
+            "Sovereign debt crises forced {} {restructuring_word}, writing off {} minor currency units of principal at a political cost.",
+            self.debt_restructuring_count, self.debt_principal_written_off_minor
+        ));
     }
 
     fn push_transport_narration(&self, sentences: &mut Vec<String>) {
@@ -495,6 +529,8 @@ impl YearSummary {
             100
         } else if self.minimum_survival_bps.is_some_and(|value| value < 5_000) {
             90
+        } else if self.debt_restructuring_count > 0 {
+            88
         } else if !self.hostility_changes.is_empty() {
             85
         } else if self.rationing_actions > 0 {
@@ -885,5 +921,34 @@ mod tests {
         assert_eq!(chronicle.len(), 1);
         assert!(chronicle[0].text.contains("paid 10 minor currency units"));
         assert!(chronicle[0].text.contains("across 2 freight legs"));
+    }
+
+    #[test]
+    fn chronicle_reports_sovereign_debt_restructuring() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::PublicDebtRestructured {
+                country: CountryId::new(1),
+                debt_before: Money::from_minor_units(1_000),
+                debt_after: Money::from_minor_units(600),
+                principal_written_off: Money::from_minor_units(400),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 88);
+        assert!(chronicle[0].text.contains("1 restructuring"));
+        assert!(chronicle[0].text.contains("writing off 400"));
+        assert!(chronicle[0].text.contains("political cost"));
     }
 }

@@ -352,6 +352,14 @@ pub enum DomainEvent {
         added_capacity: QuantityMilli,
         cost: Money,
     },
+    /// Sovereign debt reduced through an involuntary restructuring after debt
+    /// service became unsustainable relative to output and tax revenue.
+    PublicDebtRestructured {
+        country: CountryId,
+        debt_before: Money,
+        debt_after: Money,
+        principal_written_off: Money,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

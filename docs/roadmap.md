@@ -898,3 +898,24 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Next gate: audit the demo's long-run production collapse and public-debt spiral, then choose a
   larger causal slice that connects firm exit/recovery, credit, or fiscal default to existing
   accounting evidence rather than adding isolated surface mechanics.
+
+### Sovereign debt restructuring gate (step 051)
+
+- A 50-year seed-1 audit confirmed the fiscal failure mode: after the spending floor bound, Arcadia's
+  debt service kept compounding while debt remained an inert stock with no terminal institutional
+  event. The audit selected fiscal default before adding new surface systems.
+- Annual closure now restructures public debt only when closing debt exceeds twice measured annual
+  output and annual interest reaches at least one third of realized tax revenue. The settlement
+  writes off 40% of principal, then applies an 800-bp legitimacy shock and a 500-bp elite-cohesion
+  shock. This creates a real recovery-versus-instability tradeoff rather than free debt deletion.
+- `PublicDebtRestructured` records debt before and after plus principal written off; the chronicle
+  narrates the crisis and gives it importance 88. ADR 0099 records the Stage-0 aggregate-creditor
+  approximation and the path toward explicit bonds, maturities, holders, and negotiated defaults.
+- Gate coverage proves the exact haircut, authoritative closing debt, political cost, non-trigger in
+  a sustainable twin, and chronicle narration. The full format/check/Clippy/test/docs gate passes
+  with 130 tests. The rule change advances SIMULATION_VERSION 37 -> 38. In the seed-1 release run,
+  Arcadia restructures in 2070 and writes off 133,851 minor units; the new 50-year fingerprint is
+  `18077342798678252871`, self-comparison is identical, and runtime is 34.5 ms/year.
+- Next gate: introduce evidence-driven firm distress and owner/creditor recapitalization. Repeated
+  wage arrears and exhausted cash should force a governed choice among fresh owner capital,
+  downsizing, insolvency, or closure, while preserving inventories, worker claims, and replayability.
