@@ -61,6 +61,12 @@ impl EmploymentAgreement {
         self.workers = workers;
         self.active = workers > 0;
     }
+
+    pub(crate) fn settle_arrears(&mut self) -> Money {
+        let settled = self.arrears;
+        self.arrears = Money::default();
+        settled
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PayrollRecord {
@@ -129,6 +135,11 @@ impl World {
         workers: u64,
     ) -> Result<(), WorldError> {
         let key = (firm, cohort);
+        if workers > 0 && self.is_firm_insolvent(firm) {
+            return Err(WorldError::InvalidFirmReorganization(
+                "insolvent employment can resume only through an approved reorganization",
+            ));
+        }
         let definition = self
             .firms()
             .get(&firm)

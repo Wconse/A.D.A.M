@@ -256,9 +256,9 @@ mod tests {
     use crate::{
         Actor, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget, Country,
         CountryId, DemandBasis, EducationLevel, EmploymentAgreement, EmploymentStatus, Firm,
-        FirmPolicy, Good, GoodId, HouseholdCohort, HouseholdType, NeedProfileId, NeedTier,
-        OwnershipStake, Population, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId,
-        SimDate, WorldSeed,
+        FirmPolicy, FirmReorganizationPlan, Good, GoodId, HouseholdCohort, HouseholdType,
+        NeedProfileId, NeedTier, OwnershipStake, Population, ProductionRecipe, QuantityMilli,
+        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -585,6 +585,122 @@ mod tests {
         assert!(world.chronicle().iter().any(|entry| {
             entry.text.contains(
                 "1 firm entered insolvency administration with 300 minor currency units of unpaid wages and 2500 milli-units of inventory preserved",
+            )
+        }));
+    }
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn funded_reorganization_pays_claims_and_reopens_through_command_boundary() {
+        let mut world = distressed_world();
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        assert!(world.is_firm_insolvent(FirmId::new(1)));
+        assert!(matches!(
+            world.set_firm_production_target(ActorId::new(1), FirmId::new(1), 1),
+            Err(WorldError::InvalidFirmReorganization(_))
+        ));
+        assert!(matches!(
+            world.change_employment_workers(FirmId::new(1), CohortId::new(1), 1),
+            Err(WorldError::InvalidFirmReorganization(_))
+        ));
+
+        world
+            .actor_cash
+            .insert(ActorId::new(1), Money::from_minor_units(500));
+        let plan = FirmReorganizationPlan {
+            firm: FirmId::new(1),
+            administrator: ActorId::new(1),
+            sponsor: ActorId::new(1),
+            contribution: Money::from_minor_units(400),
+            staffing: vec![(CohortId::new(1), 1)],
+            production_target: 1,
+        };
+        let mut underfunded = world.clone();
+        let mut bad_plan = plan.clone();
+        bad_plan.contribution = Money::from_minor_units(399);
+        let before = underfunded.clone();
+        assert!(matches!(
+            underfunded.reorganize_firm(&bad_plan),
+            Err(WorldError::InvalidFirmReorganization(_))
+        ));
+        assert_eq!(underfunded, before);
+
+        let mut replayed = world.clone();
+        let result = world.reorganize_firm(&plan).expect("reorganization");
+        WorldCommand::ReorganizeFirm(plan)
+            .apply(&mut replayed)
+            .expect("replayed reorganization");
+
+        assert_eq!(result.claims_paid, Money::from_minor_units(300));
+        assert_eq!(result.cash_reserve, Money::from_minor_units(100));
+        assert_eq!(result.workers, 1);
+        assert!(!world.is_firm_insolvent(FirmId::new(1)));
+        assert_eq!(
+            world.firms()[&FirmId::new(1)].cash(),
+            Money::from_minor_units(100)
+        );
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(1)],
+            Money::from_minor_units(100)
+        );
+        assert_eq!(
+            world.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(300)
+        );
+        assert_eq!(
+            world.employment_agreements()[&(FirmId::new(1), CohortId::new(1))].workers(),
+            1
+        );
+        assert_eq!(world.firm_production_targets()[&FirmId::new(1)], 1);
+        assert_eq!(world, replayed);
+        assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(matches!(
+            world.events().events().last().map(crate::EventEnvelope::event),
+            Some(DomainEvent::FirmReorganized {
+                firm,
+                claims_paid,
+                workers,
+                production_target,
+                cash_reserve,
+                ..
+            }) if *firm == FirmId::new(1)
+                && *claims_paid == Money::from_minor_units(300)
+                && *workers == 1
+                && *production_target == 1
+                && *cash_reserve == Money::from_minor_units(100)
+        ));
+        assert_eq!(
+            world
+                .plan_firm_market_offers()
+                .expect("reopened offers")
+                .len(),
+            1
+        );
+        assert_eq!(
+            world
+                .plan_monthly_production()
+                .expect("reopened production")[0]
+                .batches(),
+            1
+        );
+        world.events.append(
+            world.date(),
+            DomainEvent::EconomicYearCompleted {
+                closed_year: world.date().year(),
+                monthly_cycles: 12,
+            },
+        );
+        assert!(world.chronicle().iter().any(|entry| {
+            entry.text.contains(
+                "1 firm left insolvency after owners contributed 400 minor currency units, paid 300 in worker claims, and funded 1 returning workers",
             )
         }));
     }

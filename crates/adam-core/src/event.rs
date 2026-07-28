@@ -360,6 +360,17 @@ pub enum DomainEvent {
         wage_arrears: Money,
         inventory: Vec<(GoodId, QuantityMilli)>,
     },
+    /// Insolvency administration paid worker claims and reopened a funded operating plan.
+    FirmReorganized {
+        firm: FirmId,
+        administrator: ActorId,
+        sponsor: ActorId,
+        contribution: Money,
+        claims_paid: Money,
+        workers: u64,
+        production_target: u64,
+        cash_reserve: Money,
+    },
     /// Authorized management reduced employment after owners could not finance persistent distress.
     FirmDownsizedForDistress {
         firm: FirmId,

@@ -61,7 +61,7 @@ pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
     ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
 };
-pub use insolvency::FirmInsolvency;
+pub use insolvency::{FirmInsolvency, FirmReorganization, FirmReorganizationPlan};
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use labor::{EmploymentAgreement, PayrollRecord};
 pub use logistics::{
@@ -99,4 +99,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 41;
+pub const SIMULATION_VERSION: u32 = 42;

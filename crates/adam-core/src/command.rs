@@ -1,7 +1,7 @@
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmExpectations, FirmId,
-    FirmPolicy, FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId,
-    ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
+    FirmPolicy, FirmReorganizationPlan, FreightContract, InvestmentProject, MarketClearing,
+    ProjectId, ResolutionId, ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
@@ -36,6 +36,7 @@ pub enum WorldCommand {
         firm: FirmId,
         batches: u64,
     },
+    ReorganizeFirm(FirmReorganizationPlan),
     CaptureMonthlyFirmObservation {
         firm: FirmId,
     },
@@ -157,6 +158,7 @@ impl WorldCommand {
                 firm,
                 batches,
             } => world.set_firm_production_target(*actor, *firm, *batches),
+            Self::ReorganizeFirm(plan) => world.reorganize_firm(plan).map(|_| ()),
             Self::CaptureMonthlyFirmObservation { firm } => {
                 world.capture_monthly_firm_observation(*firm).map(|_| ())
             }

@@ -405,6 +405,7 @@ pub enum WorldError {
         capacity: u64,
     },
     InvalidEmployment(&'static str),
+    InvalidFirmReorganization(&'static str),
     InvalidFirmExpectations(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
@@ -539,6 +540,9 @@ impl fmt::Display for WorldError {
                 write!(formatter, "annual closure already executed for {year}")
             }
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
+            Self::InvalidFirmReorganization(reason) => {
+                write!(formatter, "invalid firm reorganization: {reason}")
+            }
             Self::InvalidFirmExpectations(reason) => {
                 write!(formatter, "invalid firm expectations: {reason}")
             }

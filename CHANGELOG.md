@@ -6,6 +6,8 @@ All notable project changes are documented here. The format follows Keep a Chang
 
 ### Added
 
+- Replayable funded firm reorganization that pays preserved wage claims and requires a full month of payroll liquidity before reopening.
+
 - Firm insolvency administration after prolonged zero-workforce distress, freezing ordinary operations while preserving cash, inventory, and worker claims.
 
 - Evidence-driven owner recapitalization after three consecutive months of wage arrears, preserving worker claims and journaling the transfer.

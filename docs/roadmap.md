@@ -972,3 +972,12 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - `FirmInsolvencyDeclared` makes the transition auditable, and the chronicle reports preserved claims and inventory. ADR 0102 records the boundary.
 - Full format, check, Clippy, test, and docs gate passes with 132 workspace tests. SIMULATION_VERSION advances 40 -> 41. The seed-1 50-year fingerprint is `6714888034744335345`; self-comparison is identical at 42.0 ms/year. The demo reaches one insolvency in 2041 after six downsizing actions, preserving 36,432 minor units of unpaid wages.
 - Next gate: governed reorganization. An administrator should be able to reopen only after worker claims are funded and a viable staffing/production plan exists; otherwise a later creditor-priority and asset-sale gate should liquidate transparently.
+
+
+### Funded firm reorganization gate (step 055)
+
+- Insolvency now has a governed recovery path through the shared command boundary. The appointed administrator submits a sponsor contribution, cohort staffing plan, and production target.
+- Reopening is atomic and requires an economic-owner sponsor, payment of every preserved wage claim, positive valid staffing, a feasible target, and enough post-claim cash for one complete month of proposed payroll. Direct target changes and rehiring remain blocked while insolvency is active.
+- Acceptance transfers real owner cash, pays worker households, restores employment and production through ordinary transitions, removes administration, and journals `FirmReorganized`; the chronicle reports contributions, claims paid, and returning workers. ADR 0103 records the rule.
+- The rejection gate proves underfunding changes nothing; command replay reproduces state and fingerprint exactly. Full format/check/Clippy/test/docs passes with 133 workspace tests. SIMULATION_VERSION advances 41 -> 42. Seed-1/50-year fingerprint is `4178072713035629664`, self-comparison is identical at 42.4 ms/year.
+- The demo still leaves its 2041 insolvency unresolved because no autonomous owner chooses a plan. Next gate: evidence-based administrator proposals and owner acceptance, followed by transparent liquidation if no fully funded plan appears within a bounded administration period.

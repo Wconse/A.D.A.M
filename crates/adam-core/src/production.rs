@@ -365,6 +365,11 @@ impl World {
         if !self.actors().contains_key(&actor) {
             return Err(WorldError::UnknownActor(actor));
         }
+        if self.is_firm_insolvent(firm) {
+            return Err(WorldError::InvalidFirmReorganization(
+                "insolvent production targets can change only through an approved reorganization",
+            ));
+        }
         let capacity = self
             .firms
             .get(&firm)

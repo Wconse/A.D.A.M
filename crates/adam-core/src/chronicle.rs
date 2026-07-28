@@ -78,6 +78,10 @@ struct YearSummary {
     firm_insolvencies: u64,
     insolvent_wage_claims_minor: i128,
     insolvent_inventory_milli: u128,
+    firm_reorganizations: u64,
+    reorganization_contributions_minor: i128,
+    reorganization_claims_paid_minor: i128,
+    reorganized_workers: u64,
 
     production_milli: u128,
     traded_milli: u128,
@@ -222,6 +226,17 @@ impl YearSummary {
                         .map(|(_, quantity)| u128::from(quantity.get()))
                         .sum(),
                 );
+            }
+            DomainEvent::FirmReorganized {
+                contribution,
+                claims_paid,
+                workers,
+                ..
+            } => {
+                self.firm_reorganizations = self.firm_reorganizations.saturating_add(1);
+                self.reorganization_contributions_minor += i128::from(contribution.minor_units());
+                self.reorganization_claims_paid_minor += i128::from(claims_paid.minor_units());
+                self.reorganized_workers = self.reorganized_workers.saturating_add(*workers);
             }
             _ => return false,
         }
@@ -453,6 +468,20 @@ impl YearSummary {
                 self.insolvent_inventory_milli
             ));
         }
+        if self.firm_reorganizations > 0 {
+            let firm_word = if self.firm_reorganizations == 1 {
+                "firm"
+            } else {
+                "firms"
+            };
+            sentences.push(format!(
+                "{} {firm_word} left insolvency after owners contributed {} minor currency units, paid {} in worker claims, and funded {} returning workers.",
+                self.firm_reorganizations,
+                self.reorganization_contributions_minor,
+                self.reorganization_claims_paid_minor,
+                self.reorganized_workers
+            ));
+        }
     }
 
     fn push_debt_restructuring_narration(&self, sentences: &mut Vec<String>) {
@@ -609,6 +638,8 @@ impl YearSummary {
             80
         } else if self.firm_insolvencies > 0 {
             78
+        } else if self.firm_reorganizations > 0 {
+            76
         } else if !self.procurement_shortfalls.is_empty() {
             75
         } else if self.firm_distress_downsizings > 0 {
