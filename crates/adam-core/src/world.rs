@@ -406,6 +406,7 @@ pub enum WorldError {
     },
     InvalidEmployment(&'static str),
     InvalidFirmReorganization(&'static str),
+    InvalidFirmCredit(&'static str),
     InvalidFirmExpectations(&'static str),
     InvalidBusinessPolicy(&'static str),
     MissingFirmPolicy(FirmId),
@@ -542,6 +543,9 @@ impl fmt::Display for WorldError {
             Self::InvalidEmployment(reason) => write!(formatter, "invalid employment: {reason}"),
             Self::InvalidFirmReorganization(reason) => {
                 write!(formatter, "invalid firm reorganization: {reason}")
+            }
+            Self::InvalidFirmCredit(reason) => {
+                write!(formatter, "invalid firm credit: {reason}")
             }
             Self::InvalidFirmExpectations(reason) => {
                 write!(formatter, "invalid firm expectations: {reason}")
@@ -683,6 +687,8 @@ pub struct World {
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
     pub(crate) firm_distress_months: BTreeMap<FirmId, u8>,
     pub(crate) firm_insolvencies: BTreeMap<FirmId, crate::FirmInsolvency>,
+    pub(crate) firm_creditor_claims:
+        BTreeMap<(FirmId, crate::FirmCreditorPriority, ActorId), crate::FirmCreditorClaim>,
     pub(crate) monthly_firm_procurement_purchases:
         BTreeMap<(FirmId, GoodId), (crate::QuantityMilli, Money)>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
@@ -758,6 +764,7 @@ impl World {
             firm_expectations: BTreeMap::new(),
             firm_distress_months: BTreeMap::new(),
             firm_insolvencies: BTreeMap::new(),
+            firm_creditor_claims: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
             monthly_firm_procurement_purchases: BTreeMap::new(),
@@ -1475,6 +1482,21 @@ impl World {
                 hash.write_u32(good.get());
                 hash.write_u64(quantity.get());
             }
+            hash.write_u8(u8::from(insolvency.liquidated_on().is_some()));
+            if let Some(date) = insolvency.liquidated_on() {
+                hash.write_i32(date.year());
+                hash.write_u16(date.day_of_year());
+            }
+        }
+        hash.write_u64(self.firm_creditor_claims.len() as u64);
+        for ((firm, priority, creditor), claim) in &self.firm_creditor_claims {
+            hash.write_u32(firm.get());
+            hash.write_u8(match priority {
+                crate::FirmCreditorPriority::Secured => 1,
+                crate::FirmCreditorPriority::Unsecured => 2,
+            });
+            hash.write_u32(creditor.get());
+            hash.write_i64(claim.principal().minor_units());
         }
         hash.write_u64(self.firm_distress_months.len() as u64);
         for (firm, months) in &self.firm_distress_months {

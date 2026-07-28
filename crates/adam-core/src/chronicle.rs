@@ -79,6 +79,18 @@ struct YearSummary {
     insolvent_wage_claims_minor: i128,
     insolvent_inventory_milli: u128,
     firm_reorganizations: u64,
+    firm_liquidations: u64,
+    liquidation_claims_paid_minor: i128,
+    liquidation_claims_written_off_minor: i128,
+    liquidation_creditor_paid_minor: i128,
+    liquidation_creditor_written_off_minor: i128,
+    liquidation_inventory_sold_milli: u128,
+    liquidation_inventory_sale_proceeds_minor: i128,
+    liquidation_inventory_written_off_milli: u128,
+    liquidation_capacity_sold_batches: u64,
+    liquidation_capacity_sale_proceeds_minor: i128,
+    liquidation_capacity_written_off_batches: u64,
+    liquidation_owner_distribution_minor: i128,
     reorganization_contributions_minor: i128,
     reorganization_claims_paid_minor: i128,
     reorganized_workers: u64,
@@ -226,6 +238,57 @@ impl YearSummary {
                         .map(|(_, quantity)| u128::from(quantity.get()))
                         .sum(),
                 );
+            }
+            DomainEvent::FirmCreditorClaimSettled {
+                paid, written_off, ..
+            } => {
+                self.liquidation_creditor_paid_minor += i128::from(paid.minor_units());
+                self.liquidation_creditor_written_off_minor +=
+                    i128::from(written_off.minor_units());
+            }
+            DomainEvent::FirmLiquidationInventorySold {
+                quantity, proceeds, ..
+            } => {
+                self.liquidation_inventory_sold_milli = self
+                    .liquidation_inventory_sold_milli
+                    .saturating_add(u128::from(quantity.get()));
+                self.liquidation_inventory_sale_proceeds_minor +=
+                    i128::from(proceeds.minor_units());
+            }
+            DomainEvent::FirmLiquidationCapacitySold {
+                capacity_batches,
+                proceeds,
+                ..
+            } => {
+                self.liquidation_capacity_sold_batches = self
+                    .liquidation_capacity_sold_batches
+                    .saturating_add(*capacity_batches);
+                self.liquidation_capacity_sale_proceeds_minor += i128::from(proceeds.minor_units());
+            }
+            DomainEvent::FirmLiquidated {
+                claims_paid,
+                claims_written_off,
+                inventory_written_off,
+                capacity_written_off,
+                owner_distribution,
+                ..
+            } => {
+                self.firm_liquidations = self.firm_liquidations.saturating_add(1);
+                self.liquidation_claims_paid_minor += i128::from(claims_paid.minor_units());
+                self.liquidation_claims_written_off_minor +=
+                    i128::from(claims_written_off.minor_units());
+                self.liquidation_inventory_written_off_milli =
+                    self.liquidation_inventory_written_off_milli.saturating_add(
+                        inventory_written_off
+                            .iter()
+                            .map(|(_, quantity)| u128::from(quantity.get()))
+                            .sum(),
+                    );
+                self.liquidation_capacity_written_off_batches = self
+                    .liquidation_capacity_written_off_batches
+                    .saturating_add(*capacity_written_off);
+                self.liquidation_owner_distribution_minor +=
+                    i128::from(owner_distribution.minor_units());
             }
             DomainEvent::FirmReorganized {
                 contribution,
@@ -468,6 +531,33 @@ impl YearSummary {
                 self.insolvent_inventory_milli
             ));
         }
+        if self.firm_liquidations > 0 {
+            let firm_word = if self.firm_liquidations == 1 {
+                "firm"
+            } else {
+                "firms"
+            };
+            let verb = if self.firm_liquidations == 1 {
+                "was"
+            } else {
+                "were"
+            };
+            sentences.push(format!(
+                "{} {firm_word} {verb} liquidated after a year without a viable plan: solvent producers bought {} milli-units of estate inventory for {} minor currency units, workers received {}, {} of worker claims were written off, ranked creditors recovered {}, {} of creditor claims were written off, {} milli-units of unsold inventory were written off, compatible successors acquired {} batches of installed capacity for {} minor currency units, {} batches of capacity were retired, and owners received {} residual cash.",
+                self.firm_liquidations,
+                self.liquidation_inventory_sold_milli,
+                self.liquidation_inventory_sale_proceeds_minor,
+                self.liquidation_claims_paid_minor,
+                self.liquidation_claims_written_off_minor,
+                self.liquidation_creditor_paid_minor,
+                self.liquidation_creditor_written_off_minor,
+                self.liquidation_inventory_written_off_milli,
+                self.liquidation_capacity_sold_batches,
+                self.liquidation_capacity_sale_proceeds_minor,
+                self.liquidation_capacity_written_off_batches,
+                self.liquidation_owner_distribution_minor
+            ));
+        }
         if self.firm_reorganizations > 0 {
             let firm_word = if self.firm_reorganizations == 1 {
                 "firm"
@@ -634,6 +724,8 @@ impl YearSummary {
             88
         } else if !self.hostility_changes.is_empty() {
             85
+        } else if self.firm_liquidations > 0 {
+            82
         } else if self.rationing_actions > 0 {
             80
         } else if self.firm_insolvencies > 0 {

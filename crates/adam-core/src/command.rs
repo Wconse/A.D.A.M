@@ -11,6 +11,7 @@ pub enum WorldCommand {
     ExecuteMonthlyCommercialCycle,
     ExecuteObservedFirmManagement,
     ExecuteObservedFirmReorganizations,
+    ExecuteObservedFirmLiquidations,
     ExecuteObservedEmergencyRelief,
     SetGovernmentEmergencyPolicy {
         actor: ActorId,
@@ -114,6 +115,12 @@ pub enum WorldCommand {
         policy: FirmPolicy,
     },
     RegisterFirm(crate::Firm),
+    IssueFirmCredit {
+        creditor: ActorId,
+        firm: FirmId,
+        priority: crate::FirmCreditorPriority,
+        principal: crate::Money,
+    },
 }
 impl WorldCommand {
     /// Applies the same deterministic command regardless of player or AI origin.
@@ -133,6 +140,9 @@ impl WorldCommand {
             }
             Self::ExecuteObservedFirmReorganizations => {
                 world.execute_observed_firm_reorganizations().map(|_| ())
+            }
+            Self::ExecuteObservedFirmLiquidations => {
+                world.execute_observed_firm_liquidations().map(|_| ())
             }
             Self::ExecuteObservedEmergencyRelief => {
                 world.execute_observed_emergency_relief().map(|_| ())
@@ -247,6 +257,12 @@ impl WorldCommand {
                 policy,
             } => world.set_firm_policy(*actor, *firm, *policy),
             Self::RegisterFirm(firm) => world.register_firm(firm.clone()),
+            Self::IssueFirmCredit {
+                creditor,
+                firm,
+                priority,
+                principal,
+            } => world.issue_firm_credit(*creditor, *firm, *priority, *principal),
         }
     }
 }

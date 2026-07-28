@@ -156,6 +156,7 @@ impl World {
         let payroll = next.execute_monthly_payroll()?;
         next.execute_observed_firm_distress_response()?;
         next.execute_observed_firm_reorganizations()?;
+        next.execute_observed_firm_liquidations()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
         let household_borrowing = next.execute_monthly_household_coping()?;
         let commercial = next.execute_monthly_commercial_cycle()?;

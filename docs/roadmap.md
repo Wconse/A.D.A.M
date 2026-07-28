@@ -989,3 +989,37 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Derived plans execute through the existing funded-reorganization boundary, preserving administrator authority, complete worker-claim priority, one month of payroll runway, atomicity, typed events, save/replay, and player/AI rule parity. ADR 0104 records the decision.
 - Gate coverage proves policy refusal, exact minimum funding, canonical one-worker staffing, claim payment, production-target restoration, ordinary command replay, and stable fingerprints. Full workspace tests pass with 134 tests. The rule is integrated into the monthly economic cycle and advances SIMULATION_VERSION 42 -> 43.
 - The seed-1 50-year demo remains materially unchanged because the insolvent firm's owner cannot afford a compliant plan; the new fingerprint is `5456998744248754763`, changed by the simulation-version contract. Next gate: bounded administration and transparent liquidation when no viable funded plan emerges, with worker claims paid first from estate cash and explicit treatment of inventories and residual owner value.
+
+### Bounded firm liquidation gate (step 057)
+
+- Insolvency administration now has a twelve-month deadline. Each monthly cycle attempts the existing funded reorganization first; only an estate that still lacks a viable plan at the deadline enters terminal liquidation.
+- Estate cash pays wage claims before owners. Underfunded claims share available cash proportionally through deterministic largest-remainder allocation; unpaid balances are explicitly written off instead of persisting as phantom claims. Residual cash is distributed by economic ownership rights.
+- Unsold inventory is explicitly written off because Stage 0 has no physical estate auction or public inventory buyer. The liquidation event records worker recovery, claim losses, inventory losses, and owner recovery; the liquidated estate remains permanently frozen and cannot reorganize.
+- The transition is atomic, available through the shared command boundary, integrated into the economic month, serialized, fingerprinted, and narrated in the yearly chronicle. ADR 0105 records the decision. Focused gates cover the exact twelve-month boundary, worker priority, partial recovery, residual owner value, terminal state, and deterministic replay.
+- The rule changes authoritative claims, cash, inventory, and insolvency state, so SIMULATION_VERSION advances 43 -> 44. The full format/check/Clippy/test/docs gate passes with 137 workspace tests. Two seed-1 release runs produce byte-identical chronicles and fingerprints after excluding the intentionally variable runtime line; the 50-year fingerprint is `1313592537849333646`. In the demo, the unresolved 2041 insolvency liquidates in 2042 and explicitly writes off 36,432 minor units of unfunded wage claims.
+- Next gate: replace blanket inventory write-off with a physical estate auction to real solvent firms, while adding creditor classes and preserving money, inventory, and claim priority exactly.
+
+### Physical estate inventory auction gate (step 058)
+
+- Terminal liquidation now attempts a real local asset sale before destroying stock. Solvent producers buy only recipe inputs they can use, up to their authorized production target, current inventory shortfall, and available cash; buyers and goods resolve in canonical order.
+- Every sale moves physical inventory and cash atomically at the regional reference price. Proceeds enter the existing estate waterfall, so workers retain priority and owners receive only the residual. Unmarketable stock remains an explicit write-off rather than disappearing silently.
+- `FirmLiquidationInventorySold` provides typed evidence, and the chronicle reports inventory preserved and proceeds recovered alongside claims and residual losses. ADR 0106 records the administered Stage-0 auction and its local/reference-price limits.
+- Full format, check, Clippy, 137-test, and documentation gates pass. `SIMULATION_VERSION` advances 44 -> 45; the seed-1 50-year self-comparison is identical with fingerprint `11514179436319650475` at 53.7 ms/year.
+- Next gate: add explicit creditor claims and priority classes, then let liquidation transfer productive capacity or successor ownership without inventing value.
+
+### Ranked firm creditor claims gate (step 059)
+
+- Operating firms can now borrow real actor cash through the shared command boundary. Issuance atomically debits the creditor, credits the firm, and creates a persisted, fingerprinted principal claim; insolvent firms cannot originate fresh credit.
+- Liquidation now enforces an explicit waterfall: worker wage claims first, then secured creditor principal, then unsecured creditor principal, then owners. Scarce value within one rank is allocated proportionally through deterministic largest-remainder allocation with canonical tie-breaking.
+- Each creditor settlement journals paid and written-off principal, settled claims leave authoritative state, and the yearly chronicle exposes aggregate creditor recovery and loss. Reorganization deliberately preserves outstanding principal rather than granting an implicit debt discharge.
+- ADR 0107 records the contract and Stage-0 limits: no interest, maturity, collateral matching, covenants, loan trading, bank balance sheets, or repayment schedule yet.
+- Gate coverage proves money-conserving replayable loan issuance, worker seniority, secured-before-unsecured recovery, explicit write-offs, terminal claim removal, liquidation replay, and stable fingerprints. Full workspace tests pass with 138 tests. The new creditor state advances `SIMULATION_VERSION` 45 -> 46; the seed-1/50-year self-comparison remains byte-identical with fingerprint `7807349546474967676` at 58.1 ms/year.
+- Next gate: let a liquidated estate sell installed productive capacity to a solvent successor, preserving physical capacity and transferring ownership without inventing output or value.
+
+### Physical productive-capacity successor sale gate (step 060)
+
+- Terminal liquidation now offers installed production capacity to solvent local firms using the same recipe before retiring the estate. A successor must already target its installed ceiling, retain one full month of active payroll after purchase, and can at most double its current scale in one administered sale.
+- Capacity is priced at one month of reference-price gross output per batch. Every accepted sale moves real buyer cash and physical capacity atomically; proceeds enter the existing worker-first, secured-creditor, unsecured-creditor, and owner waterfall. The auction never changes the buyer's production target or creates output.
+- Unsold capacity is explicitly retired and narrated rather than silently disappearing. `FirmLiquidationCapacitySold` records estate, successor, batches, and proceeds; liquidation results and the yearly chronicle distinguish transferred from retired capacity. ADR 0108 records the rule and its strict same-region/same-recipe Stage-0 boundary.
+- Focused coverage proves price formation, capacity conservation, cash conservation, improved worker recovery, terminal estate retirement, typed evidence, command replay, and stable fingerprints. The workspace passes 139 tests. `SIMULATION_VERSION` advances 46 -> 47; the seed-1/50-year release fingerprint is `310691261537918658` at 63.9 ms/year.
+- Next gate: represent creditor maturity and scheduled repayment for operating firms, so credit affects monthly liquidity before insolvency rather than existing only as liquidation priority.

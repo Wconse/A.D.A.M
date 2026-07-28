@@ -256,9 +256,9 @@ mod tests {
     use crate::{
         Actor, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget, Country,
         CountryId, DemandBasis, EducationLevel, EmploymentAgreement, EmploymentStatus, Firm,
-        FirmPolicy, FirmReorganizationPlan, Good, GoodId, HouseholdCohort, HouseholdType,
-        NeedProfileId, NeedTier, OwnershipStake, Population, ProductionRecipe, QuantityMilli,
-        RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        FirmCreditorPriority, FirmPolicy, FirmReorganizationPlan, Good, GoodId, HouseholdCohort,
+        HouseholdType, NeedProfileId, NeedTier, OwnershipStake, Population, ProductionRecipe,
+        QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -777,5 +777,321 @@ mod tests {
         assert_eq!(world, replayed);
         assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
         assert!(!world.is_firm_insolvent(FirmId::new(1)));
+    }
+
+    #[test]
+    fn bounded_administration_liquidates_with_worker_priority_and_replays() {
+        let mut world = distressed_world();
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        assert!(world.is_firm_insolvent(FirmId::new(1)));
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("firm")
+            .set_cash(Money::from_minor_units(200));
+        for _ in 0..11 {
+            world.advance_month().expect("administration month");
+            assert!(
+                world
+                    .execute_observed_firm_liquidations()
+                    .expect("not due")
+                    .is_empty()
+            );
+        }
+        world.advance_month().expect("twelfth administration month");
+        let mut replayed = world.clone();
+        let liquidations = world
+            .execute_observed_firm_liquidations()
+            .expect("liquidation");
+        WorldCommand::ExecuteObservedFirmLiquidations
+            .apply(&mut replayed)
+            .expect("replayed liquidation");
+
+        assert_eq!(liquidations.len(), 1);
+        assert_eq!(liquidations[0].claims_paid, Money::from_minor_units(200));
+        assert_eq!(
+            liquidations[0].claims_written_off,
+            Money::from_minor_units(100)
+        );
+        assert_eq!(
+            liquidations[0].inventory_written_off[&GoodId::new(1)],
+            QuantityMilli::new(2_500)
+        );
+        assert_eq!(liquidations[0].owner_distribution, Money::default());
+        assert!(world.is_firm_liquidated(FirmId::new(1)));
+        assert!(world.firms()[&FirmId::new(1)].inventories().is_empty());
+        assert_eq!(world.firms()[&FirmId::new(1)].cash(), Money::default());
+        assert_eq!(
+            world.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(200)
+        );
+        assert_eq!(
+            world.employment_agreements()[&(FirmId::new(1), CohortId::new(1))].arrears(),
+            Money::default()
+        );
+        assert_eq!(world, replayed);
+        assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(
+            world
+                .plan_observed_firm_reorganization(FirmId::new(1))
+                .expect("terminal plan")
+                .is_none()
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn liquidation_pays_workers_then_ranked_creditors_before_owners() {
+        let mut world = distressed_world();
+        for (id, name, cash) in [(2, "Secured lender", 100), (3, "Trade creditor", 200)] {
+            world
+                .register_actor(
+                    Actor::new(ActorId::new(id), name, RegionId::new(1), 1975).expect("creditor"),
+                )
+                .expect("register creditor");
+            world
+                .actor_cash
+                .insert(ActorId::new(id), Money::from_minor_units(cash));
+        }
+        let commands = [
+            WorldCommand::IssueFirmCredit {
+                creditor: ActorId::new(2),
+                firm: FirmId::new(1),
+                priority: FirmCreditorPriority::Secured,
+                principal: Money::from_minor_units(100),
+            },
+            WorldCommand::IssueFirmCredit {
+                creditor: ActorId::new(3),
+                firm: FirmId::new(1),
+                priority: FirmCreditorPriority::Unsecured,
+                principal: Money::from_minor_units(200),
+            },
+        ];
+        let mut credit_replay = world.clone();
+        world
+            .issue_firm_credit(
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(100),
+            )
+            .expect("secured credit");
+        world
+            .issue_firm_credit(
+                ActorId::new(3),
+                FirmId::new(1),
+                FirmCreditorPriority::Unsecured,
+                Money::from_minor_units(200),
+            )
+            .expect("unsecured credit");
+        for command in &commands {
+            command.apply(&mut credit_replay).expect("credit replay");
+        }
+        assert_eq!(world, credit_replay);
+        assert_eq!(
+            world.firms()[&FirmId::new(1)].cash(),
+            Money::from_minor_units(300)
+        );
+
+        // The borrowed working capital is exhausted before payroll distress begins.
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("firm")
+            .set_cash(Money::default());
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("estate")
+            .set_cash(Money::from_minor_units(350));
+        for _ in 0..12 {
+            world.advance_month().expect("administration month");
+        }
+        let mut replayed = world.clone();
+        let liquidation = world
+            .execute_observed_firm_liquidations()
+            .expect("liquidation")
+            .pop()
+            .expect("liquidation result");
+        WorldCommand::ExecuteObservedFirmLiquidations
+            .apply(&mut replayed)
+            .expect("liquidation replay");
+
+        assert_eq!(liquidation.claims_paid, Money::from_minor_units(300));
+        assert_eq!(liquidation.claims_written_off, Money::default());
+        assert_eq!(
+            liquidation.creditor_claims_paid,
+            Money::from_minor_units(50)
+        );
+        assert_eq!(
+            liquidation.creditor_claims_written_off,
+            Money::from_minor_units(250)
+        );
+        assert_eq!(liquidation.owner_distribution, Money::default());
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(50)
+        );
+        assert_eq!(world.actor_cash()[&ActorId::new(3)], Money::default());
+        assert!(world.firm_creditor_claims().is_empty());
+        assert_eq!(world, replayed);
+        assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(world.events().events().iter().any(|event| matches!(
+            event.event(),
+            DomainEvent::FirmCreditorClaimSettled {
+                creditor,
+                priority: FirmCreditorPriority::Secured,
+                paid,
+                written_off,
+                ..
+            } if *creditor == ActorId::new(2)
+                && *paid == Money::from_minor_units(50)
+                && *written_off == Money::from_minor_units(50)
+        )));
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn liquidation_transfers_capacity_to_a_funded_compatible_successor() {
+        let mut world = distressed_world();
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        world
+            .register_firm(
+                Firm::new(
+                    FirmId::new(2),
+                    "Successor farm",
+                    RegionId::new(1),
+                    RecipeId::new(1),
+                    1,
+                    1,
+                    Money::from_minor_units(150),
+                    BTreeMap::new(),
+                )
+                .expect("successor"),
+            )
+            .expect("successor");
+        world.firm_production_targets.insert(FirmId::new(2), 1);
+        for _ in 0..12 {
+            world.advance_month().expect("administration month");
+        }
+        let mut replayed = world.clone();
+        let liquidation = world
+            .execute_observed_firm_liquidations()
+            .expect("liquidation")
+            .pop()
+            .expect("liquidation result");
+        WorldCommand::ExecuteObservedFirmLiquidations
+            .apply(&mut replayed)
+            .expect("replayed liquidation");
+
+        assert_eq!(liquidation.capacity_sales.len(), 1);
+        assert_eq!(liquidation.capacity_sales[0].estate, FirmId::new(1));
+        assert_eq!(liquidation.capacity_sales[0].buyer, FirmId::new(2));
+        assert_eq!(liquidation.capacity_sales[0].capacity_batches, 1);
+        assert_eq!(
+            liquidation.capacity_sale_proceeds,
+            Money::from_minor_units(10)
+        );
+        assert_eq!(liquidation.capacity_written_off, 0);
+        assert_eq!(liquidation.claims_paid, Money::from_minor_units(10));
+        assert_eq!(liquidation.claims_written_off, Money::from_minor_units(290));
+        assert_eq!(world.firms()[&FirmId::new(1)].capacity_batches(), 0);
+        assert_eq!(world.firms()[&FirmId::new(2)].capacity_batches(), 2);
+        assert_eq!(
+            world.firms()[&FirmId::new(2)].cash(),
+            Money::from_minor_units(140)
+        );
+        assert_eq!(
+            world.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(10)
+        );
+        assert_eq!(world, replayed);
+        assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(world.events().events().iter().any(|event| matches!(
+            event.event(),
+            DomainEvent::FirmLiquidationCapacitySold {
+                estate,
+                buyer,
+                capacity_batches: 1,
+                proceeds,
+            } if *estate == FirmId::new(1)
+                && *buyer == FirmId::new(2)
+                && *proceeds == Money::from_minor_units(10)
+        )));
+    }
+
+    #[test]
+    fn liquidation_pays_workers_before_residual_owner_value() {
+        let mut world = distressed_world();
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("firm")
+            .set_cash(Money::from_minor_units(450));
+        for _ in 0..12 {
+            world.advance_month().expect("administration month");
+        }
+        let liquidation = world
+            .execute_observed_firm_liquidations()
+            .expect("liquidation")
+            .pop()
+            .expect("liquidation result");
+        assert_eq!(liquidation.claims_paid, Money::from_minor_units(300));
+        assert_eq!(liquidation.claims_written_off, Money::default());
+        assert_eq!(liquidation.owner_distribution, Money::from_minor_units(150));
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(1)],
+            Money::from_minor_units(150)
+        );
+        world.events.append(
+            world.date(),
+            DomainEvent::EconomicYearCompleted {
+                closed_year: world.date().year(),
+                monthly_cycles: 12,
+            },
+        );
+        assert!(world.chronicle().iter().any(|entry| {
+            entry.text.contains(
+                "1 firm was liquidated after a year without a viable plan: solvent producers bought 0 milli-units of estate inventory for 0 minor currency units, workers received 300",
+            ) && entry.text.contains("owners received 150 residual cash")
+        }));
     }
 }

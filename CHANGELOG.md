@@ -6,6 +6,14 @@ All notable project changes are documented here. The format follows Keep a Chang
 
 ### Added
 
+- Physical liquidation sales of installed capacity to funded compatible local successors, with payroll reserves, bounded integration, estate proceeds, and explicit retirement of unsold capacity.
+
+- Actor-funded firm credit with secured and unsecured principal claims, worker-first liquidation priority, deterministic pro-rata creditor recovery, and explicit write-offs.
+
+- Physical liquidation inventory auctions that transfer usable stock to solvent local producers, route proceeds through worker-priority claims, and journal each sale.
+
+- Bounded twelve-month insolvency administration followed by replayable worker-priority liquidation, explicit claim and inventory write-offs, and residual owner distribution when no viable reorganization emerges.
+
 - Policy-driven autonomous firm reorganization that derives and executes a minimum viable reopening plan from worker claims, payroll, available labor, owner liquidity, and the authorized reinvestment rate.
 
 - Replayable funded firm reorganization that pays preserved wage claims and requires a full month of payroll liquidity before reopening.

@@ -247,6 +247,15 @@ impl Firm {
             .ok_or(WorldError::ArithmeticOverflow("firm capacity"))?;
         Ok(())
     }
+    pub(crate) fn remove_capacity(&mut self, value: u64) -> Result<(), WorldError> {
+        if value > self.capacity_batches {
+            return Err(WorldError::InvalidFirmReorganization(
+                "capacity transfer exceeds the seller's installed capacity",
+            ));
+        }
+        self.capacity_batches -= value;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

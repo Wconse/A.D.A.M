@@ -67,6 +67,15 @@ impl EmploymentAgreement {
         self.arrears = Money::default();
         settled
     }
+
+    pub(crate) fn settle_arrears_up_to(&mut self, available: Money) -> Money {
+        let paid = self
+            .arrears
+            .minor_units()
+            .min(available.minor_units().max(0));
+        self.arrears = Money::from_minor_units(self.arrears.minor_units() - paid);
+        Money::from_minor_units(paid)
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PayrollRecord {

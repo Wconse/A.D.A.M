@@ -360,6 +360,17 @@ pub enum DomainEvent {
         wage_arrears: Money,
         inventory: Vec<(GoodId, QuantityMilli)>,
     },
+    /// A bounded administration ended without a viable plan; worker claims had priority,
+    /// residual cash went to owners, and unsold inventory was explicitly written off.
+    FirmLiquidated {
+        firm: FirmId,
+        administrator: ActorId,
+        claims_paid: Money,
+        claims_written_off: Money,
+        inventory_written_off: Vec<(GoodId, QuantityMilli)>,
+        capacity_written_off: u64,
+        owner_distribution: Money,
+    },
     /// Insolvency administration paid worker claims and reopened a funded operating plan.
     FirmReorganized {
         firm: FirmId,
@@ -393,6 +404,37 @@ pub enum DomainEvent {
         debt_before: Money,
         debt_after: Money,
         principal_written_off: Money,
+    },
+    /// A solvent local producer bought physical inventory from a liquidating estate.
+    /// Appended to preserve the serialized ordering of earlier journal variants.
+    FirmLiquidationInventorySold {
+        estate: FirmId,
+        buyer: FirmId,
+        good: GoodId,
+        quantity: QuantityMilli,
+        proceeds: Money,
+    },
+    /// Real creditor cash entered a firm in exchange for a ranked principal claim.
+    FirmCreditIssued {
+        firm: FirmId,
+        creditor: ActorId,
+        priority: crate::FirmCreditorPriority,
+        principal: Money,
+    },
+    /// A liquidation paid or explicitly wrote off one ranked creditor claim.
+    FirmCreditorClaimSettled {
+        firm: FirmId,
+        creditor: ActorId,
+        priority: crate::FirmCreditorPriority,
+        paid: Money,
+        written_off: Money,
+    },
+    /// A solvent compatible successor bought installed production capacity from an estate.
+    FirmLiquidationCapacitySold {
+        estate: FirmId,
+        buyer: FirmId,
+        capacity_batches: u64,
+        proceeds: Money,
     },
 }
 
