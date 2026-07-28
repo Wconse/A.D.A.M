@@ -10,6 +10,7 @@ pub enum WorldCommand {
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
     ExecuteObservedFirmManagement,
+    ExecuteObservedFirmReorganizations,
     ExecuteObservedEmergencyRelief,
     SetGovernmentEmergencyPolicy {
         actor: ActorId,
@@ -129,6 +130,9 @@ impl WorldCommand {
             }
             Self::ExecuteObservedFirmManagement => {
                 world.execute_observed_firm_management().map(|_| ())
+            }
+            Self::ExecuteObservedFirmReorganizations => {
+                world.execute_observed_firm_reorganizations().map(|_| ())
             }
             Self::ExecuteObservedEmergencyRelief => {
                 world.execute_observed_emergency_relief().map(|_| ())

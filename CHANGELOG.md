@@ -6,6 +6,8 @@ All notable project changes are documented here. The format follows Keep a Chang
 
 ### Added
 
+- Policy-driven autonomous firm reorganization that derives and executes a minimum viable reopening plan from worker claims, payroll, available labor, owner liquidity, and the authorized reinvestment rate.
+
 - Replayable funded firm reorganization that pays preserved wage claims and requires a full month of payroll liquidity before reopening.
 
 - Firm insolvency administration after prolonged zero-workforce distress, freezing ordinary operations while preserving cash, inventory, and worker claims.

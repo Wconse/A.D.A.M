@@ -704,4 +704,78 @@ mod tests {
             )
         }));
     }
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn observed_reorganization_respects_owner_reinvestment_policy_and_replays() {
+        let mut world = distressed_world();
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("month");
+            }
+        }
+        world
+            .actor_cash
+            .insert(ActorId::new(1), Money::from_minor_units(1_000));
+        world
+            .set_firm_policy(
+                ActorId::new(1),
+                FirmId::new(1),
+                FirmPolicy::new(
+                    0,
+                    BasisPoints::new(0).expect("markup"),
+                    BasisPoints::new(0).expect("marketing"),
+                    BasisPoints::new(3_000).expect("reinvestment"),
+                    BasisPoints::new(0).expect("dividend"),
+                )
+                .expect("policy"),
+            )
+            .expect("cautious policy");
+        assert!(
+            world
+                .plan_observed_firm_reorganization(FirmId::new(1))
+                .expect("proposal")
+                .is_none()
+        );
+
+        world
+            .set_firm_policy(
+                ActorId::new(1),
+                FirmId::new(1),
+                FirmPolicy::new(
+                    0,
+                    BasisPoints::new(0).expect("markup"),
+                    BasisPoints::new(0).expect("marketing"),
+                    BasisPoints::new(5_000).expect("reinvestment"),
+                    BasisPoints::new(0).expect("dividend"),
+                )
+                .expect("policy"),
+            )
+            .expect("recovery policy");
+        let proposal = world
+            .plan_observed_firm_reorganization(FirmId::new(1))
+            .expect("proposal")
+            .expect("affordable proposal");
+        assert_eq!(proposal.contribution, Money::from_minor_units(400));
+        assert_eq!(proposal.staffing, vec![(CohortId::new(1), 1)]);
+        assert_eq!(proposal.production_target, 1);
+
+        let mut replayed = world.clone();
+        let completed = world
+            .execute_observed_firm_reorganizations()
+            .expect("observed reorganization");
+        WorldCommand::ExecuteObservedFirmReorganizations
+            .apply(&mut replayed)
+            .expect("replayed observation");
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].contribution, Money::from_minor_units(400));
+        assert_eq!(completed[0].claims_paid, Money::from_minor_units(300));
+        assert_eq!(world, replayed);
+        assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(!world.is_firm_insolvent(FirmId::new(1)));
+    }
 }
