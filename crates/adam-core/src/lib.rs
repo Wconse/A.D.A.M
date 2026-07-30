@@ -8,9 +8,11 @@ pub mod cohort;
 pub mod command;
 pub mod commerce;
 pub mod coping;
+pub mod credit_market;
 pub mod demand;
 pub mod distress;
 pub mod event;
+pub mod firm_entry;
 pub mod freight;
 pub mod health;
 pub mod ids;
@@ -23,6 +25,7 @@ pub mod market;
 pub mod observation;
 pub mod procurement;
 pub mod production;
+pub mod public_reserve;
 pub mod rationing;
 pub mod relief;
 pub mod rng;
@@ -47,11 +50,13 @@ pub use cohort::{
 pub use command::{WorldCommand, replay_commands};
 pub use commerce::{MonthlyCommercialCycleResult, MonthlyEconomicCycleResult};
 pub use coping::HouseholdSurvivalBorrowing;
+pub use credit_market::{AutonomousFirmCreditDecision, BorrowerCreditHistory, LenderCreditHistory};
 pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
 pub use distress::{FirmDistressAction, FirmDistressDownsizing, FirmRecapitalization};
 pub use event::{DomainEvent, EventEnvelope, EventLog};
+pub use firm_entry::{FirmEntryDecision, FirmFoundingPlan};
 pub use freight::{
     ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics,
     MonthlyFreightCapacityLedger, RouteOperatingCost, evaluate_freight_economics,
@@ -62,12 +67,14 @@ pub use ids::{
     ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
 };
 pub use insolvency::{
-    FirmCreditorClaim, FirmCreditorPriority, FirmInsolvency, FirmLiquidation,
-    FirmLiquidationCapacitySale, FirmLiquidationInventorySale, FirmReorganization,
-    FirmReorganizationPlan,
+    FirmCreditOffer, FirmCreditSchedule, FirmCreditorClaim, FirmCreditorPriority,
+    FirmDebtServicePayment, FirmInsolvency, FirmLiquidation, FirmLiquidationCapacitySale,
+    FirmLiquidationInventorySale, FirmReorganization, FirmReorganizationPlan,
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
-pub use labor::{EmploymentAgreement, PayrollRecord};
+pub use labor::{
+    EmploymentAgreement, EmploymentMatch, PayrollRecord, RegionalLaborMarketObservation,
+};
 pub use logistics::{
     IntermodalPhase, IntermodalShipmentLifecycle, LegShipmentLifecycle, LogisticsRoute,
     MultiLegShipmentPlan, RouteCapacityLedger, ShipmentLifecycle, ShipmentOrder, ShipmentPlan,
@@ -76,13 +83,17 @@ pub use logistics::{
 };
 pub use management::FirmManagementDecision;
 pub use market::{
-    FirmMarketOfferPlan, MarketClearing, MarketFill, MarketOffer, MarketOfferOutcome, MarketOrder,
-    clear_local_market, clear_market_with_delivery,
+    FirmMarketOfferPlan, HouseholdImportDependence, MarketClearing, MarketFill, MarketOffer,
+    MarketOfferOutcome, MarketOrder, clear_local_market, clear_market_with_delivery,
 };
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};
 pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
+};
+pub use public_reserve::{
+    GovernmentReserveDistribution, GovernmentReserveMaintenance, GovernmentReservePolicyReview,
+    GovernmentReserveProcurement, ReservePriorityRevisionReason,
 };
 pub use rationing::{SurvivalRationingAllocation, SurvivalRationingOutcome};
 pub use relief::{
@@ -103,4 +114,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 47;
+pub const SIMULATION_VERSION: u32 = 66;

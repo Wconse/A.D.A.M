@@ -1,8 +1,8 @@
-# A.D.A.M content schema v7.
+# A.D.A.M content schema v8.
 # Stage 0 demo: two contrasting Arcadian stories plus the separate country of
 # Borealia, all under the 20% final-sales tax.
 # All money values are minor units; all quantities are milli-units (1000 = 1.0).
-schema_version = 7
+schema_version = 8
 
 [scenario]
 start_year = 2026
@@ -63,6 +63,13 @@ initial_annual_output = 1
 id = 1
 name = "Mara Voss"
 birth_year = 1980
+liquid_cash = 0
+
+[[regions.financiers]]
+id = 4
+name = "Arcadian Working Capital Trust"
+birth_year = 1970
+liquid_cash = 15
 
 [regions.cohort]
 id = 1
@@ -91,8 +98,48 @@ name = "Northreach Grain Collective"
 recipe = 1
 workers = 125
 capacity_batches = 125
-production_target = 125
+production_target = 123
 cash = 200000
+wage = 16
+
+[regions.firms.governance]
+owner_voting_bp = 6000
+owner_economic_bp = 6000
+manager_role = "operations_manager"
+
+[regions.firms.policy]
+inventory_buffer_days = 0
+price_markup_bp = 0
+allocations_bp = [0, 0, 0]
+
+[[regions.firms]]
+id = 13
+name = "Northreach Mill Credit Case"
+recipe = 1
+workers = 1
+capacity_batches = 1
+production_target = 1
+cash = 0
+wage = 16
+
+[regions.firms.governance]
+owner_voting_bp = 6000
+owner_economic_bp = 6000
+manager_role = "operations_manager"
+
+[regions.firms.policy]
+inventory_buffer_days = 0
+price_markup_bp = 0
+allocations_bp = [0, 0, 0]
+
+[[regions.firms]]
+id = 14
+name = "Northreach Mill Refusal Case"
+recipe = 1
+workers = 1
+capacity_batches = 1
+production_target = 1
+cash = 0
 wage = 16
 
 [regions.firms.governance]
@@ -144,6 +191,7 @@ initial_annual_output = 1
 id = 2
 name = "Ilya Roden"
 birth_year = 1980
+liquid_cash = 0
 
 [regions.cohort]
 id = 2
@@ -225,6 +273,7 @@ initial_annual_output = 1
 id = 3
 name = "Sana Kettu"
 birth_year = 1985
+liquid_cash = 0
 
 [regions.cohort]
 id = 3

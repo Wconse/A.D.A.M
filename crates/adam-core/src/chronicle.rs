@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{ActorId, CountryId, DomainEvent, RegionId, World};
+use crate::{ActorId, BasisPoints, CountryId, DomainEvent, RegionId, World};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum ProcurementShortfallCause {
@@ -62,6 +62,38 @@ struct YearSummary {
     relief_by_actor: BTreeMap<ActorId, i128>,
     target_changes_by_actor: BTreeMap<ActorId, u64>,
     rationing_by_region: BTreeMap<RegionId, u64>,
+    reserve_policy_changes: u64,
+    reserve_coverage_increases: u64,
+    reserve_coverage_decreases: u64,
+    reserve_budget_increases: u64,
+    reserve_budget_decreases: u64,
+    leading_reserve_policy_change: Option<(CountryId, u8, u8, u16, u16)>,
+    reserve_priority_changes: u64,
+    reserve_priority_increases: u64,
+    reserve_priority_decreases: u64,
+    reserve_import_reliance_priority_changes: u64,
+    leading_reserve_priority_change: Option<(CountryId, RegionId, u16, u16)>,
+    reserve_maintenance_entries: u64,
+    reserve_maintenance_assessed_minor: i128,
+    reserve_maintenance_paid_minor: i128,
+    reserve_baseline_spoilage_milli: u128,
+    reserve_neglect_spoilage_milli: u128,
+    reserve_requirements_reviewed: u64,
+    reserve_prioritized_reviews: u64,
+    reserve_target_milli: u128,
+    reserve_opening_stock_milli: u128,
+    reserve_available_supply_milli: u128,
+    reserve_remaining_gap_milli: u128,
+    reserve_supply_limited_reviews: u64,
+    reserve_budget_limited_reviews: u64,
+    reserve_procurements: u64,
+    reserve_procured_milli: u128,
+    reserve_spending_minor: i128,
+    reserve_procurement_by_actor: BTreeMap<ActorId, i128>,
+    reserve_procurement_by_region: BTreeMap<RegionId, u128>,
+    reserve_distributions: u64,
+    reserve_distributed_milli: u128,
+    reserve_distribution_by_region: BTreeMap<RegionId, u128>,
     hostility_changes: Vec<(CountryId, CountryId, bool)>,
     grievances_by_pair: BTreeMap<(CountryId, CountryId), (u16, u16)>,
     procurement_shortfalls:
@@ -71,8 +103,40 @@ struct YearSummary {
     route_expansions: u64,
     route_capacity_added_milli: u128,
     route_investment_minor: i128,
+    firms_founded: u64,
+    firm_entry_capital_cost_minor: i128,
+    firm_entry_working_capital_minor: i128,
+    firm_entry_jobs: u64,
+    leading_firm_entry: Option<(ActorId, crate::FirmId, RegionId, crate::GoodId)>,
+    labor_market_observations: u64,
+    labor_offers: u64,
+    labor_hires: u64,
+    labor_available_workers: u64,
+    labor_vacancies: u64,
+    labor_wage_pressure_increases: u64,
+    labor_wage_pressure_decreases: u64,
+    labor_wage_adjustment_basis_points: i64,
+    maximum_unemployment_pressure_months: u8,
+    maximum_vacancy_pressure_months: u8,
+    leading_unemployment_region: Option<RegionId>,
+    leading_vacancy_region: Option<RegionId>,
     firm_recapitalizations: u64,
     firm_recapitalization_minor: i128,
+    autonomous_credit_acceptances: u64,
+    autonomous_credit_principal_minor: i128,
+    autonomous_credit_searches: u64,
+    autonomous_credit_unfunded_searches: u64,
+    lender_principal_repaid_minor: i128,
+    lender_interest_income_minor: i128,
+    lender_realized_loss_minor: i128,
+    lender_successful_loans: u64,
+    lender_defaulted_loans: u64,
+    firm_debt_service_due_minor: i128,
+    firm_debt_service_paid_minor: i128,
+    firm_interest_charged_minor: i128,
+    firm_interest_paid_minor: i128,
+    firm_debt_service_attempts: u64,
+    firm_overdue_debt_attempts: u64,
     firm_distress_downsizings: u64,
     distress_workers_released: u64,
     firm_insolvencies: u64,
@@ -124,8 +188,12 @@ struct YearSummary {
 impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
         if self.observe_procurement_event(event)
+            || self.observe_public_reserve_event(event)
             || self.observe_freight_event(event)
             || self.observe_route_expansion_event(event)
+            || self.observe_firm_entry_event(event)
+            || self.observe_labor_market_event(event)
+            || self.observe_firm_debt_service_event(event)
             || self.observe_firm_distress_event(event)
             || self.observe_fiscal_event(event)
         {
@@ -209,8 +277,69 @@ impl YearSummary {
         }
     }
 
+    fn observe_firm_debt_service_event(&mut self, event: &DomainEvent) -> bool {
+        let DomainEvent::FirmDebtServiceSettled {
+            due,
+            paid,
+            interest_charged,
+            interest_paid,
+            overdue,
+            ..
+        } = event
+        else {
+            return false;
+        };
+        self.firm_debt_service_attempts = self.firm_debt_service_attempts.saturating_add(1);
+        self.firm_debt_service_due_minor += i128::from(due.minor_units());
+        self.firm_debt_service_paid_minor += i128::from(paid.minor_units());
+        self.firm_interest_charged_minor += i128::from(interest_charged.minor_units());
+        self.firm_interest_paid_minor += i128::from(interest_paid.minor_units());
+        if *overdue {
+            self.firm_overdue_debt_attempts = self.firm_overdue_debt_attempts.saturating_add(1);
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn observe_firm_distress_event(&mut self, event: &DomainEvent) -> bool {
         match event {
+            DomainEvent::LenderCreditHistoryUpdated {
+                principal_repaid,
+                interest_income,
+                realized_loss,
+                resolved,
+                defaulted,
+                ..
+            } => {
+                self.lender_principal_repaid_minor += i128::from(principal_repaid.minor_units());
+                self.lender_interest_income_minor += i128::from(interest_income.minor_units());
+                self.lender_realized_loss_minor += i128::from(realized_loss.minor_units());
+                if *resolved {
+                    if *defaulted {
+                        self.lender_defaulted_loans = self.lender_defaulted_loans.saturating_add(1);
+                    } else {
+                        self.lender_successful_loans =
+                            self.lender_successful_loans.saturating_add(1);
+                    }
+                }
+            }
+            DomainEvent::FirmCreditOfferAccepted { principal, .. } => {
+                self.autonomous_credit_acceptances =
+                    self.autonomous_credit_acceptances.saturating_add(1);
+                self.autonomous_credit_principal_minor += i128::from(principal.minor_units());
+            }
+            DomainEvent::ObservedFirmCreditMarketCompleted {
+                borrowers_reviewed,
+                offers_accepted,
+                ..
+            } => {
+                self.autonomous_credit_searches = self
+                    .autonomous_credit_searches
+                    .saturating_add(*borrowers_reviewed);
+                self.autonomous_credit_unfunded_searches = self
+                    .autonomous_credit_unfunded_searches
+                    .saturating_add(borrowers_reviewed.saturating_sub(*offers_accepted));
+            }
             DomainEvent::FirmRecapitalized { amount, .. } => {
                 self.firm_recapitalizations = self.firm_recapitalizations.saturating_add(1);
                 self.firm_recapitalization_minor += i128::from(amount.minor_units());
@@ -337,6 +466,79 @@ impl YearSummary {
         true
     }
 
+    fn observe_firm_entry_event(&mut self, event: &DomainEvent) -> bool {
+        let DomainEvent::FirmFoundedFromOpportunity {
+            founder,
+            firm,
+            region,
+            good,
+            capital_cost,
+            working_capital,
+            ..
+        } = event
+        else {
+            return false;
+        };
+        self.firms_founded = self.firms_founded.saturating_add(1);
+        self.firm_entry_capital_cost_minor += i128::from(capital_cost.minor_units());
+        self.firm_entry_working_capital_minor += i128::from(working_capital.minor_units());
+        self.firm_entry_jobs = self.firm_entry_jobs.saturating_add(1);
+        self.leading_firm_entry
+            .get_or_insert((*founder, *firm, *region, *good));
+        true
+    }
+
+    fn observe_labor_market_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::EmploymentMatched {
+                labor_market_adjustment_basis_points,
+                ..
+            } => {
+                self.labor_wage_adjustment_basis_points +=
+                    i64::from(*labor_market_adjustment_basis_points);
+                match labor_market_adjustment_basis_points.cmp(&0) {
+                    std::cmp::Ordering::Greater => {
+                        self.labor_wage_pressure_increases =
+                            self.labor_wage_pressure_increases.saturating_add(1);
+                    }
+                    std::cmp::Ordering::Less => {
+                        self.labor_wage_pressure_decreases =
+                            self.labor_wage_pressure_decreases.saturating_add(1);
+                    }
+                    std::cmp::Ordering::Equal => {}
+                }
+            }
+            DomainEvent::RegionalLaborMarketObserved {
+                region,
+                available_workers,
+                vacancies,
+                offers,
+                hires,
+                unemployment_pressure_months,
+                vacancy_pressure_months,
+                ..
+            } => {
+                self.labor_market_observations = self.labor_market_observations.saturating_add(1);
+                self.labor_offers = self.labor_offers.saturating_add(*offers);
+                self.labor_hires = self.labor_hires.saturating_add(*hires);
+                self.labor_available_workers = self
+                    .labor_available_workers
+                    .saturating_add(*available_workers);
+                self.labor_vacancies = self.labor_vacancies.saturating_add(*vacancies);
+                if *unemployment_pressure_months > self.maximum_unemployment_pressure_months {
+                    self.maximum_unemployment_pressure_months = *unemployment_pressure_months;
+                    self.leading_unemployment_region = Some(*region);
+                }
+                if *vacancy_pressure_months > self.maximum_vacancy_pressure_months {
+                    self.maximum_vacancy_pressure_months = *vacancy_pressure_months;
+                    self.leading_vacancy_region = Some(*region);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn observe_route_expansion_event(&mut self, event: &DomainEvent) -> bool {
         let DomainEvent::RouteCapacityExpanded {
             added_capacity,
@@ -351,6 +553,104 @@ impl YearSummary {
             .route_capacity_added_milli
             .saturating_add(u128::from(added_capacity.get()));
         self.route_investment_minor += i128::from(cost.minor_units());
+        true
+    }
+
+    fn observe_public_reserve_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::GovernmentReservePolicyReviewed {
+                country,
+                previous_coverage_months,
+                new_coverage_months,
+                previous_monthly_budget,
+                new_monthly_budget,
+                ..
+            } => self.observe_reserve_policy_change(
+                *country,
+                *previous_coverage_months,
+                *new_coverage_months,
+                previous_monthly_budget.get(),
+                new_monthly_budget.get(),
+            ),
+            DomainEvent::GovernmentReservePriorityReviewed {
+                country,
+                region,
+                previous_priority,
+                new_priority,
+                revision_reason,
+                ..
+            } => self.observe_reserve_priority_change(
+                *country,
+                *region,
+                previous_priority.get(),
+                new_priority.get(),
+                *revision_reason,
+            ),
+            DomainEvent::GovernmentReserveMaintained {
+                assessed_cost,
+                paid_cost,
+                baseline_spoilage,
+                neglect_spoilage,
+                ..
+            } => self.observe_reserve_maintenance(
+                *assessed_cost,
+                *paid_cost,
+                *baseline_spoilage,
+                *neglect_spoilage,
+            ),
+            DomainEvent::GovernmentReserveRequirementReviewed {
+                priority,
+                target_stock,
+                opening_stock,
+                available_supply,
+                remaining_gap,
+                supply_limited,
+                budget_limited,
+                ..
+            } => self.observe_reserve_requirement((
+                *priority,
+                *target_stock,
+                *opening_stock,
+                *available_supply,
+                *remaining_gap,
+                *supply_limited,
+                *budget_limited,
+            )),
+            DomainEvent::GovernmentReserveProcured {
+                actor,
+                region,
+                quantity,
+                cost,
+                ..
+            } => {
+                self.reserve_procurements = self.reserve_procurements.saturating_add(1);
+                self.reserve_procured_milli = self
+                    .reserve_procured_milli
+                    .saturating_add(u128::from(quantity.get()));
+                self.reserve_spending_minor += i128::from(cost.minor_units());
+                let actor_total = self.reserve_procurement_by_actor.entry(*actor).or_default();
+                *actor_total += i128::from(cost.minor_units());
+                let region_total = self
+                    .reserve_procurement_by_region
+                    .entry(*region)
+                    .or_default();
+                *region_total = region_total.saturating_add(u128::from(quantity.get()));
+            }
+            DomainEvent::GovernmentReserveDistributed {
+                region, quantity, ..
+            } => {
+                self.reserve_distributions = self.reserve_distributions.saturating_add(1);
+                self.reserve_distributed_milli = self
+                    .reserve_distributed_milli
+                    .saturating_add(u128::from(quantity.get()));
+                let region_total = self
+                    .reserve_distribution_by_region
+                    .entry(*region)
+                    .or_default();
+                *region_total = region_total.saturating_add(u128::from(quantity.get()));
+            }
+            _ => return false,
+        }
         true
     }
 
@@ -444,8 +744,16 @@ impl YearSummary {
                 self.rationing_actions
             ));
         }
+        self.push_public_reserve_narration(
+            &mut sentences,
+            actor_names,
+            country_names,
+            region_names,
+        );
         self.push_conflict_narration(&mut sentences, country_names);
         self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
+        self.push_firm_entry_narration(&mut sentences, actor_names, region_names, firms, goods);
+        self.push_labor_market_narration(&mut sentences, region_names);
         self.push_transport_narration(&mut sentences);
         self.push_firm_distress_narration(&mut sentences);
         if self.relief_minor > 0 {
@@ -505,7 +813,397 @@ impl YearSummary {
         })
     }
 
+    fn observe_reserve_maintenance(
+        &mut self,
+        assessed_cost: crate::Money,
+        paid_cost: crate::Money,
+        baseline_spoilage: crate::QuantityMilli,
+        neglect_spoilage: crate::QuantityMilli,
+    ) {
+        self.reserve_maintenance_entries = self.reserve_maintenance_entries.saturating_add(1);
+        self.reserve_maintenance_assessed_minor += i128::from(assessed_cost.minor_units());
+        self.reserve_maintenance_paid_minor += i128::from(paid_cost.minor_units());
+        self.reserve_baseline_spoilage_milli = self
+            .reserve_baseline_spoilage_milli
+            .saturating_add(u128::from(baseline_spoilage.get()));
+        self.reserve_neglect_spoilage_milli = self
+            .reserve_neglect_spoilage_milli
+            .saturating_add(u128::from(neglect_spoilage.get()));
+    }
+
+    fn observe_reserve_requirement(
+        &mut self,
+        evidence: (
+            BasisPoints,
+            crate::QuantityMilli,
+            crate::QuantityMilli,
+            crate::QuantityMilli,
+            crate::QuantityMilli,
+            bool,
+            bool,
+        ),
+    ) {
+        let (
+            priority,
+            target_stock,
+            opening_stock,
+            available_supply,
+            remaining_gap,
+            supply_limited,
+            budget_limited,
+        ) = evidence;
+        self.reserve_requirements_reviewed = self.reserve_requirements_reviewed.saturating_add(1);
+        if priority != BasisPoints::FULL {
+            self.reserve_prioritized_reviews = self.reserve_prioritized_reviews.saturating_add(1);
+        }
+        self.reserve_target_milli = self
+            .reserve_target_milli
+            .saturating_add(u128::from(target_stock.get()));
+        self.reserve_opening_stock_milli = self
+            .reserve_opening_stock_milli
+            .saturating_add(u128::from(opening_stock.get()));
+        self.reserve_available_supply_milli = self
+            .reserve_available_supply_milli
+            .saturating_add(u128::from(available_supply.get()));
+        self.reserve_remaining_gap_milli = self
+            .reserve_remaining_gap_milli
+            .saturating_add(u128::from(remaining_gap.get()));
+        if supply_limited {
+            self.reserve_supply_limited_reviews =
+                self.reserve_supply_limited_reviews.saturating_add(1);
+        }
+        if budget_limited {
+            self.reserve_budget_limited_reviews =
+                self.reserve_budget_limited_reviews.saturating_add(1);
+        }
+    }
+
+    fn observe_reserve_priority_change(
+        &mut self,
+        country: CountryId,
+        region: RegionId,
+        previous: u16,
+        new: u16,
+        reason: crate::ReservePriorityRevisionReason,
+    ) {
+        if previous == new {
+            return;
+        }
+        self.reserve_priority_changes = self.reserve_priority_changes.saturating_add(1);
+        if new > previous {
+            self.reserve_priority_increases = self.reserve_priority_increases.saturating_add(1);
+        } else {
+            self.reserve_priority_decreases = self.reserve_priority_decreases.saturating_add(1);
+        }
+        if reason == crate::ReservePriorityRevisionReason::ImportReliance {
+            self.reserve_import_reliance_priority_changes = self
+                .reserve_import_reliance_priority_changes
+                .saturating_add(1);
+        }
+        self.leading_reserve_priority_change
+            .get_or_insert((country, region, previous, new));
+    }
+
+    fn observe_reserve_policy_change(
+        &mut self,
+        country: CountryId,
+        previous_coverage: u8,
+        new_coverage: u8,
+        previous_budget: u16,
+        new_budget: u16,
+    ) {
+        if previous_coverage == new_coverage && previous_budget == new_budget {
+            return;
+        }
+        self.reserve_policy_changes = self.reserve_policy_changes.saturating_add(1);
+        match new_coverage.cmp(&previous_coverage) {
+            std::cmp::Ordering::Greater => {
+                self.reserve_coverage_increases = self.reserve_coverage_increases.saturating_add(1);
+            }
+            std::cmp::Ordering::Less => {
+                self.reserve_coverage_decreases = self.reserve_coverage_decreases.saturating_add(1);
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+        match new_budget.cmp(&previous_budget) {
+            std::cmp::Ordering::Greater => {
+                self.reserve_budget_increases = self.reserve_budget_increases.saturating_add(1);
+            }
+            std::cmp::Ordering::Less => {
+                self.reserve_budget_decreases = self.reserve_budget_decreases.saturating_add(1);
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+        self.leading_reserve_policy_change.get_or_insert((
+            country,
+            previous_coverage,
+            new_coverage,
+            previous_budget,
+            new_budget,
+        ));
+    }
+
+    fn push_firm_entry_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        actor_names: &BTreeMap<ActorId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+        firms: &BTreeMap<crate::FirmId, crate::Firm>,
+        goods: &BTreeMap<crate::GoodId, crate::Good>,
+    ) {
+        let Some((founder, firm, region, good)) = self.leading_firm_entry else {
+            return;
+        };
+        let founder_name = actor_names
+            .get(&founder)
+            .map_or_else(|| format!("actor {}", founder.get()), Clone::clone);
+        let firm_name = firms.get(&firm).map_or_else(
+            || format!("firm {}", firm.get()),
+            |value| value.name().to_owned(),
+        );
+        let region_name = region_names
+            .get(&region)
+            .map_or_else(|| format!("region {}", region.get()), Clone::clone);
+        let good_name = goods.get(&good).map_or_else(
+            || format!("good {}", good.get()),
+            |value| value.name().to_owned(),
+        );
+        sentences.push(format!(
+            "Persistent shortages drew {} new local producers, committing {} minor currency units to installed capacity and {} to working capital while opening {} initial jobs. {} founded {} in {} to produce {}.",
+            self.firms_founded,
+            self.firm_entry_capital_cost_minor,
+            self.firm_entry_working_capital_minor,
+            self.firm_entry_jobs,
+            founder_name,
+            firm_name,
+            region_name,
+            good_name
+        ));
+    }
+
+    fn push_labor_market_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if self.labor_market_observations == 0 {
+            return;
+        }
+        sentences.push(format!(
+            "Competitive labor markets recorded {} funded offers and {} hires across {} regional monthly observations, with {} residual vacancies and {} available workers observed after matching.",
+            self.labor_offers,
+            self.labor_hires,
+            self.labor_market_observations,
+            self.labor_vacancies,
+            self.labor_available_workers
+        ));
+        if self.labor_wage_pressure_increases > 0 || self.labor_wage_pressure_decreases > 0 {
+            sentences.push(format!(
+                "Persistent labor pressure raised {} accepted wage bids and restrained {}, for a net observed adjustment of {} basis points across hires.",
+                self.labor_wage_pressure_increases,
+                self.labor_wage_pressure_decreases,
+                self.labor_wage_adjustment_basis_points
+            ));
+        }
+        if let Some(region) = self.leading_unemployment_region {
+            let name = region_names
+                .get(&region)
+                .map_or_else(|| format!("region {}", region.get()), Clone::clone);
+            sentences.push(format!(
+                "The longest observed unemployment pressure reached {} consecutive months in {}.",
+                self.maximum_unemployment_pressure_months, name
+            ));
+        }
+        if let Some(region) = self.leading_vacancy_region {
+            let name = region_names
+                .get(&region)
+                .map_or_else(|| format!("region {}", region.get()), Clone::clone);
+            sentences.push(format!(
+                "The longest observed unfilled-vacancy pressure reached {} consecutive months in {}.",
+                self.maximum_vacancy_pressure_months, name
+            ));
+        }
+    }
+
+    fn push_reserve_priority_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        country_names: &BTreeMap<CountryId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        let Some((country, region, previous, new)) = self.leading_reserve_priority_change else {
+            return;
+        };
+        let country_name = country_names
+            .get(&country)
+            .map_or_else(|| format!("country {}", country.get()), Clone::clone);
+        let region_name = region_names
+            .get(&region)
+            .map_or_else(|| format!("region {}", region.get()), Clone::clone);
+        sentences.push(format!(
+            "Reserve priorities adapted {} times after persistent regional evidence: {} targets rose and {} fell; {} revisions followed sustained household import reliance. The leading revision in {}, {}, moved a regional-good priority from {} to {} basis points.",
+            self.reserve_priority_changes,
+            self.reserve_priority_increases,
+            self.reserve_priority_decreases,
+            self.reserve_import_reliance_priority_changes,
+            country_name,
+            region_name,
+            previous,
+            new
+        ));
+    }
+
+    fn push_public_reserve_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        actor_names: &BTreeMap<ActorId, String>,
+        country_names: &BTreeMap<CountryId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if let Some((country, previous_coverage, new_coverage, previous_budget, new_budget)) =
+            self.leading_reserve_policy_change
+        {
+            let country_name = country_names
+                .get(&country)
+                .map_or_else(|| format!("country {}", country.get()), Clone::clone);
+            sentences.push(format!(
+                "Reserve doctrine adapted {} times from accumulated evidence: coverage rose {} times and fell {}, while procurement authority rose {} times and fell {}. In {}, the leading revision moved coverage from {} to {} months and the monthly treasury ceiling from {} to {} basis points.",
+                self.reserve_policy_changes,
+                self.reserve_coverage_increases,
+                self.reserve_coverage_decreases,
+                self.reserve_budget_increases,
+                self.reserve_budget_decreases,
+                country_name,
+                previous_coverage,
+                new_coverage,
+                previous_budget,
+                new_budget
+            ));
+        }
+        self.push_reserve_priority_narration(sentences, country_names, region_names);
+        if self.reserve_maintenance_entries > 0 {
+            let unpaid = self
+                .reserve_maintenance_assessed_minor
+                .saturating_sub(self.reserve_maintenance_paid_minor);
+            sentences.push(format!(
+                "Maintaining carried public reserves consumed {} of {} assessed minor currency units; ordinary spoilage removed {} milli-units and unfunded upkeep destroyed another {}, leaving {} unpaid.",
+                self.reserve_maintenance_paid_minor,
+                self.reserve_maintenance_assessed_minor,
+                self.reserve_baseline_spoilage_milli,
+                self.reserve_neglect_spoilage_milli,
+                unpaid
+            ));
+        }
+        if self.reserve_requirements_reviewed > 0 {
+            sentences.push(format!(
+                "Officials reviewed {} observed survival-reserve requirements: coverage targets totaled {} milli-units against {} already stocked, with {} in eligible local supply. {} milli-units remained uncovered; {} reviews were supply-limited and {} budget-limited.",
+                self.reserve_requirements_reviewed,
+                self.reserve_target_milli,
+                self.reserve_opening_stock_milli,
+                self.reserve_available_supply_milli,
+                self.reserve_remaining_gap_milli,
+                self.reserve_supply_limited_reviews,
+                self.reserve_budget_limited_reviews
+            ));
+            if self.reserve_prioritized_reviews > 0 {
+                sentences.push(format!(
+                    "Differentiated regional-good priorities scaled {} of those targets and placed the most protected needs first against the shared treasury ceiling.",
+                    self.reserve_prioritized_reviews
+                ));
+            }
+        }
+        if self.reserve_procurements > 0 {
+            let mut leading_actor = None;
+            for (actor, spending) in &self.reserve_procurement_by_actor {
+                if leading_actor.is_none_or(|(_, current)| *spending > current) {
+                    leading_actor = Some((*actor, *spending));
+                }
+            }
+            let buyer = leading_actor
+                .and_then(|(actor, _)| actor_names.get(&actor))
+                .map_or_else(|| "Public buyers".to_owned(), Clone::clone);
+            sentences.push(format!(
+                "After household markets exposed physical shortages, {} bought {} milli-units from local producers in {} procurements for {} minor currency units.",
+                buyer,
+                self.reserve_procured_milli,
+                self.reserve_procurements,
+                self.reserve_spending_minor
+            ));
+        }
+        if self.reserve_distributions > 0 {
+            let mut leading_region = None;
+            for (region, quantity) in &self.reserve_distribution_by_region {
+                if leading_region.is_none_or(|(_, current)| *quantity > current) {
+                    leading_region = Some((*region, *quantity));
+                }
+            }
+            let destination = leading_region
+                .and_then(|(region, quantity)| {
+                    region_names.get(&region).map(|name| {
+                        format!("; the largest flow was {quantity} milli-units to {name}")
+                    })
+                })
+                .unwrap_or_default();
+            sentences.push(format!(
+                "Public reserves released {} milli-units across {} cohort deliveries before grievance, stress, and health consequences{}.",
+                self.reserve_distributed_milli, self.reserve_distributions, destination
+            ));
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn push_firm_distress_narration(&self, sentences: &mut Vec<String>) {
+        if self.lender_principal_repaid_minor > 0
+            || self.lender_interest_income_minor > 0
+            || self.lender_realized_loss_minor > 0
+        {
+            let successful_label = if self.lender_successful_loans == 1 {
+                "loan"
+            } else {
+                "loans"
+            };
+            let default_label = if self.lender_defaulted_loans == 1 {
+                "default"
+            } else {
+                "defaults"
+            };
+            sentences.push(format!(
+                "Private lenders recovered {} principal and earned {} interest; {} {} completed successfully while {} {} realized {} of credit losses.",
+                self.lender_principal_repaid_minor,
+                self.lender_interest_income_minor,
+                self.lender_successful_loans,
+                successful_label,
+                self.lender_defaulted_loans,
+                default_label,
+                self.lender_realized_loss_minor
+            ));
+        }
+        if self.autonomous_credit_acceptances > 0 {
+            sentences.push(format!(
+                "Viable cash-constrained firms accepted {} observed credit offers providing {} minor currency units of working capital.",
+                self.autonomous_credit_acceptances, self.autonomous_credit_principal_minor
+            ));
+        }
+        if self.autonomous_credit_unfunded_searches > 0 {
+            sentences.push(format!(
+                "{} of {} viable monthly firm funding searches ended without an acceptable domestic credit offer.",
+                self.autonomous_credit_unfunded_searches, self.autonomous_credit_searches
+            ));
+        }
+        if self.firm_debt_service_attempts > 0 {
+            let unpaid = self
+                .firm_debt_service_due_minor
+                .saturating_sub(self.firm_debt_service_paid_minor);
+            sentences.push(format!(
+                "Operating firms paid {} of {} minor currency units of scheduled debt service, including {} of {} interest; {} remained unpaid across {} overdue attempts.",
+                self.firm_debt_service_paid_minor,
+                self.firm_debt_service_due_minor,
+                self.firm_interest_paid_minor,
+                self.firm_interest_charged_minor,
+                unpaid,
+                self.firm_overdue_debt_attempts
+            ));
+        }
         if self.firm_recapitalizations > 0 {
             sentences.push(format!(
                 "Owners injected {} minor currency units into {} firms after persistent wage arrears.",
@@ -732,8 +1430,22 @@ impl YearSummary {
             78
         } else if self.firm_reorganizations > 0 {
             76
+        } else if self.reserve_neglect_spoilage_milli > 0 {
+            80
+        } else if self.reserve_policy_changes > 0 || self.reserve_priority_changes > 0 {
+            79
+        } else if self.reserve_distributions > 0 || self.reserve_procurements > 0 {
+            78
+        } else if self.reserve_baseline_spoilage_milli > 0
+            || self.reserve_maintenance_paid_minor > 0
+        {
+            76
         } else if !self.procurement_shortfalls.is_empty() {
             75
+        } else if self.firms_founded > 0 {
+            73
+        } else if self.firm_overdue_debt_attempts > 0 {
+            74
         } else if self.firm_distress_downsizings > 0 {
             72
         } else if self.relief_debt_minor > 0 || self.relief_minor > 0 {
@@ -752,9 +1464,388 @@ impl YearSummary {
 
 #[cfg(test)]
 mod tests {
-    use crate::{BasisPoints, CohortId, CountryId, Money, Population, SimDate, WorldSeed};
+    use crate::{
+        Actor, BasisPoints, CohortId, Country, CountryId, Good, GoodId, Money, Population,
+        RecipeId, Region, SimDate, WorldSeed,
+    };
 
     use super::*;
+
+    #[test]
+    fn chronicle_explains_persistent_regional_labor_pressure() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: RegionId::new(1),
+                country: CountryId::new(1),
+                name: "North March".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EmploymentMatched {
+                firm: crate::FirmId::new(1),
+                cohort: CohortId::new(1),
+                workers: 1,
+                wage: Money::from_minor_units(125),
+                minimum_education: crate::EducationLevel::Basic,
+                labor_market_adjustment_basis_points: 500,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalLaborMarketObserved {
+                region: RegionId::new(1),
+                available_workers: 0,
+                vacancies: 3,
+                offers: 2,
+                hires: 1,
+                average_offered_wage: Money::from_minor_units(120),
+                unemployment_pressure_months: 0,
+                vacancy_pressure_months: 4,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert!(entry.text.contains("2 funded offers and 1 hires"));
+        assert!(entry.text.contains("3 residual vacancies"));
+        assert!(
+            entry
+                .text
+                .contains("Persistent labor pressure raised 1 accepted wage bids and restrained 0")
+        );
+        assert!(
+            entry
+                .text
+                .contains("net observed adjustment of 500 basis points")
+        );
+        assert!(entry.text.contains(
+            "longest observed unfilled-vacancy pressure reached 4 consecutive months in North March"
+        ));
+    }
+
+    #[test]
+    fn chronicle_names_shortage_driven_firm_entry_and_real_capital() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world
+            .register_country(Country::new(CountryId::new(1), "Aster").expect("country"))
+            .expect("country");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "North March",
+                    Population::new(10),
+                    Money::from_minor_units(100),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_good(Good::new(GoodId::new(1), "grain").expect("good"))
+            .expect("good");
+        world
+            .register_actor(
+                Actor::new(ActorId::new(1), "Iris Vale", RegionId::new(1), 1980).expect("actor"),
+            )
+            .expect("actor");
+        world.events.append(
+            date,
+            DomainEvent::FirmFoundedFromOpportunity {
+                founder: ActorId::new(1),
+                firm: crate::FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                recipe: RecipeId::new(1),
+                cohort: CohortId::new(1),
+                wage: Money::from_minor_units(1),
+                capital_cost: Money::from_minor_units(20),
+                working_capital: Money::from_minor_units(3),
+                pressure_months: 3,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 73);
+        assert!(
+            entry
+                .text
+                .contains("Persistent shortages drew 1 new local producers")
+        );
+        assert!(
+            entry
+                .text
+                .contains("20 minor currency units to installed capacity")
+        );
+        assert!(
+            entry
+                .text
+                .contains("Iris Vale founded firm 1 in North March to produce grain")
+        );
+    }
+
+    #[test]
+    fn chronicle_explains_evidence_driven_reserve_policy_change() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world
+            .register_country(Country::new(CountryId::new(1), "Aster").expect("country"))
+            .expect("country");
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReservePolicyReviewed {
+                country: CountryId::new(1),
+                observed_shortage: crate::QuantityMilli::new(1_000),
+                opening_stock: crate::QuantityMilli::new(0),
+                remaining_gap: crate::QuantityMilli::new(0),
+                baseline_spoilage: crate::QuantityMilli::new(0),
+                neglect_spoilage: crate::QuantityMilli::new(0),
+                preparedness_months: 0,
+                budget_gap_months: 0,
+                upkeep_stress_months: 0,
+                waste_months: 0,
+                previous_coverage_months: 1,
+                new_coverage_months: 2,
+                previous_monthly_budget: crate::BasisPoints::new(4_000).expect("budget"),
+                new_monthly_budget: crate::BasisPoints::new(4_000).expect("budget"),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 79);
+        assert!(entry.text.contains("Reserve doctrine adapted 1 times"));
+        assert!(entry.text.contains("In Aster"));
+        assert!(entry.text.contains("coverage from 1 to 2 months"));
+        assert!(entry.text.contains("from 4000 to 4000 basis points"));
+    }
+
+    #[test]
+    fn chronicle_explains_evidence_driven_reserve_priority_change() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world
+            .register_country(Country::new(CountryId::new(1), "Aster").expect("country"))
+            .expect("country");
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: RegionId::new(1),
+                country: CountryId::new(1),
+                name: "North March".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReservePriorityReviewed {
+                country: CountryId::new(1),
+                region: RegionId::new(1),
+                good: crate::GoodId::new(1),
+                remaining_gap: crate::QuantityMilli::new(500),
+                baseline_spoilage: crate::QuantityMilli::new(0),
+                imported_quantity: crate::QuantityMilli::new(1_000),
+                imported_share: BasisPoints::FULL,
+                uncovered_months: 0,
+                import_reliance_months: 0,
+                idle_spoilage_months: 0,
+                previous_priority: BasisPoints::new(5_000).expect("priority"),
+                new_priority: BasisPoints::new(5_500).expect("priority"),
+                revision_reason: crate::ReservePriorityRevisionReason::ImportReliance,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 79);
+        assert!(entry.text.contains("Reserve priorities adapted 1 times"));
+        assert!(
+            entry
+                .text
+                .contains("1 revisions followed sustained household import reliance")
+        );
+        assert!(entry.text.contains("Aster, North March"));
+        assert!(entry.text.contains("from 5000 to 5500 basis points"));
+    }
+
+    #[test]
+    fn chronicle_explains_reserve_storage_cost_and_neglect() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReserveMaintained {
+                country: CountryId::new(1),
+                region: crate::RegionId::new(1),
+                good: crate::GoodId::new(1),
+                opening_stock: crate::QuantityMilli::new(1_000),
+                reference_value: Money::from_minor_units(10),
+                assessed_cost: Money::from_minor_units(4),
+                paid_cost: Money::from_minor_units(1),
+                baseline_spoilage: crate::QuantityMilli::new(100),
+                neglect_spoilage: crate::QuantityMilli::new(169),
+                closing_stock: crate::QuantityMilli::new(731),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 80);
+        assert!(entry.text.contains("consumed 1 of 4 assessed"));
+        assert!(entry.text.contains("ordinary spoilage removed 100"));
+        assert!(entry.text.contains("unfunded upkeep destroyed another 169"));
+        assert!(entry.text.contains("leaving 3 unpaid"));
+    }
+
+    #[test]
+    fn chronicle_attributes_physical_reserve_procurement_and_release() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::ActorRegistered {
+                actor: crate::ActorId::new(1),
+                name: "Mara Voss".to_owned(),
+                home_region: crate::RegionId::new(1),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReserveRequirementReviewed {
+                actor: crate::ActorId::new(1),
+                country: CountryId::new(1),
+                region: crate::RegionId::new(1),
+                good: crate::GoodId::new(1),
+                observed_shortage: crate::QuantityMilli::new(1_000),
+                priority: BasisPoints::FULL,
+                target_stock: crate::QuantityMilli::new(2_000),
+                opening_stock: crate::QuantityMilli::new(0),
+                available_supply: crate::QuantityMilli::new(2_000),
+                budget_available: Money::from_minor_units(20),
+                purchased: crate::QuantityMilli::new(2_000),
+                spending: Money::from_minor_units(20),
+                remaining_gap: crate::QuantityMilli::new(0),
+                supply_limited: false,
+                budget_limited: false,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReserveProcured {
+                actor: crate::ActorId::new(1),
+                country: CountryId::new(1),
+                region: crate::RegionId::new(1),
+                seller: crate::FirmId::new(1),
+                good: crate::GoodId::new(1),
+                quantity: crate::QuantityMilli::new(2_000),
+                cost: Money::from_minor_units(20),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::GovernmentReserveDistributed {
+                country: CountryId::new(1),
+                region: crate::RegionId::new(1),
+                cohort: CohortId::new(1),
+                good: crate::GoodId::new(1),
+                quantity: crate::QuantityMilli::new(1_000),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 78);
+        assert!(
+            entry
+                .text
+                .contains("reviewed 1 observed survival-reserve requirements")
+        );
+        assert!(
+            entry
+                .text
+                .contains("coverage targets totaled 2000 milli-units")
+        );
+        assert!(entry.text.contains("Mara Voss bought 2000 milli-units"));
+        assert!(entry.text.contains("for 20 minor currency units"));
+        assert!(entry.text.contains("released 1000 milli-units"));
+        assert!(
+            entry
+                .text
+                .contains("before grievance, stress, and health consequences")
+        );
+    }
+
+    #[test]
+    fn chronicle_reports_scheduled_firm_debt_service_and_overdue_principal() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::FirmDebtServiceSettled {
+                firm: crate::FirmId::new(1),
+                creditor: crate::ActorId::new(1),
+                priority: crate::FirmCreditorPriority::Secured,
+                due: Money::from_minor_units(40),
+                paid: Money::from_minor_units(10),
+                interest_charged: Money::from_minor_units(2),
+                interest_paid: Money::from_minor_units(2),
+                remaining_principal: Money::from_minor_units(70),
+                remaining_interest: Money::default(),
+                overdue: true,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let entry = world.chronicle().pop().expect("chronicle entry");
+        assert_eq!(entry.importance, 74);
+        assert!(entry.text.contains("paid 10 of 40"));
+        assert!(entry.text.contains("including 2 of 2 interest"));
+        assert!(
+            entry
+                .text
+                .contains("30 remained unpaid across 1 overdue attempts")
+        );
+    }
 
     #[test]
     fn chronicle_connects_material_shortage_coping_relief_and_deaths() {

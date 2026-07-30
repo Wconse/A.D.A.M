@@ -1,7 +1,8 @@
 use crate::{
-    ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, FirmExpectations, FirmId,
-    FirmPolicy, FirmReorganizationPlan, FreightContract, InvestmentProject, MarketClearing,
-    ProjectId, ResolutionId, ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
+    ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, EmploymentMatch,
+    FirmExpectations, FirmFoundingPlan, FirmId, FirmPolicy, FirmReorganizationPlan,
+    FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId, ShipmentId,
+    ShipmentOrder, TerminalId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
@@ -10,6 +11,9 @@ pub enum WorldCommand {
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
     ExecuteObservedFirmManagement,
+    ExecuteObservedFirmEntry,
+    FoundFirm(FirmFoundingPlan),
+    ExecuteObservedFirmCreditMarket,
     ExecuteObservedFirmReorganizations,
     ExecuteObservedFirmLiquidations,
     ExecuteObservedEmergencyRelief,
@@ -56,6 +60,8 @@ pub enum WorldCommand {
         cohort: crate::CohortId,
         workers: u64,
     },
+    MatchEmploymentWorker(EmploymentMatch),
+    ExecuteObservedLaborMatching,
     ExecuteMonthlyPayroll,
     UpdateMonthlyCohortHealth,
     UpdateMonthlyCohortExperience,
@@ -121,6 +127,45 @@ pub enum WorldCommand {
         priority: crate::FirmCreditorPriority,
         principal: crate::Money,
     },
+    IssueScheduledFirmCredit {
+        creditor: ActorId,
+        firm: FirmId,
+        priority: crate::FirmCreditorPriority,
+        principal: crate::Money,
+        term_months: u16,
+    },
+    UnderwriteFirmCreditOffer {
+        creditor: ActorId,
+        firm: FirmId,
+        priority: crate::FirmCreditorPriority,
+        requested_principal: crate::Money,
+        annual_interest: BasisPoints,
+        term_months: u16,
+    },
+    AcceptFirmCreditOffer {
+        actor: ActorId,
+        creditor: ActorId,
+        firm: FirmId,
+        priority: crate::FirmCreditorPriority,
+    },
+    ExecuteMonthlyFirmDebtService,
+    SetGovernmentReservePriority {
+        actor: ActorId,
+        country: crate::CountryId,
+        region: crate::RegionId,
+        good: crate::GoodId,
+        priority: crate::BasisPoints,
+    },
+    ProcureGovernmentReserve {
+        actor: ActorId,
+        seller: FirmId,
+        good: crate::GoodId,
+        quantity: crate::QuantityMilli,
+        unit_price: crate::Money,
+    },
+    ExecuteObservedGovernmentReserveProcurement,
+    ExecuteMonthlyGovernmentReserveMaintenance,
+    ExecuteObservedGovernmentReservePolicyReview,
 }
 impl WorldCommand {
     /// Applies the same deterministic command regardless of player or AI origin.
@@ -137,6 +182,11 @@ impl WorldCommand {
             }
             Self::ExecuteObservedFirmManagement => {
                 world.execute_observed_firm_management().map(|_| ())
+            }
+            Self::ExecuteObservedFirmEntry => world.execute_observed_firm_entry().map(|_| ()),
+            Self::FoundFirm(plan) => world.found_firm(*plan),
+            Self::ExecuteObservedFirmCreditMarket => {
+                world.execute_observed_firm_credit_market().map(|_| ())
             }
             Self::ExecuteObservedFirmReorganizations => {
                 world.execute_observed_firm_reorganizations().map(|_| ())
@@ -194,6 +244,10 @@ impl WorldCommand {
                 cohort,
                 workers,
             } => world.change_employment_workers(*firm, *cohort, *workers),
+            Self::MatchEmploymentWorker(matched) => world.match_employment_worker(*matched),
+            Self::ExecuteObservedLaborMatching => {
+                world.execute_observed_labor_matching().map(|_| ())
+            }
             Self::ExecuteMonthlyPayroll => world.execute_monthly_payroll().map(|_| ()),
             Self::UpdateMonthlyCohortHealth => world.update_monthly_cohort_health(),
             Self::UpdateMonthlyCohortExperience => world.update_monthly_cohort_experience(),
@@ -263,6 +317,70 @@ impl WorldCommand {
                 priority,
                 principal,
             } => world.issue_firm_credit(*creditor, *firm, *priority, *principal),
+            Self::IssueScheduledFirmCredit {
+                creditor,
+                firm,
+                priority,
+                principal,
+                term_months,
+            } => world.issue_scheduled_firm_credit(
+                *creditor,
+                *firm,
+                *priority,
+                *principal,
+                *term_months,
+            ),
+            Self::UnderwriteFirmCreditOffer {
+                creditor,
+                firm,
+                priority,
+                requested_principal,
+                annual_interest,
+                term_months,
+            } => world
+                .underwrite_firm_credit_offer(
+                    *creditor,
+                    *firm,
+                    *priority,
+                    *requested_principal,
+                    *annual_interest,
+                    *term_months,
+                )
+                .map(|_| ()),
+            Self::AcceptFirmCreditOffer {
+                actor,
+                creditor,
+                firm,
+                priority,
+            } => world.accept_firm_credit_offer(*actor, *creditor, *firm, *priority),
+            Self::ExecuteMonthlyFirmDebtService => {
+                world.execute_monthly_firm_debt_service().map(|_| ())
+            }
+            Self::SetGovernmentReservePriority {
+                actor,
+                country,
+                region,
+                good,
+                priority,
+            } => world.set_government_reserve_priority(*actor, *country, *region, *good, *priority),
+            Self::ProcureGovernmentReserve {
+                actor,
+                seller,
+                good,
+                quantity,
+                unit_price,
+            } => world
+                .procure_government_reserve(*actor, *seller, *good, *quantity, *unit_price)
+                .map(|_| ()),
+            Self::ExecuteObservedGovernmentReserveProcurement => world
+                .execute_observed_government_reserve_procurement()
+                .map(|_| ()),
+            Self::ExecuteMonthlyGovernmentReserveMaintenance => world
+                .execute_monthly_government_reserve_maintenance()
+                .map(|_| ()),
+            Self::ExecuteObservedGovernmentReservePolicyReview => world
+                .execute_observed_government_reserve_policy_review()
+                .map(|_| ()),
         }
     }
 }

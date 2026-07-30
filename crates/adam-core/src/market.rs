@@ -60,6 +60,28 @@ pub struct MarketFill {
     pub freight_spend: Money,
     pub route: Option<RouteId>,
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HouseholdImportDependence {
+    pub local_quantity: QuantityMilli,
+    pub imported_quantity: QuantityMilli,
+}
+
+impl HouseholdImportDependence {
+    #[must_use]
+    pub fn imported_share(self) -> crate::BasisPoints {
+        let total = self
+            .local_quantity
+            .get()
+            .saturating_add(self.imported_quantity.get());
+        if total == 0 {
+            return crate::BasisPoints::ZERO;
+        }
+        let share = self.imported_quantity.get().saturating_mul(10_000) / total;
+        crate::BasisPoints::new(u16::try_from(share).unwrap_or(crate::BasisPoints::MAX))
+            .unwrap_or(crate::BasisPoints::FULL)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MarketOfferOutcome {
     pub seller: FirmId,
@@ -542,6 +564,55 @@ fn validate_market_clearing(
     Ok(())
 }
 
+fn derive_household_import_dependence(
+    cohorts: &std::collections::BTreeMap<CohortId, crate::HouseholdCohort>,
+    fills: &[MarketFill],
+) -> Result<std::collections::BTreeMap<(RegionId, GoodId), HouseholdImportDependence>, WorldError> {
+    let mut dependence = std::collections::BTreeMap::new();
+    for fill in fills.iter().filter(|fill| fill.tier == NeedTier::Survival) {
+        let region = cohorts
+            .get(&fill.buyer)
+            .ok_or(WorldError::UnknownCohort(fill.buyer))?
+            .region();
+        let row = dependence
+            .entry((region, fill.good))
+            .or_insert_with(HouseholdImportDependence::default);
+        let slot = if fill.route.is_some() {
+            &mut row.imported_quantity
+        } else {
+            &mut row.local_quantity
+        };
+        *slot = QuantityMilli::new(slot.get().checked_add(fill.quantity.get()).ok_or(
+            WorldError::ArithmeticOverflow("household import dependence quantity"),
+        )?);
+    }
+    Ok(dependence)
+}
+
+fn household_import_dependence_events(
+    world: &crate::World,
+    dependence: &std::collections::BTreeMap<(RegionId, GoodId), HouseholdImportDependence>,
+) -> Result<Vec<crate::DomainEvent>, WorldError> {
+    dependence
+        .iter()
+        .map(|((region, good), row)| {
+            let country = world
+                .regions
+                .get(region)
+                .ok_or(WorldError::UnknownRegion(*region))?
+                .country();
+            Ok(crate::DomainEvent::HouseholdImportDependenceObserved {
+                country,
+                region: *region,
+                good: *good,
+                local_quantity: row.local_quantity,
+                imported_quantity: row.imported_quantity,
+                imported_share: row.imported_share(),
+            })
+        })
+        .collect()
+}
+
 impl crate::World {
     /// Atomically settles pre-cleared market fills against household wealth and firm inventories.
     /// # Errors
@@ -589,6 +660,8 @@ impl crate::World {
             );
             consumption.insert(key, next);
         }
+        let import_dependence = derive_household_import_dependence(&cohorts, &clearing.fills)?;
+        let import_events = household_import_dependence_events(self, &import_dependence)?;
         self.cohorts = cohorts;
         self.firms = firms;
         let mut weighted_desired: std::collections::BTreeMap<CohortId, u128> =
@@ -629,8 +702,12 @@ impl crate::World {
             );
         }
         self.monthly_consumption = consumption;
+        self.household_import_dependence = import_dependence;
         self.unmet_demand = clearing.unmet.clone();
         self.deprivation_pressure = pressure;
+        for event in import_events {
+            self.events.append(self.date, event);
+        }
         record_market_settlement_evidence(self, clearing)?;
         Ok(())
     }
@@ -643,6 +720,13 @@ impl crate::World {
     ) -> &std::collections::BTreeMap<(CohortId, GoodId, NeedTier), QuantityMilli> {
         &self.monthly_consumption
     }
+    #[must_use]
+    pub fn household_import_dependence(
+        &self,
+    ) -> &std::collections::BTreeMap<(RegionId, GoodId), HouseholdImportDependence> {
+        &self.household_import_dependence
+    }
+
     #[must_use]
     pub fn unmet_demand(&self) -> &BTreeUnmet {
         &self.unmet_demand

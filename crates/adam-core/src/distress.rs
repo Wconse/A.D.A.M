@@ -66,7 +66,15 @@ impl World {
             return Ok(None);
         }
         let arrears = self.firm_wage_arrears(firm)?;
-        if arrears.minor_units() <= 0 {
+        let matured_default = self.firm_creditor_claims.values().any(|claim| {
+            claim.firm() == firm
+                && claim.schedule().is_some_and(|schedule| {
+                    schedule.installments_remaining() == 0
+                        && (claim.principal().minor_units() > 0
+                            || claim.accrued_interest().minor_units() > 0)
+                })
+        });
+        if arrears.minor_units() <= 0 && !matured_default {
             self.firm_distress_months.remove(&firm);
             return Ok(None);
         }
@@ -78,17 +86,24 @@ impl World {
             .saturating_add(1)
             .min(INSOLVENCY_TRIGGER_MONTHS);
         self.firm_distress_months.insert(firm, months);
-        if months < RECAPITALIZATION_TRIGGER_MONTHS {
+        let observations = self.firm_operating_history.get(&firm).map_or(0, Vec::len);
+        let awaiting_credit_evidence = (2..4).contains(&observations);
+        if months < RECAPITALIZATION_TRIGGER_MONTHS
+            || (months <= RECAPITALIZATION_TRIGGER_MONTHS.saturating_add(1)
+                && awaiting_credit_evidence)
+        {
             return Ok(None);
         }
-        if let Some(owner) = self.largest_economic_owner(firm) {
-            let available = self.actor_cash.get(&owner).copied().unwrap_or_default();
-            let amount =
-                Money::from_minor_units(available.minor_units().min(arrears.minor_units()));
-            if amount.minor_units() > 0 {
-                return self
-                    .recapitalize_distressed_firm(firm, owner, available, amount, arrears)
-                    .map(Some);
+        if arrears.minor_units() > 0 {
+            if let Some(owner) = self.largest_economic_owner(firm) {
+                let available = self.actor_cash.get(&owner).copied().unwrap_or_default();
+                let amount =
+                    Money::from_minor_units(available.minor_units().min(arrears.minor_units()));
+                if amount.minor_units() > 0 {
+                    return self
+                        .recapitalize_distressed_firm(firm, owner, available, amount, arrears)
+                        .map(Some);
+                }
             }
         }
         if months >= INSOLVENCY_TRIGGER_MONTHS && self.active_firm_workers(firm) == 0 {
@@ -257,8 +272,9 @@ mod tests {
         Actor, AgeBand, BasisPoints, CohortId, ConsumptionProfile, ConsumptionTarget, Country,
         CountryId, DemandBasis, EducationLevel, EmploymentAgreement, EmploymentStatus, Firm,
         FirmCreditorPriority, FirmPolicy, FirmReorganizationPlan, Good, GoodId, HouseholdCohort,
-        HouseholdType, NeedProfileId, NeedTier, OwnershipStake, Population, ProductionRecipe,
-        QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand, WorldSeed,
+        HouseholdType, NeedProfileId, NeedTier, OwnershipStake, Population, ProductionInput,
+        ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, SimDate, WorldCommand,
+        WorldSeed,
     };
     use std::collections::BTreeMap;
 
@@ -952,6 +968,23 @@ mod tests {
             Money::from_minor_units(50)
         );
         assert_eq!(world.actor_cash()[&ActorId::new(3)], Money::default());
+        let secured_history = world.lender_credit_history()[&ActorId::new(2)];
+        assert_eq!(
+            secured_history.principal_repaid(),
+            Money::from_minor_units(50)
+        );
+        assert_eq!(
+            secured_history.realized_losses(),
+            Money::from_minor_units(50)
+        );
+        assert_eq!(secured_history.defaulted_loans(), 1);
+        let unsecured_history = world.lender_credit_history()[&ActorId::new(3)];
+        assert_eq!(unsecured_history.principal_repaid(), Money::default());
+        assert_eq!(
+            unsecured_history.realized_losses(),
+            Money::from_minor_units(200)
+        );
+        assert_eq!(unsecured_history.defaulted_loans(), 1);
         assert!(world.firm_creditor_claims().is_empty());
         assert_eq!(world, replayed);
         assert_eq!(world.stable_fingerprint(), replayed.stable_fingerprint());
@@ -967,6 +1000,750 @@ mod tests {
                 && *paid == Money::from_minor_units(50)
                 && *written_off == Money::from_minor_units(50)
         )));
+    }
+
+    #[test]
+    fn matured_debt_default_without_wage_arrears_enters_insolvency() {
+        let mut world = distressed_world();
+        world
+            .issue_scheduled_firm_credit(
+                ActorId::new(1),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(12),
+                1,
+            )
+            .expect("one-month credit");
+        world
+            .change_employment_workers(FirmId::new(1), CohortId::new(1), 0)
+            .expect("close workforce");
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("firm")
+            .debit_cash(Money::from_minor_units(12))
+            .expect("consume loan cash");
+        world.advance_month().expect("loan maturity");
+        let service = world
+            .execute_monthly_firm_debt_service()
+            .expect("missed maturity");
+        assert_eq!(service.len(), 1);
+        assert!(service[0].overdue);
+        assert_eq!(service[0].paid, Money::default());
+        assert_eq!(
+            world.employment_agreements()[&(FirmId::new(1), CohortId::new(1))].arrears(),
+            Money::default()
+        );
+
+        let mut final_actions = Vec::new();
+        for month in 1..=6 {
+            final_actions = world
+                .execute_observed_firm_distress_response()
+                .expect("debt-default distress");
+            if month < 6 {
+                world.advance_month().expect("default month");
+            }
+        }
+        assert!(matches!(
+            final_actions.as_slice(),
+            [FirmDistressAction::DeclaredInsolvent { firm, .. }]
+                if *firm == FirmId::new(1)
+        ));
+        assert!(world.is_firm_insolvent(FirmId::new(1)));
+        assert_eq!(
+            world.firm_insolvencies()[&FirmId::new(1)].wage_arrears(),
+            Money::default()
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn autonomous_credit_market_funds_viable_gap_from_competing_domestic_lenders() {
+        let mut direct = distressed_world();
+        direct
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(100),
+            )
+            .expect("collateral price");
+        for (id, name) in [(2, "First lender"), (3, "Second lender")] {
+            direct
+                .register_actor(
+                    Actor::new(ActorId::new(id), name, RegionId::new(1), 1975).expect("lender"),
+                )
+                .expect("register lender");
+            direct
+                .actor_cash
+                .insert(ActorId::new(id), Money::from_minor_units(1_000));
+        }
+        for month in 0..3 {
+            direct
+                .record_firm_sale(FirmId::new(1), Money::from_minor_units(500))
+                .expect("observed sales");
+            direct
+                .record_firm_production(FirmId::new(1), 1)
+                .expect("observed production");
+            direct
+                .capture_monthly_firm_observation(FirmId::new(1))
+                .expect("operating observation");
+            direct.reset_monthly_firm_accounts();
+            if month < 2 {
+                direct.advance_month().expect("observation month");
+            }
+        }
+        let mut replayed = direct.clone();
+        let decisions = direct
+            .execute_observed_firm_credit_market()
+            .expect("autonomous credit market");
+        WorldCommand::ExecuteObservedFirmCreditMarket
+            .apply(&mut replayed)
+            .expect("replayed credit market");
+
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].actor, ActorId::new(1));
+        assert_eq!(decisions[0].creditor, ActorId::new(2));
+        assert_eq!(decisions[0].funding_gap, Money::from_minor_units(100));
+        assert_eq!(decisions[0].principal, Money::from_minor_units(110));
+        assert_eq!(decisions[0].annual_interest.get(), 600);
+        assert_eq!(
+            direct.firms()[&FirmId::new(1)].cash(),
+            Money::from_minor_units(110)
+        );
+        assert_eq!(
+            direct.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(890)
+        );
+        assert_eq!(
+            direct.actor_cash()[&ActorId::new(3)],
+            Money::from_minor_units(1_000)
+        );
+        assert!(direct.firm_credit_offers().is_empty());
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        direct.events.append(
+            direct.date(),
+            DomainEvent::EconomicYearCompleted {
+                closed_year: direct.date().year(),
+                monthly_cycles: 12,
+            },
+        );
+        assert!(direct.chronicle().iter().any(|entry| {
+            entry.text.contains(
+                "accepted 1 observed credit offers providing 110 minor currency units of working capital",
+            )
+        }));
+
+        let before = direct.clone();
+        assert!(matches!(
+            direct.execute_observed_firm_credit_market(),
+            Err(WorldError::MonthlyStageAlreadyExecuted { .. })
+        ));
+        assert_eq!(direct, before);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn scarce_lender_headroom_is_ranked_across_contemporaneous_applications() {
+        let mut direct = distressed_world();
+        direct
+            .register_good(Good::new(GoodId::new(2), "Prepared food").expect("good"))
+            .expect("prepared good");
+        direct
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(2),
+                Money::from_minor_units(100),
+            )
+            .expect("prepared price");
+        direct
+            .register_production_recipe(
+                ProductionRecipe::new(
+                    RecipeId::new(2),
+                    "Prepared food",
+                    GoodId::new(2),
+                    QuantityMilli::new(1_000),
+                    1,
+                    vec![ProductionInput::new(
+                        GoodId::new(1),
+                        QuantityMilli::new(10_000),
+                    )],
+                )
+                .expect("recipe"),
+            )
+            .expect("prepared recipe");
+        direct
+            .register_firm(
+                Firm::new(
+                    FirmId::new(2),
+                    "Kitchen",
+                    RegionId::new(1),
+                    RecipeId::new(2),
+                    1,
+                    1,
+                    Money::default(),
+                    BTreeMap::from([(GoodId::new(2), QuantityMilli::new(2_000))]),
+                )
+                .expect("firm"),
+            )
+            .expect("kitchen");
+        direct
+            .register_ownership_stake(OwnershipStake::new(
+                FirmId::new(2),
+                ActorId::new(1),
+                BasisPoints::new(10_000).expect("rights"),
+                BasisPoints::new(10_000).expect("rights"),
+            ))
+            .expect("kitchen ownership");
+        direct
+            .set_firm_policy(
+                ActorId::new(1),
+                FirmId::new(2),
+                FirmPolicy::new(
+                    0,
+                    BasisPoints::ZERO,
+                    BasisPoints::ZERO,
+                    BasisPoints::ZERO,
+                    BasisPoints::ZERO,
+                )
+                .expect("policy"),
+            )
+            .expect("kitchen policy");
+        direct
+            .register_actor(
+                Actor::new(ActorId::new(2), "Finite lender", RegionId::new(1), 1975)
+                    .expect("lender"),
+            )
+            .expect("register lender");
+        // Forty-percent portfolio headroom is 120: enough for one 110-unit request, not both.
+        direct
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(300));
+        direct.firm_distress_months.insert(FirmId::new(1), 2);
+        for month in 0..3 {
+            for firm in [FirmId::new(1), FirmId::new(2)] {
+                direct
+                    .record_firm_sale(firm, Money::from_minor_units(500))
+                    .expect("observed sales");
+                direct
+                    .record_firm_production(firm, 1)
+                    .expect("observed production");
+                direct
+                    .capture_monthly_firm_observation(firm)
+                    .expect("operating observation");
+            }
+            direct.reset_monthly_firm_accounts();
+            if month < 2 {
+                direct.advance_month().expect("observation month");
+            }
+        }
+
+        let mut replayed = direct.clone();
+        let decisions = direct
+            .execute_observed_firm_credit_market()
+            .expect("batched credit market");
+        WorldCommand::ExecuteObservedFirmCreditMarket
+            .apply(&mut replayed)
+            .expect("replayed batch");
+
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].firm, FirmId::new(2));
+        assert_eq!(decisions[0].creditor, ActorId::new(2));
+        assert_eq!(decisions[0].funding_gap, Money::from_minor_units(100));
+        assert_eq!(decisions[0].principal, Money::from_minor_units(110));
+        assert_eq!(direct.firms()[&FirmId::new(1)].cash(), Money::default());
+        assert_eq!(
+            direct.firms()[&FirmId::new(2)].cash(),
+            Money::from_minor_units(110)
+        );
+        assert_eq!(
+            direct.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(190)
+        );
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn lender_track_record_changes_rate_and_portfolio_capacity() {
+        let mut world = distressed_world();
+        world
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        world
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(1_000));
+        assert_eq!(
+            world
+                .autonomous_lender_capacity(ActorId::new(2))
+                .expect("baseline capacity"),
+            Money::from_minor_units(400)
+        );
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("baseline rate"),
+            BasisPoints::new(600).expect("base rate")
+        );
+        let baseline_fingerprint = world.stable_fingerprint();
+        world
+            .record_lender_credit_outcome(
+                ActorId::new(2),
+                Money::from_minor_units(100),
+                Money::from_minor_units(10),
+                Money::default(),
+                true,
+                false,
+            )
+            .expect("successful history");
+        assert_ne!(world.stable_fingerprint(), baseline_fingerprint);
+        assert_eq!(
+            world
+                .autonomous_lender_capacity(ActorId::new(2))
+                .expect("earned capacity"),
+            Money::from_minor_units(410)
+        );
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("earned discount"),
+            BasisPoints::new(550).expect("discounted rate")
+        );
+        world
+            .record_lender_credit_outcome(
+                ActorId::new(2),
+                Money::default(),
+                Money::default(),
+                Money::from_minor_units(100),
+                true,
+                true,
+            )
+            .expect("default history");
+        assert_eq!(
+            world
+                .autonomous_lender_capacity(ActorId::new(2))
+                .expect("loss capacity"),
+            Money::from_minor_units(160)
+        );
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("loss premium"),
+            BasisPoints::new(2_050).expect("loss adjusted rate")
+        );
+        let history = world.lender_credit_history()[&ActorId::new(2)];
+        assert_eq!(history.interest_income(), Money::from_minor_units(10));
+        assert_eq!(history.successful_loans(), 1);
+        assert_eq!(history.defaulted_loans(), 1);
+    }
+
+    #[test]
+    fn borrower_payment_history_changes_future_credit_price() {
+        let mut world = distressed_world();
+        world
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        world
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(1_000));
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("clean borrower rate"),
+            BasisPoints::new(600).expect("base rate")
+        );
+        let baseline = world.stable_fingerprint();
+        world
+            .record_borrower_credit_outcome(
+                FirmId::new(1),
+                Money::from_minor_units(100),
+                Money::from_minor_units(50),
+                true,
+                false,
+                false,
+            )
+            .expect("partial service");
+        assert_ne!(world.stable_fingerprint(), baseline);
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("delinquent rate"),
+            BasisPoints::new(1_700).expect("delinquent premium")
+        );
+        world
+            .record_borrower_credit_outcome(
+                FirmId::new(1),
+                Money::from_minor_units(50),
+                Money::from_minor_units(50),
+                true,
+                true,
+                false,
+            )
+            .expect("successful resolution");
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("partly rehabilitated rate"),
+            BasisPoints::new(1_316).expect("history adjusted rate")
+        );
+        world
+            .record_borrower_credit_outcome(
+                FirmId::new(1),
+                Money::default(),
+                Money::default(),
+                false,
+                true,
+                true,
+            )
+            .expect("default resolution");
+        assert_eq!(
+            world
+                .autonomous_credit_rate(ActorId::new(2), FirmId::new(1))
+                .expect("post-default rate"),
+            BasisPoints::new(2_316).expect("default premium")
+        );
+        let history = world.borrower_credit_history()[&FirmId::new(1)];
+        assert_eq!(history.scheduled_due(), Money::from_minor_units(150));
+        assert_eq!(history.scheduled_paid(), Money::from_minor_units(100));
+        assert_eq!(history.on_time_payments(), 1);
+        assert_eq!(history.delinquent_payments(), 1);
+        assert_eq!(history.successful_loans(), 1);
+        assert_eq!(history.defaulted_loans(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn observed_underwriting_prices_credit_and_interest_moves_real_cash() {
+        let mut direct = distressed_world();
+        direct
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        direct
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(1_000));
+        for month in 0..3 {
+            direct
+                .record_firm_sale(FirmId::new(1), Money::from_minor_units(500))
+                .expect("observed sales");
+            direct
+                .record_firm_production(FirmId::new(1), 1)
+                .expect("observed production");
+            direct
+                .capture_monthly_firm_observation(FirmId::new(1))
+                .expect("operating observation");
+            direct.reset_monthly_firm_accounts();
+            if month < 2 {
+                direct.advance_month().expect("observation month");
+            }
+        }
+        let mut replayed = direct.clone();
+        let rate = BasisPoints::new(1_200).expect("interest rate");
+        let offer = direct
+            .underwrite_firm_credit_offer(
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(20),
+                rate,
+                12,
+            )
+            .expect("underwritten offer");
+        WorldCommand::UnderwriteFirmCreditOffer {
+            creditor: ActorId::new(2),
+            firm: FirmId::new(1),
+            priority: FirmCreditorPriority::Secured,
+            requested_principal: Money::from_minor_units(20),
+            annual_interest: rate,
+            term_months: 12,
+        }
+        .apply(&mut replayed)
+        .expect("replayed underwriting");
+        assert_eq!(offer.principal(), Money::from_minor_units(20));
+        assert_eq!(
+            offer.observed_monthly_surplus(),
+            Money::from_minor_units(400)
+        );
+        assert_eq!(offer.collateral_value(), Money::from_minor_units(35));
+        assert_eq!(direct, replayed);
+
+        let expectations = direct
+            .derive_firm_expectations_from_observations(FirmId::new(1), 3)
+            .expect("offer-aware expectations");
+        WorldCommand::DeriveFirmExpectationsFromObservations {
+            firm: FirmId::new(1),
+            horizon_months: 3,
+        }
+        .apply(&mut replayed)
+        .expect("replayed expectations");
+        assert_eq!(
+            expectations.expected_financing(),
+            Money::from_minor_units(20)
+        );
+        assert_eq!(direct, replayed);
+
+        direct
+            .accept_firm_credit_offer(
+                ActorId::new(1),
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+            )
+            .expect("accepted offer");
+        WorldCommand::AcceptFirmCreditOffer {
+            actor: ActorId::new(1),
+            creditor: ActorId::new(2),
+            firm: FirmId::new(1),
+            priority: FirmCreditorPriority::Secured,
+        }
+        .apply(&mut replayed)
+        .expect("replayed acceptance");
+        assert!(direct.firm_credit_offers().is_empty());
+        assert_eq!(
+            direct.firms()[&FirmId::new(1)].cash(),
+            Money::from_minor_units(20)
+        );
+        assert_eq!(
+            direct.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(980)
+        );
+        assert_eq!(direct, replayed);
+
+        direct.advance_month().expect("first due month");
+        replayed.advance_month().expect("replayed due month");
+        let payment = direct
+            .execute_monthly_firm_debt_service()
+            .expect("interest-bearing service");
+        WorldCommand::ExecuteMonthlyFirmDebtService
+            .apply(&mut replayed)
+            .expect("replayed service");
+        assert_eq!(payment[0].interest_charged, Money::from_minor_units(1));
+        assert_eq!(payment[0].interest_paid, Money::from_minor_units(1));
+        assert_eq!(payment[0].paid, Money::from_minor_units(3));
+        assert_eq!(payment[0].remaining_principal, Money::from_minor_units(18));
+        assert_eq!(
+            direct.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(983)
+        );
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
+    #[test]
+    fn payroll_is_senior_to_scheduled_principal_and_full_repayment_removes_claim() {
+        let mut world = distressed_world();
+        world
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        world
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(200));
+        world
+            .issue_scheduled_firm_credit(
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(200),
+                2,
+            )
+            .expect("scheduled credit");
+
+        world.advance_month().expect("first due month");
+        let payroll = world.execute_monthly_payroll().expect("payroll first");
+        assert_eq!(payroll[0].paid, Money::from_minor_units(100));
+        let first = world
+            .execute_monthly_firm_debt_service()
+            .expect("first installment");
+        assert_eq!(first[0].paid, Money::from_minor_units(100));
+        assert_eq!(world.firms()[&FirmId::new(1)].cash(), Money::default());
+
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("borrower")
+            .set_cash(Money::from_minor_units(200));
+        world.advance_month().expect("second due month");
+        world.execute_monthly_payroll().expect("payroll second");
+        let second = world
+            .execute_monthly_firm_debt_service()
+            .expect("final installment");
+        assert_eq!(second[0].paid, Money::from_minor_units(100));
+        assert_eq!(second[0].remaining_principal, Money::default());
+        assert!(world.firm_creditor_claims().is_empty());
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(200)
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn insolvent_firm_freezes_scheduled_service_until_worker_first_liquidation() {
+        let mut world = distressed_world();
+        world
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        world
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(120));
+        world
+            .issue_scheduled_firm_credit(
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(120),
+                1,
+            )
+            .expect("scheduled credit");
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("borrower")
+            .set_cash(Money::default());
+        world.actor_cash.insert(ActorId::new(1), Money::default());
+        world.advance_month().expect("maturity month");
+        let missed = world
+            .execute_monthly_firm_debt_service()
+            .expect("missed maturity");
+        assert!(missed[0].overdue);
+        assert_eq!(missed[0].paid, Money::default());
+
+        for month in 1..=6 {
+            world.execute_monthly_payroll().expect("payroll");
+            world
+                .execute_observed_firm_distress_response()
+                .expect("distress response");
+            if month < 6 {
+                world.advance_month().expect("distress month");
+            }
+        }
+        assert!(world.is_firm_insolvent(FirmId::new(1)));
+        assert!(
+            world
+                .execute_monthly_firm_debt_service()
+                .expect("frozen service")
+                .is_empty()
+        );
+        assert_eq!(
+            world.firm_creditor_claims()[&(
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                ActorId::new(2)
+            )]
+                .principal(),
+            Money::from_minor_units(120)
+        );
+
+        world
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("estate")
+            .set_cash(Money::from_minor_units(420));
+        for _ in 0..12 {
+            world.advance_month().expect("administration month");
+        }
+        let liquidation = world
+            .execute_observed_firm_liquidations()
+            .expect("liquidation")
+            .pop()
+            .expect("liquidation result");
+        assert_eq!(liquidation.claims_paid, Money::from_minor_units(300));
+        assert_eq!(
+            liquidation.creditor_claims_paid,
+            Money::from_minor_units(120)
+        );
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(2)],
+            Money::from_minor_units(120)
+        );
+        assert!(world.firm_creditor_claims().is_empty());
+    }
+
+    #[test]
+    fn scheduled_credit_amortizes_and_carries_missed_principal_past_maturity() {
+        let mut direct = distressed_world();
+        direct
+            .register_actor(
+                Actor::new(ActorId::new(2), "Lender", RegionId::new(1), 1975).expect("lender"),
+            )
+            .expect("register lender");
+        direct
+            .actor_cash
+            .insert(ActorId::new(2), Money::from_minor_units(120));
+        let mut replayed = direct.clone();
+        direct
+            .issue_scheduled_firm_credit(
+                ActorId::new(2),
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                Money::from_minor_units(120),
+                3,
+            )
+            .expect("scheduled credit");
+        WorldCommand::IssueScheduledFirmCredit {
+            creditor: ActorId::new(2),
+            firm: FirmId::new(1),
+            priority: FirmCreditorPriority::Secured,
+            principal: Money::from_minor_units(120),
+            term_months: 3,
+        }
+        .apply(&mut replayed)
+        .expect("replay issuance");
+        direct.advance_month().expect("first due month");
+        replayed.advance_month().expect("replay due month");
+        let first = direct
+            .execute_monthly_firm_debt_service()
+            .expect("first installment");
+        WorldCommand::ExecuteMonthlyFirmDebtService
+            .apply(&mut replayed)
+            .expect("replay installment");
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].due, Money::from_minor_units(40));
+        assert_eq!(first[0].paid, Money::from_minor_units(40));
+        assert_eq!(first[0].remaining_principal, Money::from_minor_units(80));
+        assert!(!first[0].overdue);
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+
+        direct
+            .firms
+            .get_mut(&FirmId::new(1))
+            .expect("borrower")
+            .set_cash(Money::from_minor_units(10));
+        direct.advance_month().expect("second due month");
+        let second = direct
+            .execute_monthly_firm_debt_service()
+            .expect("partial installment");
+        assert_eq!(second[0].due, Money::from_minor_units(40));
+        assert_eq!(second[0].paid, Money::from_minor_units(10));
+        assert_eq!(second[0].remaining_principal, Money::from_minor_units(70));
+        assert!(!second[0].overdue);
+
+        direct.advance_month().expect("maturity month");
+        let maturity = direct
+            .execute_monthly_firm_debt_service()
+            .expect("maturity attempt");
+        assert_eq!(maturity[0].due, Money::from_minor_units(70));
+        assert_eq!(maturity[0].paid, Money::default());
+        assert!(maturity[0].overdue);
+        assert_eq!(
+            direct.firm_creditor_claims()[&(
+                FirmId::new(1),
+                FirmCreditorPriority::Secured,
+                ActorId::new(2)
+            )]
+                .principal(),
+            Money::from_minor_units(70)
+        );
     }
 
     #[test]

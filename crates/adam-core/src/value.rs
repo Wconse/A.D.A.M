@@ -71,7 +71,9 @@ pub struct BasisPoints(u16);
 
 impl BasisPoints {
     pub const MAX: u16 = 10_000;
+    pub const ZERO: Self = Self(0);
     pub const HALF: Self = Self(5_000);
+    pub const FULL: Self = Self(10_000);
 
     /// Creates a fixed-point share where 10,000 means 100%.
     ///

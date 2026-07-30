@@ -362,6 +362,7 @@ pub enum WorldError {
     DuplicateCohort(CohortId),
     DuplicateRegion(RegionId),
     DuplicateActor(ActorId),
+    DuplicateActorCash(ActorId),
     DuplicatePowerNode(PowerNodeId),
     DuplicateInfluence {
         actor: ActorId,
@@ -383,6 +384,7 @@ pub enum WorldError {
     InvalidCohort(&'static str),
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
+    InvalidActorCash,
     InvalidMarketClearing(&'static str),
     CommercialCycleAlreadyExecuted(SimDate),
     MonthlyStageAlreadyExecuted {
@@ -484,6 +486,9 @@ impl fmt::Display for WorldError {
             Self::DuplicateCohort(id) => write!(formatter, "cohort {id} already exists"),
             Self::DuplicateRegion(id) => write!(formatter, "region {id} already exists"),
             Self::DuplicateActor(id) => write!(formatter, "actor {id} already exists"),
+            Self::DuplicateActorCash(id) => {
+                write!(formatter, "actor {id} already has an initial cash balance")
+            }
             Self::DuplicatePowerNode(id) => write!(formatter, "power node {id} already exists"),
             Self::DuplicateInfluence { actor, node } => {
                 write!(
@@ -525,6 +530,7 @@ impl fmt::Display for WorldError {
                 )
             }
             Self::InvalidPrice => formatter.write_str("regional price must be positive"),
+            Self::InvalidActorCash => formatter.write_str("actor initial cash cannot be negative"),
             Self::InvalidMarketClearing(reason) => {
                 write!(formatter, "invalid market clearing: {reason}")
             }
@@ -672,6 +678,12 @@ pub struct World {
     pub(crate) date: SimDate,
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
     pub(crate) last_firm_management_date: Option<SimDate>,
+    pub(crate) last_firm_entry_date: Option<SimDate>,
+    pub(crate) last_labor_market_date: Option<SimDate>,
+    pub(crate) last_firm_credit_market_date: Option<SimDate>,
+    pub(crate) last_government_reserve_procurement_date: Option<SimDate>,
+    pub(crate) last_government_reserve_maintenance_date: Option<SimDate>,
+    pub(crate) last_government_reserve_policy_review_date: Option<SimDate>,
     pub(crate) last_emergency_relief_date: Option<SimDate>,
     pub(crate) last_payroll_date: Option<SimDate>,
     pub(crate) last_household_cashflow_date: Option<SimDate>,
@@ -681,7 +693,9 @@ pub struct World {
     pub(crate) last_annual_closure_year: Option<i32>,
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
+    pub(crate) recipe_minimum_education: BTreeMap<RecipeId, crate::EducationLevel>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
+    pub(crate) firm_entry_pressure: BTreeMap<(RegionId, GoodId), u8>,
     pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
@@ -689,16 +703,21 @@ pub struct World {
     pub(crate) firm_insolvencies: BTreeMap<FirmId, crate::FirmInsolvency>,
     pub(crate) firm_creditor_claims:
         BTreeMap<(FirmId, crate::FirmCreditorPriority, ActorId), crate::FirmCreditorClaim>,
+    pub(crate) firm_credit_offers:
+        BTreeMap<(FirmId, crate::FirmCreditorPriority, ActorId), crate::FirmCreditOffer>,
     pub(crate) monthly_firm_procurement_purchases:
         BTreeMap<(FirmId, GoodId), (crate::QuantityMilli, Money)>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
     pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
+    pub(crate) regional_labor_market: BTreeMap<RegionId, crate::RegionalLaborMarketObservation>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
     pub(crate) board_resolutions: BTreeMap<ResolutionId, BoardResolution>,
     pub(crate) actor_cash: BTreeMap<ActorId, Money>,
+    pub(crate) lender_credit_history: BTreeMap<ActorId, crate::LenderCreditHistory>,
+    pub(crate) borrower_credit_history: BTreeMap<FirmId, crate::BorrowerCreditHistory>,
     pub(crate) committed_investments: BTreeMap<FirmId, Money>,
     pub(crate) investment_projects: BTreeMap<ProjectId, InvestmentProject>,
     pub(crate) logistics_routes: BTreeMap<RouteId, LogisticsRoute>,
@@ -714,6 +733,8 @@ pub struct World {
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
     pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
+    pub(crate) household_import_dependence:
+        BTreeMap<(RegionId, GoodId), crate::HouseholdImportDependence>,
     pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) monthly_affordability_gaps: BTreeMap<CohortId, Money>,
     pub(crate) deprivation_pressure: BTreeMap<CohortId, BasisPoints>,
@@ -722,6 +743,11 @@ pub struct World {
     pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
     pub(crate) cohort_health: BTreeMap<CohortId, crate::CohortHealth>,
     pub(crate) government_emergency_policies: BTreeMap<CountryId, crate::GovernmentEmergencyPolicy>,
+    pub(crate) government_reserves: BTreeMap<(RegionId, GoodId), QuantityMilli>,
+    pub(crate) government_reserve_priorities: BTreeMap<(CountryId, RegionId, GoodId), BasisPoints>,
+    pub(crate) reserve_priority_pressure:
+        BTreeMap<(CountryId, RegionId, GoodId), crate::relief::ReservePriorityPressure>,
+    pub(crate) reserve_policy_pressure: BTreeMap<CountryId, crate::relief::ReservePolicyPressure>,
     /// Canonical unordered country pairs whose commercial relations are hostile.
     pub(crate) bilateral_hostilities: BTreeSet<(CountryId, CountryId)>,
     /// Directed bounded grievance levels keyed by (aggrieved, target) country.
@@ -749,6 +775,12 @@ impl World {
             date: start_date,
             last_commercial_cycle_date: None,
             last_firm_management_date: None,
+            last_firm_entry_date: None,
+            last_labor_market_date: None,
+            last_firm_credit_market_date: None,
+            last_government_reserve_procurement_date: None,
+            last_government_reserve_maintenance_date: None,
+            last_government_reserve_policy_review_date: None,
             last_emergency_relief_date: None,
             last_payroll_date: None,
             last_household_cashflow_date: None,
@@ -758,22 +790,28 @@ impl World {
             last_annual_closure_year: None,
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
+            recipe_minimum_education: BTreeMap::new(),
             firms: BTreeMap::new(),
+            firm_entry_pressure: BTreeMap::new(),
             firm_production_targets: BTreeMap::new(),
             firm_monthly_accounts: BTreeMap::new(),
             firm_expectations: BTreeMap::new(),
             firm_distress_months: BTreeMap::new(),
             firm_insolvencies: BTreeMap::new(),
             firm_creditor_claims: BTreeMap::new(),
+            firm_credit_offers: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
             monthly_firm_procurement_purchases: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
+            regional_labor_market: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
             firm_appointments: BTreeMap::new(),
             board_resolutions: BTreeMap::new(),
             actor_cash: BTreeMap::new(),
+            lender_credit_history: BTreeMap::new(),
+            borrower_credit_history: BTreeMap::new(),
             committed_investments: BTreeMap::new(),
             investment_projects: BTreeMap::new(),
             logistics_routes: BTreeMap::new(),
@@ -789,6 +827,7 @@ impl World {
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
             monthly_consumption: BTreeMap::new(),
+            household_import_dependence: BTreeMap::new(),
             unmet_demand: BTreeMap::new(),
             monthly_affordability_gaps: BTreeMap::new(),
             deprivation_pressure: BTreeMap::new(),
@@ -797,6 +836,10 @@ impl World {
             cohort_experience: BTreeMap::new(),
             cohort_health: BTreeMap::new(),
             government_emergency_policies: BTreeMap::new(),
+            government_reserves: BTreeMap::new(),
+            government_reserve_priorities: BTreeMap::new(),
+            reserve_priority_pressure: BTreeMap::new(),
+            reserve_policy_pressure: BTreeMap::new(),
             bilateral_hostilities: BTreeSet::new(),
             bilateral_grievances: BTreeMap::new(),
             emergent_hostilities: BTreeSet::new(),
@@ -877,6 +920,26 @@ impl World {
             },
         );
         self.actors.insert(actor.id(), actor);
+        Ok(())
+    }
+
+    /// Registers an actor's initial liquid portfolio.
+    ///
+    /// # Errors
+    /// Returns an unknown actor, duplicate balance, or negative-cash error atomically.
+    pub fn register_actor_cash(&mut self, actor: ActorId, cash: Money) -> Result<(), WorldError> {
+        if !self.actors.contains_key(&actor) {
+            return Err(WorldError::UnknownActor(actor));
+        }
+        if cash.minor_units() < 0 {
+            return Err(WorldError::InvalidActorCash);
+        }
+        if self.actor_cash.contains_key(&actor) {
+            return Err(WorldError::DuplicateActorCash(actor));
+        }
+        self.events
+            .append(self.date, DomainEvent::ActorCashRegistered { actor, cash });
+        self.actor_cash.insert(actor, cash);
         Ok(())
     }
 
@@ -1071,6 +1134,13 @@ impl World {
             });
             hash.write_u64(q.get());
         }
+        hash.write_u64(self.household_import_dependence.len() as u64);
+        for ((region, good), dependence) in &self.household_import_dependence {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u64(dependence.local_quantity.get());
+            hash.write_u64(dependence.imported_quantity.get());
+        }
         hash.write_u64(self.unmet_demand.len() as u64);
         for ((cohort, good, tier), q) in &self.unmet_demand {
             hash.write_u32(cohort.get());
@@ -1139,6 +1209,10 @@ impl World {
         for date in [
             self.last_commercial_cycle_date,
             self.last_firm_management_date,
+            self.last_firm_credit_market_date,
+            self.last_government_reserve_procurement_date,
+            self.last_government_reserve_maintenance_date,
+            self.last_government_reserve_policy_review_date,
             self.last_emergency_relief_date,
             self.last_payroll_date,
             self.last_household_cashflow_date,
@@ -1468,6 +1542,21 @@ impl World {
         }
     }
 
+    fn write_recipe_education_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.recipe_minimum_education.len() as u64);
+        for (recipe, education) in &self.recipe_minimum_education {
+            hash.write_u32(recipe.get());
+            hash.write_u8(match education {
+                crate::EducationLevel::None => 1,
+                crate::EducationLevel::Basic => 2,
+                crate::EducationLevel::Secondary => 3,
+                crate::EducationLevel::Vocational => 4,
+                crate::EducationLevel::Tertiary => 5,
+            });
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn write_production_fingerprint(&self, hash: &mut StableHasher) {
         hash.write_u64(self.firm_insolvencies.len() as u64);
         for (firm, insolvency) in &self.firm_insolvencies {
@@ -1497,10 +1586,40 @@ impl World {
             });
             hash.write_u32(creditor.get());
             hash.write_i64(claim.principal().minor_units());
+            hash.write_i64(claim.accrued_interest().minor_units());
+            hash.write_u8(u8::from(claim.schedule().is_some()));
+            if let Some(schedule) = claim.schedule() {
+                hash.write_i32(schedule.next_due_on().year());
+                hash.write_u16(schedule.next_due_on().day_of_year());
+                hash.write_u16(schedule.installments_remaining());
+                hash.write_u16(schedule.annual_interest().get());
+            }
+        }
+        hash.write_u64(self.firm_credit_offers.len() as u64);
+        for ((firm, priority, creditor), offer) in &self.firm_credit_offers {
+            hash.write_u32(firm.get());
+            hash.write_u8(match priority {
+                crate::FirmCreditorPriority::Secured => 1,
+                crate::FirmCreditorPriority::Unsecured => 2,
+            });
+            hash.write_u32(creditor.get());
+            hash.write_i64(offer.principal().minor_units());
+            hash.write_u16(offer.annual_interest().get());
+            hash.write_u16(offer.term_months());
+            hash.write_i32(offer.expires_on().year());
+            hash.write_u16(offer.expires_on().day_of_year());
+            hash.write_i64(offer.observed_monthly_surplus().minor_units());
+            hash.write_i64(offer.collateral_value().minor_units());
         }
         hash.write_u64(self.firm_distress_months.len() as u64);
         for (firm, months) in &self.firm_distress_months {
             hash.write_u32(firm.get());
+            hash.write_u8(*months);
+        }
+        hash.write_u64(self.firm_entry_pressure.len() as u64);
+        for ((region, good), months) in &self.firm_entry_pressure {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
             hash.write_u8(*months);
         }
         hash.write_u64(self.firm_production_targets.len() as u64);
@@ -1520,6 +1639,18 @@ impl World {
                 hash.write_u32(input.good().get());
                 hash.write_u64(input.quantity_per_batch().get());
             }
+        }
+        self.write_recipe_education_fingerprint(hash);
+        hash.write_u64(self.regional_labor_market.len() as u64);
+        for (region, observation) in &self.regional_labor_market {
+            hash.write_u32(region.get());
+            hash.write_u64(observation.available_workers);
+            hash.write_u64(observation.vacancies);
+            hash.write_u64(observation.offers);
+            hash.write_u64(observation.hires);
+            hash.write_i64(observation.average_offered_wage.minor_units());
+            hash.write_u8(observation.unemployment_pressure_months);
+            hash.write_u8(observation.vacancy_pressure_months);
         }
         hash.write_u64(self.firms.len() as u64);
         for (id, firm) in &self.firms {
@@ -1566,6 +1697,25 @@ impl World {
             hash.write_u32(actor.get());
             hash.write_i64(cash.minor_units());
         }
+        hash.write_u64(self.lender_credit_history.len() as u64);
+        for (actor, history) in &self.lender_credit_history {
+            hash.write_u32(actor.get());
+            hash.write_i64(history.principal_repaid().minor_units());
+            hash.write_i64(history.interest_income().minor_units());
+            hash.write_i64(history.realized_losses().minor_units());
+            hash.write_u64(history.successful_loans());
+            hash.write_u64(history.defaulted_loans());
+        }
+        hash.write_u64(self.borrower_credit_history.len() as u64);
+        for (firm, history) in &self.borrower_credit_history {
+            hash.write_u32(firm.get());
+            hash.write_i64(history.scheduled_due().minor_units());
+            hash.write_i64(history.scheduled_paid().minor_units());
+            hash.write_u64(history.on_time_payments());
+            hash.write_u64(history.delinquent_payments());
+            hash.write_u64(history.successful_loans());
+            hash.write_u64(history.defaulted_loans());
+        }
         hash.write_u64(self.committed_investments.len() as u64);
         for (firm, amount) in &self.committed_investments {
             hash.write_u32(firm.get());
@@ -1600,7 +1750,42 @@ impl World {
             hash.write_u8(match policy.physical_shortage_strategy() {
                 crate::PhysicalShortageStrategy::MarketAllocation => 1,
                 crate::PhysicalShortageStrategy::ProportionalRationing => 2,
+                crate::PhysicalShortageStrategy::ReserveRelease => 3,
             });
+            hash.write_u8(policy.reserve_coverage_months());
+            hash.write_u16(policy.reserve_monthly_budget().get());
+            hash.write_u16(policy.reserve_monthly_spoilage().get());
+            hash.write_u16(policy.reserve_monthly_carrying_cost().get());
+        }
+        hash.write_u64(self.government_reserve_priorities.len() as u64);
+        for ((country, region, good), priority) in &self.government_reserve_priorities {
+            hash.write_u32(country.get());
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u16(priority.get());
+        }
+        hash.write_u64(self.reserve_priority_pressure.len() as u64);
+        for ((country, region, good), pressure) in &self.reserve_priority_pressure {
+            hash.write_u32(country.get());
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u8(pressure.uncovered);
+            hash.write_u8(pressure.import_reliance);
+            hash.write_u8(pressure.idle_spoilage);
+        }
+        hash.write_u64(self.reserve_policy_pressure.len() as u64);
+        for (country, pressure) in &self.reserve_policy_pressure {
+            hash.write_u32(country.get());
+            hash.write_u8(pressure.preparedness);
+            hash.write_u8(pressure.budget_gap);
+            hash.write_u8(pressure.upkeep_stress);
+            hash.write_u8(pressure.waste);
+        }
+        hash.write_u64(self.government_reserves.len() as u64);
+        for ((region, good), quantity) in &self.government_reserves {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
         }
         hash.write_u64(self.bilateral_hostilities.len() as u64);
         for (first, second) in &self.bilateral_hostilities {

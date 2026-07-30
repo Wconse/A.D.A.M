@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ActorId, CohortId, CountryId, DemandIntent, DomainEvent, MarketClearing, Money, NeedTier,
-    PowerNodeKind, QuantityMilli, RegionId, World, WorldCommand, WorldError,
+    ActorId, BasisPoints, CohortId, CountryId, DemandIntent, DomainEvent, MarketClearing, Money,
+    NeedTier, PowerNodeKind, QuantityMilli, RegionId, World, WorldCommand, WorldError,
 };
 
 /// One treasury-funded transfer responding to survival goods that were available but unaffordable.
@@ -26,12 +26,32 @@ pub enum EmergencyReliefStrategy {
 pub enum PhysicalShortageStrategy {
     MarketAllocation,
     ProportionalRationing,
+    ReserveRelease,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReservePolicyPressure {
+    pub(crate) preparedness: u8,
+    pub(crate) budget_gap: u8,
+    pub(crate) upkeep_stress: u8,
+    pub(crate) waste: u8,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReservePriorityPressure {
+    pub(crate) uncovered: u8,
+    pub(crate) import_reliance: u8,
+    pub(crate) idle_spoilage: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GovernmentEmergencyPolicy {
     strategy: EmergencyReliefStrategy,
     physical_shortage_strategy: PhysicalShortageStrategy,
+    reserve_coverage_months: u8,
+    reserve_monthly_budget: BasisPoints,
+    reserve_monthly_spoilage: BasisPoints,
+    reserve_monthly_carrying_cost: BasisPoints,
 }
 
 impl Default for GovernmentEmergencyPolicy {
@@ -39,6 +59,10 @@ impl Default for GovernmentEmergencyPolicy {
         Self {
             strategy: EmergencyReliefStrategy::TreasuryOnly,
             physical_shortage_strategy: PhysicalShortageStrategy::MarketAllocation,
+            reserve_coverage_months: 1,
+            reserve_monthly_budget: BasisPoints::FULL,
+            reserve_monthly_spoilage: BasisPoints::ZERO,
+            reserve_monthly_carrying_cost: BasisPoints::ZERO,
         }
     }
 }
@@ -49,6 +73,10 @@ impl GovernmentEmergencyPolicy {
         Self {
             strategy,
             physical_shortage_strategy: PhysicalShortageStrategy::MarketAllocation,
+            reserve_coverage_months: 1,
+            reserve_monthly_budget: BasisPoints::FULL,
+            reserve_monthly_spoilage: BasisPoints::ZERO,
+            reserve_monthly_carrying_cost: BasisPoints::ZERO,
         }
     }
 
@@ -69,6 +97,56 @@ impl GovernmentEmergencyPolicy {
     #[must_use]
     pub const fn physical_shortage_strategy(self) -> PhysicalShortageStrategy {
         self.physical_shortage_strategy
+    }
+
+    /// Configures a one-to-twelve-month reserve target and the maximum share of opening treasury available to automatic monthly procurement.
+    /// # Errors
+    /// Rejects zero or more than twelve months. A zero budget share is valid and disables automatic spending.
+    pub fn with_reserve_procurement(
+        mut self,
+        coverage_months: u8,
+        monthly_budget: BasisPoints,
+    ) -> Result<Self, WorldError> {
+        if !(1..=12).contains(&coverage_months) {
+            return Err(WorldError::InvalidEmergencyRelief(
+                "reserve coverage must be between one and twelve months",
+            ));
+        }
+        self.reserve_coverage_months = coverage_months;
+        self.reserve_monthly_budget = monthly_budget;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn reserve_coverage_months(self) -> u8 {
+        self.reserve_coverage_months
+    }
+
+    #[must_use]
+    pub const fn reserve_monthly_budget(self) -> BasisPoints {
+        self.reserve_monthly_budget
+    }
+
+    /// Configures physical loss and treasury carrying cost charged on stock held from a prior month.
+    #[must_use]
+    pub const fn with_reserve_storage(
+        mut self,
+        monthly_spoilage: BasisPoints,
+        monthly_carrying_cost: BasisPoints,
+    ) -> Self {
+        self.reserve_monthly_spoilage = monthly_spoilage;
+        self.reserve_monthly_carrying_cost = monthly_carrying_cost;
+        self
+    }
+
+    #[must_use]
+    pub const fn reserve_monthly_spoilage(self) -> BasisPoints {
+        self.reserve_monthly_spoilage
+    }
+
+    #[must_use]
+    pub const fn reserve_monthly_carrying_cost(self) -> BasisPoints {
+        self.reserve_monthly_carrying_cost
     }
 }
 
@@ -234,6 +312,17 @@ impl World {
                 actor,
                 country,
                 strategy: policy.strategy(),
+            },
+        );
+        self.events.append(
+            self.date,
+            DomainEvent::GovernmentReservePolicyConfigured {
+                actor,
+                country,
+                coverage_months: policy.reserve_coverage_months(),
+                monthly_budget: policy.reserve_monthly_budget(),
+                monthly_spoilage: policy.reserve_monthly_spoilage(),
+                monthly_carrying_cost: policy.reserve_monthly_carrying_cost(),
             },
         );
         Ok(())
@@ -418,7 +507,11 @@ impl World {
             .map_err(|_| WorldError::ArithmeticOverflow("relief debt headroom"))
     }
 
-    fn can_authorize_emergency_relief(&self, actor: ActorId, country: CountryId) -> bool {
+    pub(crate) fn can_authorize_emergency_relief(
+        &self,
+        actor: ActorId,
+        country: CountryId,
+    ) -> bool {
         self.power_nodes().values().any(|node| {
             node.country() == country
                 && node.kind() == PowerNodeKind::PoliticalOffice
@@ -426,7 +519,7 @@ impl World {
         })
     }
 
-    fn emergency_relief_actor(&self, country: CountryId) -> Option<ActorId> {
+    pub(crate) fn emergency_relief_actor(&self, country: CountryId) -> Option<ActorId> {
         self.power_nodes()
             .values()
             .filter(|node| {

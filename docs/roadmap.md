@@ -143,6 +143,10 @@ Status legend: ✅ complete and verified · 🟡 working scaffold · ⬜ planned
 - Stage 5: chronicle maps, timelines, biographies, charts, HTML/PDF textbook.
 - Stage 6: UX, performance, content, and public demo.
 
+## Near-term strategic direction — societal adaptation
+
+Pause further credit depth. The next Stage 0 arc is material-crisis adaptation: physical government procurement and reserves, endogenous firm entry, cohort migration, labor matching, survival substitution, material political choice, information narratives, then causal chronicle arcs. The acceptance scenario is a trade-dependent region that can recover, substitute, shrink through migration, or collapse for concrete resource and institutional reasons.
+
 ## Progress log
 
 ### 2026-07-21
@@ -1023,3 +1027,197 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Unsold capacity is explicitly retired and narrated rather than silently disappearing. `FirmLiquidationCapacitySold` records estate, successor, batches, and proceeds; liquidation results and the yearly chronicle distinguish transferred from retired capacity. ADR 0108 records the rule and its strict same-region/same-recipe Stage-0 boundary.
 - Focused coverage proves price formation, capacity conservation, cash conservation, improved worker recovery, terminal estate retirement, typed evidence, command replay, and stable fingerprints. The workspace passes 139 tests. `SIMULATION_VERSION` advances 46 -> 47; the seed-1/50-year release fingerprint is `310691261537918658` at 63.9 ms/year.
 - Next gate: represent creditor maturity and scheduled repayment for operating firms, so credit affects monthly liquidity before insolvency rather than existing only as liquidation priority.
+
+### Scheduled firm debt service gate (step 061)
+
+- Operating firms can now issue actor-funded credit with a deterministic 1-120 month principal schedule. The first installment falls due one calendar month after issuance; principal amortizes by rounded-up remaining-balance division so the final installment absorbs every remainder.
+- Monthly causality is explicit: payroll is settled first, then scheduled principal, then distress response, reorganization, and liquidation. Firms pay only available cash, creditors receive only real transferred money, partial payments preserve unpaid principal, and complete repayment removes the claim.
+- Maturity does not forgive debt. Any remaining balance becomes overdue and is attempted in later operating months. Insolvency freezes ordinary scheduled service without erasing the claim, so workers remain senior and the balance enters the existing secured/unsecured liquidation waterfall.
+- `ScheduledFirmCreditIssued` and `FirmDebtServiceSettled` make issuance, payment, remaining principal, and overdue status auditable. Schedule state is serialized, replayable, and fingerprinted. The chronicle reports annual due, paid, unpaid, and overdue attempts. ADR 0109 records the contract.
+- Focused coverage proves deterministic amortization, partial payment, maturity, payroll seniority, complete claim removal, insolvency freeze, worker-first liquidation recovery, command replay, and chronicle narration. `SIMULATION_VERSION` advances 47 -> 48. The accepted seed-1/50-year fingerprint is `8401388131904837857`; self-comparison is identical.
+- Deliberate limits: principal-only debt has no interest, grace period, acceleration covenant before maturity, refinancing, collateral revaluation, loan trading, or bank balance sheet. Next gate: introduce priced firm credit offers with interest and underwriting based on observable cash-flow and collateral evidence, without allowing forecasts to create money or guarantees.
+
+### Observed priced firm credit gate (step 062)
+
+- Lenders can now create concrete two-month offers only after three operating observations. Underwriting subtracts observed input costs, active payroll, and existing scheduled debt service from average realized sales; at most half of residual monthly surplus supports new debt. Requested principal is further bounded by term, annual interest, lender cash, and - for secured credit - 70% of observable inventory and installed-capacity value.
+- Majority owners and chief executives accept live offers through the shared command boundary. Acceptance moves real lender cash, creates the existing ranked claim, removes the offer, and exposes only live offers as concrete expected financing to management forecasts. No forecast creates money or guarantees acceptance.
+- Interest now accrues monthly on outstanding principal. Cash settles accrued interest before principal; unpaid interest persists through maturity, freezes in insolvency, and joins principal in the worker-first liquidation waterfall. Debt-service events and the chronicle distinguish interest charged and paid.
+- Offers, underwriting evidence, rates, accrued interest, commands, events, save state, and fingerprints are deterministic. ADR 0110 records the rule. Focused replay coverage proves exact approval evidence, offer-aware expectations, authorized acceptance, real cash transfer, interest accrual, interest-first payment, and stable fingerprints.
+- The full workspace test suite passes 144 tests. `SIMULATION_VERSION` advances 48 -> 49. The seed-1/50-year demo remains materially unchanged because its actors do not yet originate offers; the accepted fingerprint is `116941166565012856`, with an identical seed-1 self-comparison at 56.3 ms/year.
+- Next gate: autonomous lender search and borrower acceptance. Distressed but viable firms should request competing offers; lenders should choose among firms using return, concentration, liquidity reserve, collateral, and default evidence instead of credit appearing only by external command.
+
+### Autonomous firm credit market gate (step 063)
+
+- Viable operating firms now search for working capital after monthly commerce and management when three observations show positive operating surplus but current cash cannot cover one target-based month of inputs, payroll, and preserved wage claims. The request is exactly that gap; insolvent firms and firms already carrying creditor claims cannot stack autonomous debt.
+- Domestic non-owner lenders compete through the existing evidence-based underwriting boundary. Each keeps 50% of current cash liquid, total firm-credit exposure is capped at 40% of liquid cash plus claims, existing concentration raises the rate, and every borrower distress month adds 250 bps. Autonomous offers are secured and remain bounded by the existing cash-flow and 70% collateral tests.
+- An authorized majority owner or CEO accepts the cheapest offer covering at least 25% of the gap, preferring larger principal and then stable actor id on ties. Rejected competing offers are removed. The accepted loan uses the ordinary command, real cash transfer, ranked claim, interest schedule, insolvency freeze, and liquidation waterfall.
+- The credit market is an atomic once-per-month stage inside the economic cycle. Typed completion evidence, cycle results, save/replay state, fingerprinting, and chronicle narration are integrated. ADR 0111 records the rule.
+- Focused coverage proves a 100-unit viable gap, two domestic lenders, canonical competition, a 600-bp accepted loan, exact lender/firm cash movement, rejected-offer cleanup, duplicate-stage atomicity, command replay, stable fingerprints, and event-derived chronicle prose. The full workspace gate passes 145 tests.
+- `SIMULATION_VERSION` advances 49 -> 50. The seed-1/50-year demo does not originate autonomous loans because its scenario actors have no lendable cash, but the new monthly causal stage is replayed identically; accepted fingerprint: `9943765951260526877` at 76.1 ms/year.
+- Next gate: give scenario actors explicit liquid portfolios and run a controlled long-history credit experiment. The content must produce at least one useful working-capital rescue and one refused or defaulted case without turning lender cash into a scripted bailout.
+
+### Scenario credit portfolios and default closure gate (step 064)
+
+- Content schema v8 gives owners explicit non-negative liquid cash and supports optional regional financiers as ordinary actors without ownership or management authority. Initial portfolios are evented, persisted, and fingerprinted.
+- The demo now contains the Arcadian Working Capital Trust and two tiny, positive-margin grain producers. After three observations the first producer receives a six-unit secured loan against a four-unit funding gap plus its first payment reserve; the trust retains nine units of cash and reaches its portfolio concentration ceiling. The otherwise viable second producer is therefore refused without leaving an inadequate offer in expectations.
+- The accepted borrower clears wage arrears, preserves its worker, and repays all six units of principal plus six units of rounded interest during 2026. The chronicle reports both the accepted working-capital loan and `1 of 2` viable searches ending without an acceptable domestic offer.
+- Funding-gap viability now subtracts recurring payroll and target inputs, not legacy wage claims; arrears remain part of the one-month cash requirement. Lender-specific requests reserve the estimated first principal installment and interest payment before ordinary cash-flow, collateral, liquidity, and concentration caps apply.
+- Distressed firms with two or three operating observations receive only enough grace to complete the four-observation credit review window. Matured unpaid debt independently accumulates distress, so a zero-workforce debtor without wage arrears reaches insolvency instead of becoming an immortal overdue claim.
+- Focused coverage proves exact scenario acceptance/refusal, real lender cash, claim repayment, preserved employment, rejected-offer cleanup, service-reserve sizing, and debt-only insolvency. The full workspace gate passes 147 tests. ADR 0112 records the design.
+- `SIMULATION_VERSION` advances 50 -> 51. Seed 1 over 50 years replays an identical chronicle and fingerprint `16300205677265857770` at 89.4 ms/year.
+- Next gate: model lender income and realized credit losses as explicit actor portfolio history, so future rates and lending capacity respond to successful repayment and default rather than only current concentration.
+
+### Realized lender track-record gate (step 065)
+
+- Every creditor now accumulates explicit principal repaid, interest income, realized losses, successful resolutions, and defaults. Scheduled debt service records only real cash received; terminal liquidation splits recovery interest-first and classifies each resolved claim exactly once.
+- `LenderCreditHistoryUpdated` exposes settlement deltas while cumulative history is serialized, inspectable, replayed through the existing command transitions, and included in stable fingerprints. The chronicle narrates annual lender recovery, income, successful loans, defaults, and losses.
+- Portfolio appetite now starts at the existing 40% financial-wealth limit, gains 100 basis points per successful loan up to 500, and loses half the realized loss ratio up to 2,500 basis points. The result remains bounded to 15-45%, and the independent 50% current-cash reserve still binds.
+- Pricing adds up to 3,000 basis points from realized loss ratio and grants 50 basis points per successful loan up to a 250-basis-point discount. Existing concentration, borrower-distress, cash-flow, collateral, liquidity, and minimum-coverage rules remain authoritative.
+- The controlled demo trust closes 2026 with 6 principal recovered, 6 interest income, one successful loan, and zero losses. Focused regressions prove exact 40% -> 41% earned capacity, 40% -> 16% post-loss capacity, 600 -> 550 bps success pricing, 550 -> 2,050 bps loss pricing, liquidation loss attribution, event evidence, and fingerprint participation.
+- The full workspace gate passes 148 tests. `SIMULATION_VERSION` advances 51 -> 52. Seed 1 over 50 years replays an identical chronicle and fingerprint `12342046951249449541` at 76.7 ms/year.
+- Next gate: batch contemporaneous credit applications and let each lender allocate finite headroom by risk-adjusted return, rather than allowing canonical borrower order to consume the portfolio before later applications are compared.
+
+### Batched risk-adjusted credit allocation gate (step 066)
+
+- The monthly firm-credit market now collects every eligible application before any lender commits
+  capital. Canonical firm order remains a replay tie-breaker but no longer decides who consumes a
+  scarce portfolio first.
+- Each lender provisionally underwrites the full domestic batch through the existing observed
+  cash-flow, collateral, liquidity, concentration, and term gates. Finite headroom is then committed
+  by a transparent risk-adjusted return: contractual rate, minus 400 bps per borrower-distress month,
+  plus at most 500 bps for collateral above principal. High rates therefore cannot automatically
+  make the weakest borrower the preferred allocation.
+- Borrowers still accept the cheapest sufficiently large offer through the ordinary shared command;
+  allocation and acceptance remain atomic and deterministically tie-broken. ADR 0114 records the rule.
+- Focused coverage creates two simultaneous 100-unit gaps and only 120 units of lender headroom. The
+  healthy later-id firm receives the 110-unit offer instead of the distressed earlier-id firm, and
+  command replay reproduces state and fingerprint exactly. Full workspace tests pass with 149 tests.
+- `SIMULATION_VERSION` advances 52 -> 53. The current demo's chronicle body remains materially
+  unchanged; the seed-1 50-year fingerprint changes by version contract to
+  `14936349298780613292`, with an identical self-comparison at 85.0 ms/year.
+- Deliberate limit: committed headroom released by rejected offers is not re-auctioned in the same
+  month. Next gate: add firm-level borrower credit histories for punctual service, delinquency,
+  restructuring, and default so underwriting can price demonstrated borrower conduct rather than
+  only current distress and collateral.
+
+### Firm borrower credit-history gate (step 067)
+
+- Firms now retain explicit borrower conduct: scheduled debt service due and paid, punctual and
+  delinquent attempts, successful loan resolutions, and defaults. Updates come only from real debt
+  service or terminal claim resolution and are journaled as typed evidence.
+- Autonomous pricing now adds a bounded firm-specific adjustment: payment shortfall contributes up
+  to 2,000 bps, delinquent attempts up to 1,500 bps, defaults up to 3,000 bps, and successful loans
+  earn at most a 250-bps discount. Current distress, collateral, cash flow, lender liquidity,
+  concentration, and lender track record remain independent constraints. ADR 0115 records the rule.
+- Focused coverage proves a 50-of-100 partial payment moves an otherwise 600-bps offer to 1,700 bps,
+  a later fully paid resolution rehabilitates it to 1,316 bps, and a default moves it to 2,316 bps.
+  History counters and stable-fingerprint participation are exact.
+- The history is serialized, replayed by existing service/liquidation commands, inspectable, and
+  fingerprinted. `SIMULATION_VERSION` advances 53 -> 54. Seed 1 over 50 years self-compares
+  identically with fingerprint `11122244119561874726` at 92.1 ms/year.
+- Next gate: attribute loan purpose and realized operating outcome, so lenders can observe whether
+  working capital preserved payroll and production rather than judging credit only by repayment.
+
+### Government physical reserve gate (step 068)
+
+- The roadmap now explicitly pauses further credit depth and begins the societal-adaptation arc.
+- Political-office holders can buy domestic firm inventory into regional public reserves through the shared command boundary. Purchases move real treasury cash, seller cash, and physical stock atomically; rejected purchases change nothing.
+- `ReserveRelease` uses stocked goods as in-kind survival aid after household clearing and before grievance, social stress, and health. Distribution reduces the same unmet-demand and deprivation state used by downstream consequences, so physically covered needs cannot still cause phantom deaths or foreign blame.
+- Reserve stock is serialized, inspectable, replayed, and fingerprinted. Focused gates prove exact money/stock conservation, full shortage closure, and insufficient-treasury atomicity. ADR 0116 records the boundary. The full workspace gate passes 152 tests; `SIMULATION_VERSION` advances 54 -> 55, and the seed-1/50-year self-comparison is identical with fingerprint `4615256241328481519` at 78.1 ms/year.
+- Deliberate limits: procurement is an explicit decision, domestic and immediate; reserves have no transport, spoilage, storage cost, coverage target, or autonomous proposal yet. Next gate: evidence-driven reserve procurement proposals based on observed survival shortage, treasury headroom, available stock, and target coverage.
+
+### Observed government reserve procurement gate (step 069)
+
+- The commercial cycle now converts residual survival unmet demand into a one-month regional reserve requirement after household settlement. Existing reserve stock is deducted before action.
+- Under `ReserveRelease`, the canonical political-office holder buys only real post-market inventory from operating local firms that produce the required good. Quantity is bounded by need, stock, and treasury affordability; purchases use the existing atomic command and stable firm ordering.
+- Procurement runs before reserve distribution, grievance, stress, and health, so retained producer stock can physically avert same-month harm without pre-empting ordinary buyers. The once-per-month stage is command-replayable, journaled, serialized, and fingerprinted. ADR 0117 records the rule.
+- Focused coverage proves exact 1,000-unit procurement for 10 currency units, treasury/firm/reserve conservation, bit-identical replay, and duplicate-stage atomicity. The full workspace gate passes 153 tests; `SIMULATION_VERSION` advances 55 -> 56, and the seed-1/50-year self-comparison is identical with fingerprint `11094233980192924180` at 88.3 ms/year.
+- Deliberate limits: one observed month of coverage, local reference-price purchases, no public transport, bids, storage cost, spoilage, corruption, or competing budget authorization. Next gate: explicit reserve coverage targets and carrying costs before interregional procurement.
+
+### Reserve coverage, budget, and causal chronicle gate (step 070)
+
+- Political-office policy now selects a one-to-twelve-month reserve coverage target and a zero-to-100% automatic procurement ceiling against opening monthly treasury. The ceiling is shared canonically across every competing regional good in the country, preventing each shortage from independently spending the full budget.
+- Observed procurement compares current stock with shortage-derived target coverage, buys only the gap, and can retain physical inventory for a future month after the current emergency release. Seller stock, treasury cash, and the common command boundary remain authoritative.
+- Every active `(region, good)` review now journals observed shortage, target stock, opening reserves, eligible local supply, available budget, purchased quantity, spending, remaining gap, and independent supply/budget constraint flags. Zero-purchase decisions are therefore evidence, not silence.
+- The yearly chronicle explains why reserves were bought and issued: it reports reviewed targets, stock already held, local supply, uncovered gaps, binding constraints, attributed procurement spending, and cohort deliveries before grievance, stress, and health consequences.
+- Focused coverage proves a retained second month of stock, one shared country budget across competing goods, exact supply-limited and budget-limited evidence, attributed chronicle prose, replay, and atomic rejection. The full workspace gate passes 157 tests. `SIMULATION_VERSION` advances 56 -> 57; two seed-1 50-year timelines produce identical chronicles and fingerprint `17917500942299006191` at 91.2 ms/year.
+- Deliberate limits: targets extrapolate the currently observed shortage rather than forecasting seasonality; reserves still have no storage cost, spoilage, interregional public transport, supplier bidding, or corruption. Next gate: introduce bounded storage loss and carrying cost so excessive buffers compete honestly with treasury resilience before any cross-region procurement.
+
+### Public reserve maintenance and spoilage gate (step 071)
+
+- Reserve policy now configures independent monthly baseline spoilage and carrying cost. Cost is assessed against opening physical stock at the regional reference price; zero rates preserve the previous model.
+- Maintenance runs at month opening, before payroll and commerce. Previously carried stock therefore costs and decays, while stock bought during the current shortage is not charged retroactively before its first use.
+- Scarce treasury upkeep is shared proportionally across every reserve good in a country using deterministic largest remainders. Unpaid assessment produces additional neglect spoilage proportional to the funding gap, capped at 25% when upkeep receives nothing.
+- Typed evidence records opening stock, reference value, assessed and paid cost, baseline loss, neglect loss, and closing stock for every maintained regional good. The shared command boundary replays the once-per-month stage atomically.
+- The chronicle now distinguishes normal spoilage from stock destroyed by unfunded upkeep and reports the unpaid fiscal burden, turning reserve depth into a visible preparedness-versus-treasury tradeoff. Focused coverage proves funded upkeep, maximum neglect, proportional multi-good funding, next-month charging, command replay, duplicate-stage atomicity, and narration. The full workspace passes 161 tests. ADR 0119 records the design; `SIMULATION_VERSION` advances 57 -> 58. Two seed-1 50-year timelines produce identical chronicles and fingerprint `18007562743465462498` at 80.8 ms/year.
+- Deliberate limits: reference prices proxy storage difficulty; there are no warehouses, stock-age lots, good-specific shelf lives, rotation sales, theft, or public transport. Next gate: let reserve policy adapt gradually to observed spoilage, repeated coverage gaps, and treasury stress rather than remaining fixed forever.
+
+### Evidence-driven reserve policy adaptation gate (step 072)
+
+- Every `ReserveRelease` country now reviews current-month procurement, distribution, and maintenance evidence after the commercial reserve response. Four serialized streaks distinguish recurring unbuffered shortage, explicit budget binding, unfunded upkeep, and idle spoilage.
+- Doctrine changes only after persistence thresholds: three serviceable shortage months raise coverage by one; two budget-bound months raise monthly authority by 500 basis points; two neglect months reduce coverage by one (or authority at the one-month floor); three quiet spoilage months reduce coverage by one. Fiscal retrenchment has priority when signals conflict.
+- Reviews are canonical, once-per-month, atomic, command-replayable, serialized, and fingerprinted. Typed evidence records physical totals, all streaks, and previous/new coverage and budget; completion evidence counts reviewed and changed countries.
+- The chronicle names the leading country revision and distinguishes coverage expansion/retrenchment from procurement-authority expansion/retrenchment. Focused coverage proves three-month preparedness learning, two-month budget adaptation, upkeep-driven retrenchment, exact replay, duplicate-stage atomicity, and narration. ADR 0120 records the boundary; `SIMULATION_VERSION` advances 58 -> 59.
+- Deliberate limits: this is bounded institutional learning rather than optimization; doctrine remains national rather than good-specific, and there are no forecasts, elections, legislative vetoes, storage investment, or public transport. Next gate: differentiated reserve priorities by good or region before interregional public logistics.
+
+### Differentiated public-reserve priorities gate (step 073)
+
+- Political-office holders can now assign a replayable zero-to-100% priority share to each regional good. Full priority preserves the national coverage target, partial priority scales it with deterministic upward rounding, and zero explicitly excludes new automatic stockpiling without destroying held reserves.
+- Observed reserve requirements are reviewed from highest priority to lowest before stable country/region/good tie-breakers. The existing country-wide treasury ceiling remains binding, so prioritization reallocates scarcity rather than creating budget or inventory.
+- Priority decisions validate country-region ownership, known goods, and real office authority. State, typed decisions, requirement evidence, save/replay, and stable fingerprints are authoritative; the chronicle explains when differentiated targets shaped allocation. ADR 0121 records the boundary.
+- Focused coverage proves that a higher-priority medicine target receives a scarce shared budget ahead of lower-id food, while the food target is honestly scaled and journaled. The full workspace gate passes 165 tests. `SIMULATION_VERSION` advances 59 -> 60; two seed-1 50-year timelines produce the identical fingerprint `7948595364616626360`.
+- Deliberate limits: priorities are explicit doctrine rather than learned proposals; reserve maintenance remains proportional, and stock cannot yet move between regions. Next gate: derive bounded priority proposals from observed regional vulnerability, import dependence, deaths, and repeated shortage before adding public interregional logistics.
+
+### Evidence-driven regional reserve-priority adaptation gate (step 074)
+
+- Every configured regional-good priority now retains separate streaks for serviceable but uncovered reserve gaps and for idle baseline spoilage. Three consecutive uncovered months raise priority by 500 basis points; six idle-spoilage months lower it by 500, with vulnerability taking precedence when signals conflict.
+- Supply-limited shortages do not falsely raise priority. Adjustments remain bounded to 0-10,000 basis points and execute through the same authorized `SetGovernmentReservePriority` command used by explicit political decisions, so institutional learning cannot bypass authority or create resources.
+- Pressure memory, reviews, resulting commands, typed evidence, save/replay, stable fingerprints, and yearly chronicle narration are authoritative. ADR 0122 records the boundary; `SIMULATION_VERSION` advances 60 -> 61.
+- Focused coverage proves a half-priority target rises to 5,500 only after three consecutive uncovered months and that the complete decision replays bit-identically. Chronicle coverage names the leading country and region revision. The full workspace gate passes 167 tests; two seed-1 50-year timelines produce the identical fingerprint `6561286070422285131`.
+- Deliberate limits: this first learning rule uses direct reserve performance. Cohort deaths are not yet attributable to individual goods, and delivered household import dependence is not retained as regional-good monthly evidence. Next gate: persist delivered household import dependence and let repeated reliance influence bounded priority proposals without treating all imports as failure.
+
+### Observed household import-dependence gate (step 075)
+
+- Atomic household market settlement now classifies fulfilled survival consumption by buyer region and good into local and delivered-import quantities. Monthly dependence state and typed evidence retain the physical totals and exact imported share; save/replay and stable fingerprints include the observation.
+- Reserve-priority learning treats imports as vulnerability only after they supply at least 60% of fulfilled survival consumption for six consecutive months. Occasional or minority imports reset the streak and do not change doctrine, so efficient trade is not mislabeled as failure.
+- Sustained high dependence raises a configured priority by one bounded 500-basis-point step through the ordinary authorized political command. Uncovered gaps retain first precedence, import reliance second, and idle-spoilage retrenchment third. Chronicle narration identifies import-driven revisions. ADR 0123 records the boundary; `SIMULATION_VERSION` advances 61 -> 62.
+- Focused coverage proves a fully imported survival purchase is persisted and evented exactly, six high-reliance months move a half-priority target from 5,000 to 5,500, the revision reason is explicit, and command replay remains bit-identical. The full workspace gate passes 168 tests; two seed-1 50-year timelines produce the identical fingerprint `15123477875765043850`.
+- Deliberate limits: import share does not yet distinguish diversified suppliers from a single fragile route or country. Next gate: measure supplier and route concentration so preparedness responds more strongly to concentrated dependence than to diversified trade before public interregional reserve logistics.
+
+### Shortage-driven local firm-entry gate (step 076)
+
+- Residual survival shortage is now aggregated by region and good after trade, rationing, and reserve release. Three consecutive shortage months create an entry opportunity; a cleared month resets the authoritative, fingerprinted streak.
+- Feasible entry requires an existing output recipe, all observed local prices, an unemployed local worker, and a local actor able to fund installed capacity plus working capital. Missing technology, labor, price evidence, or founder liquidity leaves the shortage unresolved without creating resources.
+- Startup economics are concrete and bounded: one batch of capacity costs two observed output-batch values; working capital covers one input batch and three wage months. The founder pays both, only working capital becomes firm cash, no opening inventory is minted, and production still needs ordinary inputs and labor.
+- Founding uses the shared `FoundFirm` command and creates canonical ownership, chief-executive authority, one local employment agreement, a default policy, and a one-batch target atomically. Typed events and chronicle narration identify the founder, region, good, installed capital, working capital, and initial job. ADR 0124 records the boundary; `SIMULATION_VERSION` advances 62 -> 63.
+- Focused coverage proves that one or two shortage months cannot create a firm, the third month produces a funded and staffed entrant with exact cash conservation across founder and working capital, insufficient founder cash blocks entry without mutation, and direct command execution replays bit-identically. The full workspace gate passes 171 tests; two seed-1 50-year timelines produce the identical fingerprint `10082682265911392485`.
+- Deliberate limits: entry is one-batch and equity-funded; construction time, founder risk preferences, bank-funded startups, skill requirements, and competitive wage bidding remain future work. Next gate: labor matching in which entrants and incumbents compete for finite workers through observed wages and qualifications.
+
+### Competitive opt-in labor-market gate (step 077)
+
+- Recipes may now opt into competitive vacancy matching with an explicit minimum-education profile. Recipes that omit the profile retain legacy staffing behavior, preventing silent economic changes in existing scenarios and mods.
+- Vacancies derive from authorized production targets and recipe labor intensity, are bounded by installed firm worker capacity, and subtract existing active agreements. Each solvent firm can hire at most one worker per monthly stage.
+- Firms make cash-covered wage offers anchored to local cohort income and adjusted by production urgency. Scarce qualified workers accept the highest wage; stable firm and cohort identifiers resolve ties deterministically.
+- Every accepted match revalidates vacancy, cash, locality, education, profile identity, and unallocated population through the shared command boundary. Typed completion and match events, save state, replay, and stable fingerprints are authoritative.
+- Content schema v8 accepts optional `minimum_education` recipe values from `none` through `tertiary`. Shortage-driven entry keeps its historical Basic fallback while later vacancy matching remains opt-in. ADR 0125 records the compatibility boundary.
+- Focused coverage proves wage competition for one worker, qualification rejection without mutation, direct/replay identity, schema loading, and legacy profile omission. The full workspace gate passes 174 tests; formatting, Clippy, and docs pass. `SIMULATION_VERSION` is 64. Two seed-1 50-year timelines remain identical with fingerprint `1189594396703659306` at 99.9 ms/year.
+- Deliberate limits: employed workers do not search or switch jobs; offers have no persistence, contracts have no duration, and there is no unemployment/vacancy history, bargaining, training, migration, or labor-market chronicle. Next gate: retain regional labor-market evidence and use persistent vacancy and unemployment pressure for bounded wage adaptation before adding mobility or training.
+
+### Persistent regional labor-market evidence gate (step 078)
+
+- Every region with at least one explicitly configured competitive recipe now retains an authoritative post-matching observation: remaining unemployed workers, remaining target-derived vacancies, funded offers, accepted hires, and mean offered wage. Legacy-only regions remain absent.
+- Consecutive unemployment pressure advances only when available workers exceed vacancies; vacancy pressure advances only when vacancies exceed available workers. Balance or reversal resets the corresponding bounded streak, distinguishing durable surplus from durable scarcity.
+- Automatic matching now treats only cohorts explicitly marked unemployed as active job seekers, avoiding silent recruitment from employed aggregate cohorts. Observations are serialized, fingerprinted, inspectable, and emitted as typed regional evidence.
+- The yearly chronicle aggregates labor offers and hires and names the regions with the longest unemployment or unfilled-vacancy pressure. ADR 0126 records the evidence boundary.
+- Focused coverage proves one-worker competition leaves one residual vacancy, zero-demand regions accumulate unemployment pressure across months, direct/replay state remains identical, and chronicle attribution names persistent scarcity. The full workspace gate passes 176 tests; formatting, Clippy, docs, and `git diff --check` pass. `SIMULATION_VERSION` advances 64 -> 65.
+- Two seed-1 50-year timelines remain identical with fingerprint `6342305687305279707` at 102.9 ms/year. The demo has no opted-in recipes, so its economic and chronicle path remains behaviorally unchanged apart from the deliberate simulation-version fingerprint contract.
+- Deliberate limits: evidence is regional rather than occupation-specific and does not yet alter wages. Next gate: let firms adapt offered wages gradually after persistent unfilled vacancies while persistent unemployment restrains bids, without bypassing cash coverage or payroll risk.
+
+### Bounded evidence-driven wage-adaptation gate (step 079)
+
+- Competitive bids now react only to persistent, previously observed regional pressure. Every three residual-vacancy months add 500 basis points, capped at +2,000; every three residual-unemployment months subtract 250 basis points, capped at -1,000. One- or two-month noise changes nothing.
+- The adjustment composes with the existing local-income anchor and production-urgency premium. It cannot mint cash, bypass qualification, reserve future payroll, or force a hire; firms must still cover the complete adapted wage from current cash.
+- Replayable employment matches carry the signed pressure adjustment. Direct execution re-derives both wage and adjustment and rejects stale or fabricated bids atomically. Typed match evidence and yearly chronicle narration distinguish scarcity-raised from surplus-restrained accepted wages. ADR 0127 records the rule.
+- Focused coverage proves three scarcity months move the representative bid from 120 to 125 with +500 basis points, while three surplus months restrain it to 118 with -250 basis points. Existing no-pressure competition remains unchanged. The full workspace gate passes 177 tests; formatting, Clippy, docs, release build, and `git diff --check` pass. `SIMULATION_VERSION` advances 65 -> 66.
+- Two seed-1 50-year timelines remain identical with fingerprint `9534485292765561832` at 102.8 ms/year. Because the demo has no opted-in competitive recipes, the economic chronicle remains behaviorally unchanged.
+- Deliberate limits: only new hires receive adapted bids; existing contracts do not renegotiate and workers do not switch employers. Next gate: permit bounded employed-worker search and voluntary job switching when a competing offer materially exceeds the current wage, while preserving firm capacity, notice, and one-worker-per-firm monthly limits.

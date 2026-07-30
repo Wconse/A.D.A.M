@@ -1,8 +1,11 @@
 use crate::{
-    DemandIntent, EmergencyReliefPayment, FirmManagementDecision, FirmMarketOfferPlan,
-    FirmProcurementResult, HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing,
-    MarketOrder, PayrollRecord, ProductionPlan, RouteCapacityExpansion, SimDate,
-    SurvivalRationingOutcome, World, WorldError, clear_market_with_delivery,
+    AutonomousFirmCreditDecision, DemandIntent, EmergencyReliefPayment, EmploymentMatch,
+    FirmDebtServicePayment, FirmEntryDecision, FirmManagementDecision, FirmMarketOfferPlan,
+    FirmProcurementResult, GovernmentReserveDistribution, GovernmentReserveMaintenance,
+    GovernmentReservePolicyReview, GovernmentReserveProcurement, HouseholdCashflow,
+    HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord, ProductionPlan,
+    RouteCapacityExpansion, SimDate, SurvivalRationingOutcome, World, WorldError,
+    clear_market_with_delivery,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,6 +16,9 @@ pub struct MonthlyCommercialCycleResult {
     pub demand_intents: Vec<DemandIntent>,
     pub rationing: Vec<SurvivalRationingOutcome>,
     pub clearing: MarketClearing,
+    pub reserve_procurements: Vec<GovernmentReserveProcurement>,
+    pub reserve_distributions: Vec<GovernmentReserveDistribution>,
+    pub reserve_policy_reviews: Vec<GovernmentReservePolicyReview>,
     pub route_expansions: Vec<RouteCapacityExpansion>,
 }
 
@@ -20,11 +26,16 @@ pub struct MonthlyCommercialCycleResult {
 pub struct MonthlyEconomicCycleResult {
     pub completed_date: SimDate,
     pub next_date: SimDate,
+    pub reserve_maintenance: Vec<GovernmentReserveMaintenance>,
     pub payroll: Vec<PayrollRecord>,
+    pub debt_service: Vec<FirmDebtServicePayment>,
     pub household_cashflows: Vec<HouseholdCashflow>,
     pub household_borrowing: Vec<HouseholdSurvivalBorrowing>,
     pub commercial: MonthlyCommercialCycleResult,
+    pub firm_entries: Vec<FirmEntryDecision>,
+    pub labor_matches: Vec<EmploymentMatch>,
     pub management_decisions: Vec<FirmManagementDecision>,
+    pub credit_decisions: Vec<AutonomousFirmCreditDecision>,
     pub emergency_relief: Vec<EmergencyReliefPayment>,
 }
 
@@ -81,17 +92,23 @@ impl World {
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;
         next.capture_monthly_affordability_gaps(&demand_intents, &clearing)?;
         next.settle_local_market(&clearing)?;
+        let reserve_procurements =
+            next.execute_observed_government_reserve_procurement_in_place()?;
+        let reserve_distributions = next.distribute_government_reserves()?;
+        let reserve_policy_reviews =
+            next.execute_observed_government_reserve_policy_review_in_place()?;
         let constrained_routes = procurement
             .constrained_routes
             .union(&clearing.constrained_routes)
             .copied()
             .collect();
         let route_expansions = next.respond_to_route_capacity_pressure(&constrained_routes)?;
+        let residual_household_unmet = next.unmet_demand.clone();
         next.update_bilateral_grievances(
             &procurement.unmet,
             &procurement.capacity_limited,
             &procurement.pristine_offers,
-            &clearing.unmet,
+            &residual_household_unmet,
             &offers,
         )?;
         let firms: Vec<_> = next.firms.keys().copied().collect();
@@ -125,6 +142,9 @@ impl World {
             demand_intents,
             rationing,
             clearing,
+            reserve_procurements,
+            reserve_distributions,
+            reserve_policy_reviews,
             route_expansions,
         };
         *self = next;
@@ -153,14 +173,19 @@ impl World {
     ) -> Result<MonthlyEconomicCycleResult, WorldError> {
         let mut next = self.clone();
         let completed_date = next.date;
+        let reserve_maintenance = next.execute_monthly_government_reserve_maintenance_in_place()?;
         let payroll = next.execute_monthly_payroll()?;
+        let debt_service = next.execute_monthly_firm_debt_service()?;
         next.execute_observed_firm_distress_response()?;
         next.execute_observed_firm_reorganizations()?;
         next.execute_observed_firm_liquidations()?;
         let household_cashflows = next.execute_monthly_household_cashflows()?;
         let household_borrowing = next.execute_monthly_household_coping()?;
         let commercial = next.execute_monthly_commercial_cycle()?;
+        let firm_entries = next.execute_observed_firm_entry()?;
+        let labor_matches = next.execute_observed_labor_matching()?;
         let management_decisions = next.execute_observed_firm_management()?;
+        let credit_decisions = next.execute_observed_firm_credit_market()?;
         next.derive_monthly_social_stress()?;
         next.update_monthly_cohort_health()?;
         next.update_monthly_cohort_experience()?;
@@ -181,11 +206,16 @@ impl World {
         let result = MonthlyEconomicCycleResult {
             completed_date,
             next_date: next.date,
+            reserve_maintenance,
             payroll,
+            debt_service,
             household_cashflows,
             household_borrowing,
             commercial,
+            firm_entries,
+            labor_matches,
             management_decisions,
+            credit_decisions,
             emergency_relief,
         };
         *self = next;
@@ -561,6 +591,23 @@ mod tests {
         assert_eq!(fill.goods_spend, Money::from_minor_units(10));
         assert_eq!(fill.freight_spend, Money::from_minor_units(1));
         assert_eq!(fill.route, Some(RouteId::new(1)));
+        let dependence = direct.household_import_dependence()[&(RegionId::new(1), GoodId::new(1))];
+        assert_eq!(dependence.local_quantity, QuantityMilli::new(0));
+        assert_eq!(dependence.imported_quantity, QuantityMilli::new(1_000));
+        assert_eq!(dependence.imported_share(), BasisPoints::FULL);
+        assert!(direct.events().events().iter().any(|event| matches!(
+            event.event(),
+            crate::DomainEvent::HouseholdImportDependenceObserved {
+                region,
+                good,
+                imported_quantity,
+                imported_share,
+                ..
+            } if *region == RegionId::new(1)
+                && *good == GoodId::new(1)
+                && imported_quantity.get() == 1_000
+                && *imported_share == BasisPoints::FULL
+        )));
         assert_eq!(
             direct.firms()[&FirmId::new(2)].cash(),
             Money::from_minor_units(10)

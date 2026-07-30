@@ -1,6 +1,6 @@
 //! Versioned content loading and validation for A.D.A.M.
 //!
-//! Content schema v7: a scenario is a TOML document (see `assets/demo.toml`)
+//! Content schema v8: a scenario is a TOML document (see `assets/demo.toml`)
 //! loaded into a [`World`] through [`world_from_toml_str`]. The embedded
 //! Stage 0 demo scenario keeps telling two contrasting stories under the 20%
 //! final-sales tax, the only monetary sink of the closed economy:
@@ -8,7 +8,7 @@
 //!   mid-chronicle (wage arrears, deprivation, mortality);
 //! - Southvale carries buffers and wages sized to survive the full 50 years.
 //!
-//! Schema v7 replaces the single country with a countries list: the demo also
+//! Schema v8 replaces the single country with a countries list: the demo also
 //! runs Borealia, a second country with its own region, so a single run
 //! narrates more than one fiscal and demographic path.
 
@@ -24,9 +24,9 @@ use adam_core::{
 };
 
 /// Content schema version understood by this crate.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
-/// The embedded Stage 0 demo scenario in content schema v7.
+/// The embedded Stage 0 demo scenario in content schema v8.
 pub const DEMO_SCENARIO_TOML: &str = include_str!("../assets/demo.toml");
 
 /// Errors raised while loading scenario content.
@@ -118,6 +118,9 @@ struct RecipeSpec {
     output_good: u32,
     output_per_batch_milli: u64,
     labor_milli: u64,
+    /// Opts this recipe into competitive vacancy matching. Omission preserves
+    /// legacy staffing behavior for existing scenarios and mods.
+    minimum_education: Option<String>,
     #[serde(default)]
     inputs: Vec<RecipeInputSpec>,
 }
@@ -138,6 +141,8 @@ struct RegionSpec {
     initial_annual_output: i64,
     country: u32,
     owner: OwnerSpec,
+    #[serde(default)]
+    financiers: Vec<FinancierSpec>,
     cohort: CohortSpec,
     prices: Vec<PriceSpec>,
     firms: Vec<FirmSpec>,
@@ -162,6 +167,16 @@ struct OwnerSpec {
     id: u32,
     name: String,
     birth_year: i32,
+    liquid_cash: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FinancierSpec {
+    id: u32,
+    name: String,
+    birth_year: i32,
+    liquid_cash: i64,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -243,7 +258,7 @@ pub fn demo_world(seed: u64) -> Result<World, WorldError> {
     }
 }
 
-/// Builds a [`World`] from a content schema v7 TOML scenario document.
+/// Builds a [`World`] from a content schema v8 TOML scenario document.
 ///
 /// # Errors
 /// Returns [`ContentError`] when the document cannot be parsed, violates the
@@ -324,9 +339,10 @@ fn register_catalog(world: &mut World, spec: &ScenarioSpec) -> Result<(), Conten
                 )
             })
             .collect();
+        let recipe_id = RecipeId::new(recipe.id);
         world.register_production_recipe(
             ProductionRecipe::new(
-                RecipeId::new(recipe.id),
+                recipe_id,
                 &recipe.name,
                 GoodId::new(recipe.output_good),
                 QuantityMilli::new(recipe.output_per_batch_milli),
@@ -335,6 +351,9 @@ fn register_catalog(world: &mut World, spec: &ScenarioSpec) -> Result<(), Conten
             )
             .map_err(|error| ContentError::Schema(format!("invalid recipe: {error:?}")))?,
         )?;
+        if let Some(minimum_education) = recipe.minimum_education.as_deref() {
+            world.set_recipe_minimum_education(recipe_id, parse_education(minimum_education)?)?;
+        }
     }
     Ok(())
 }
@@ -355,15 +374,20 @@ fn register_region_economy(
         )
         .map_err(|error| ContentError::Schema(format!("invalid region: {error:?}")))?,
     )?;
+    let owner = ActorId::new(spec.owner.id);
     world.register_actor(
-        Actor::new(
-            ActorId::new(spec.owner.id),
-            &spec.owner.name,
-            region,
-            spec.owner.birth_year,
-        )
-        .map_err(|error| ContentError::Schema(format!("invalid actor: {error:?}")))?,
+        Actor::new(owner, &spec.owner.name, region, spec.owner.birth_year)
+            .map_err(|error| ContentError::Schema(format!("invalid actor: {error:?}")))?,
     )?;
+    world.register_actor_cash(owner, Money::from_minor_units(spec.owner.liquid_cash))?;
+    for financier in &spec.financiers {
+        let actor = ActorId::new(financier.id);
+        world.register_actor(
+            Actor::new(actor, &financier.name, region, financier.birth_year)
+                .map_err(|error| ContentError::Schema(format!("invalid financier: {error:?}")))?,
+        )?;
+        world.register_actor_cash(actor, Money::from_minor_units(financier.liquid_cash))?;
+    }
     world.register_household_cohort(
         HouseholdCohort::new(
             CohortId::new(spec.cohort.id),
@@ -476,7 +500,7 @@ fn parse_basis_points(value: u16) -> Result<BasisPoints, ContentError> {
 }
 
 fn unsupported(kind: &str, value: &str) -> ContentError {
-    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v6"))
+    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v8"))
 }
 
 fn parse_need_tier(value: &str) -> Result<NeedTier, ContentError> {
@@ -509,7 +533,11 @@ fn parse_household_type(value: &str) -> Result<HouseholdType, ContentError> {
 
 fn parse_education(value: &str) -> Result<EducationLevel, ContentError> {
     match value {
+        "none" => Ok(EducationLevel::None),
+        "basic" => Ok(EducationLevel::Basic),
         "secondary" => Ok(EducationLevel::Secondary),
+        "vocational" => Ok(EducationLevel::Vocational),
+        "tertiary" => Ok(EducationLevel::Tertiary),
         other => Err(unsupported("education level", other)),
     }
 }
@@ -567,7 +595,7 @@ mod tests {
 
     #[test]
     fn wrong_schema_version_is_rejected() {
-        let document = DEMO_SCENARIO_TOML.replace("schema_version = 7", "schema_version = 4");
+        let document = DEMO_SCENARIO_TOML.replace("schema_version = 8", "schema_version = 4");
         assert!(matches!(
             world_from_toml_str(1, &document),
             Err(ContentError::Schema(_))
@@ -584,6 +612,23 @@ mod tests {
     }
 
     #[test]
+    fn recipe_labor_profile_is_explicit_and_legacy_recipes_remain_opted_out() {
+        let legacy = demo_world(1).expect("legacy-compatible demo world");
+        assert!(legacy.recipe_minimum_education().is_empty());
+
+        let document = DEMO_SCENARIO_TOML.replacen(
+            "labor_milli = 1000",
+            "labor_milli = 1000\nminimum_education = \"vocational\"",
+            1,
+        );
+        let configured = world_from_toml_str(1, &document).expect("configured labor profile");
+        assert_eq!(
+            configured.recipe_minimum_education()[&RecipeId::new(1)],
+            EducationLevel::Vocational
+        );
+    }
+
+    #[test]
     fn demo_world_narrates_two_countries() {
         let mut world = demo_world(1).expect("demo world");
         world.advance_economic_year().expect("first economic year");
@@ -594,5 +639,73 @@ mod tests {
                 .any(|entry| entry.text.contains("across 2 countries")),
             "chronicle should report fiscal closure across 2 countries"
         );
+    }
+    #[test]
+    fn demo_credit_market_rescues_one_case_and_refuses_concentrated_second_case() {
+        let mut world = demo_world(1).expect("demo world");
+        let mut decisions = Vec::new();
+        for _ in 0..3 {
+            decisions = world
+                .execute_monthly_economic_cycle()
+                .expect("controlled credit month")
+                .credit_decisions;
+        }
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].firm, FirmId::new(13));
+        assert_eq!(decisions[0].creditor, ActorId::new(4));
+        assert_eq!(decisions[0].funding_gap, Money::from_minor_units(4));
+        assert_eq!(decisions[0].principal, Money::from_minor_units(6));
+        assert!(
+            world
+                .firm_creditor_claims()
+                .keys()
+                .any(|(firm, _, creditor)| {
+                    *firm == FirmId::new(13) && *creditor == ActorId::new(4)
+                })
+        );
+        assert!(
+            !world
+                .firm_creditor_claims()
+                .keys()
+                .any(|(firm, _, _)| *firm == FirmId::new(14))
+        );
+        assert!(world.firm_credit_offers().is_empty());
+        assert_eq!(
+            world.actor_cash()[&ActorId::new(4)],
+            Money::from_minor_units(9)
+        );
+
+        for _ in 3..12 {
+            world
+                .execute_monthly_economic_cycle()
+                .expect("remaining credit year");
+        }
+        assert!(
+            !world
+                .firm_creditor_claims()
+                .keys()
+                .any(|(firm, _, _)| *firm == FirmId::new(13))
+        );
+        let history = world.lender_credit_history()[&ActorId::new(4)];
+        assert_eq!(history.principal_repaid(), Money::from_minor_units(6));
+        assert_eq!(history.interest_income(), Money::from_minor_units(6));
+        assert_eq!(history.realized_losses(), Money::default());
+        assert_eq!(history.successful_loans(), 1);
+        assert_eq!(history.defaulted_loans(), 0);
+        let rescued = &world.employment_agreements()[&(FirmId::new(13), CohortId::new(1))];
+        assert_eq!(rescued.workers(), 1);
+        assert_eq!(rescued.arrears(), Money::default());
+        let chronicle = world.chronicle();
+        assert!(chronicle.iter().any(|entry| {
+            entry
+                .text
+                .contains("accepted 1 observed credit offers providing 6 minor currency units")
+                && entry.text.contains(
+                    "1 of 2 viable monthly firm funding searches ended without an acceptable domestic credit offer",
+                )
+                && entry.text.contains(
+                    "Private lenders recovered 6 principal and earned 6 interest; 1 loan completed successfully",
+                )
+        }));
     }
 }

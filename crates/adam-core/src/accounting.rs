@@ -329,7 +329,15 @@ impl World {
                 i64::try_from(expected_inputs)
                     .map_err(|_| WorldError::ArithmeticOverflow("expected input costs"))?,
             ),
-            Money::default(),
+            Money::from_minor_units(
+                self.firm_credit_offers
+                    .values()
+                    .filter(|offer| offer.firm() == firm && offer.expires_on() >= self.date)
+                    .try_fold(0_i64, |sum, offer| {
+                        sum.checked_add(offer.principal().minor_units())
+                            .ok_or(WorldError::ArithmeticOverflow("available financing offers"))
+                    })?,
+            ),
             horizon_months,
             source,
         )?;
