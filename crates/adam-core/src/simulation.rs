@@ -51,6 +51,10 @@ struct CountryUpdate {
     interest: Money,
     debt_before_restructuring: Money,
     principal_written_off: Money,
+    social_pressure: BasisPoints,
+    legitimacy_effect: i32,
+    regional_confidence: BasisPoints,
+    regional_confidence_effect: i32,
     legitimacy: BasisPoints,
     cohesion: BasisPoints,
 }
@@ -79,12 +83,15 @@ impl World {
         let mut close_date = self.date;
         close_date.advance_years(1)?;
         let region_updates = self.plan_regions(simulated_year)?;
-        let country_updates = self.plan_countries(simulated_year, &region_updates)?;
+        let social_pressure = self.plan_annual_regional_social_pressure()?;
+        let country_updates =
+            self.plan_countries(simulated_year, &region_updates, &social_pressure)?;
         self.apply_year(
             simulated_year,
             close_date,
             &[],
             &region_updates,
+            &social_pressure,
             &country_updates,
         );
         Ok(())
@@ -124,14 +131,20 @@ impl World {
         let region_updates =
             next.plan_material_regions(closed_year, &opening_inventories, &months)?;
         let tax_updates = next.plan_firm_sales_taxes()?;
-        let country_updates =
-            next.plan_material_countries(closed_year, &region_updates, &tax_updates)?;
+        let social_pressure = next.plan_annual_regional_social_pressure()?;
+        let country_updates = next.plan_material_countries(
+            closed_year,
+            &region_updates,
+            &tax_updates,
+            &social_pressure,
+        )?;
         let close_date = next.date;
         next.apply_year(
             closed_year,
             close_date,
             &tax_updates,
             &region_updates,
+            &social_pressure,
             &country_updates,
         );
         next.events.append(
@@ -387,6 +400,7 @@ impl World {
         simulated_year: i32,
         region_updates: &[RegionUpdate],
         tax_updates: &[FirmTaxUpdate],
+        social_pressure: &BTreeMap<RegionId, crate::RegionalSocialPressure>,
     ) -> Result<Vec<CountryUpdate>, WorldError> {
         let mut old_output = BTreeMap::<CountryId, i128>::new();
         let mut new_output = BTreeMap::<CountryId, i128>::new();
@@ -421,6 +435,8 @@ impl World {
                     *old_output.get(&country.id()).unwrap_or(&0),
                     *new_output.get(&country.id()).unwrap_or(&0),
                     *revenue.get(&country.id()).unwrap_or(&0),
+                    self.country_social_pressure(country.id(), social_pressure),
+                    self.country_regional_confidence(country.id()),
                 )
             })
             .collect()
@@ -430,6 +446,7 @@ impl World {
         &self,
         simulated_year: i32,
         region_updates: &[RegionUpdate],
+        social_pressure: &BTreeMap<RegionId, crate::RegionalSocialPressure>,
     ) -> Result<Vec<CountryUpdate>, WorldError> {
         let mut old_output = BTreeMap::<CountryId, i128>::new();
         let mut new_output = BTreeMap::<CountryId, i128>::new();
@@ -457,6 +474,8 @@ impl World {
                     country.indicators(),
                     *old_output.get(&country.id()).unwrap_or(&0),
                     *new_output.get(&country.id()).unwrap_or(&0),
+                    self.country_social_pressure(country.id(), social_pressure),
+                    self.country_regional_confidence(country.id()),
                 )
             })
             .collect()
@@ -527,6 +546,22 @@ impl World {
         );
         self.events.append(
             close_date,
+            DomainEvent::CountryLegitimacyPressureApplied {
+                country: update.id,
+                population_weighted_pressure: update.social_pressure,
+                legitimacy_effect: update.legitimacy_effect,
+            },
+        );
+        self.events.append(
+            close_date,
+            DomainEvent::CountryRegionalConfidenceApplied {
+                country: update.id,
+                population_weighted_confidence: update.regional_confidence,
+                legitimacy_effect: update.regional_confidence_effect,
+            },
+        );
+        self.events.append(
+            close_date,
             DomainEvent::CountryPoliticsChanged {
                 country: update.id,
                 legitimacy: update.legitimacy,
@@ -535,12 +570,14 @@ impl World {
         );
     }
 
+    #[allow(clippy::too_many_lines)]
     fn apply_year(
         &mut self,
         simulated_year: i32,
         close_date: crate::SimDate,
         tax_updates: &[FirmTaxUpdate],
         region_updates: &[RegionUpdate],
+        social_pressure: &BTreeMap<RegionId, crate::RegionalSocialPressure>,
         country_updates: &[CountryUpdate],
     ) {
         for update in tax_updates {
@@ -590,9 +627,127 @@ impl World {
                 );
             }
         }
+        let cohort_ids: Vec<_> = self.cohorts.keys().copied().collect();
+        for cohort_id in cohort_ids {
+            let transition = self
+                .cohorts
+                .get_mut(&cohort_id)
+                .expect("registered cohort exists")
+                .advance_lifecycle_year();
+            let Some((previous_age_band, age_band)) = transition else {
+                continue;
+            };
+            let retired_workers = if age_band == crate::AgeBand::Senior {
+                self.employment_agreements
+                    .values_mut()
+                    .filter(|agreement| agreement.cohort() == cohort_id && agreement.active())
+                    .map(|agreement| {
+                        let workers = agreement.workers();
+                        agreement.set_workers(0);
+                        workers
+                    })
+                    .sum()
+            } else {
+                0
+            };
+            self.events.append(
+                close_date,
+                DomainEvent::HouseholdCohortAged {
+                    cohort: cohort_id,
+                    previous_age_band,
+                    age_band,
+                    retired_workers,
+                },
+            );
+        }
+        self.regional_social_pressure = social_pressure.clone();
+        for (region, pressure) in social_pressure {
+            self.events.append(
+                close_date,
+                DomainEvent::RegionalSocialPressureUpdated {
+                    region: *region,
+                    chronic_unemployment: pressure.chronic_unemployment(),
+                    livelihood_stress: pressure.livelihood_stress(),
+                    public_service_shortfall: pressure.public_service_shortfall(),
+                    combined: pressure.combined(),
+                },
+            );
+        }
+        for country_update in country_updates {
+            let service_budget =
+                i128::from(country_update.spending.minor_units()).max(0) * 3_000 / 10_000;
+            let (allocation_source, shares, regional_budgets, allocation_influences) =
+                self.plan_regional_service_budgets(country_update.id, service_budget);
+            for influence in allocation_influences {
+                self.events.append(
+                    close_date,
+                    DomainEvent::RegionalServiceAllocationInfluenceApplied {
+                        country: country_update.id,
+                        actor: influence.actor,
+                        office: influence.office,
+                        region: influence.region,
+                        kind: influence.kind,
+                        weight: influence.weight,
+                        score_bonus: influence.score_bonus,
+                    },
+                );
+            }
+            let regions: Vec<_> = self
+                .regions
+                .values()
+                .filter(|region| region.country() == country_update.id)
+                .map(crate::Region::id)
+                .collect();
+            for region in regions {
+                let regional_budget = *regional_budgets.get(&region).unwrap_or(&0);
+                let regional_output = region_updates
+                    .iter()
+                    .find(|update| update.id == region)
+                    .map_or(0, |update| i128::from(update.annual_output.minor_units()));
+                let target_value = if regional_output <= 0 {
+                    0
+                } else {
+                    (regional_budget * 100_000 / regional_output).clamp(0, 10_000)
+                };
+                let funding_target =
+                    BasisPoints::new(u16::try_from(target_value).unwrap_or(10_000))
+                        .expect("regional service target is bounded");
+                let share = shares.get(&region).copied().unwrap_or(BasisPoints::ZERO);
+                let budget =
+                    Money::from_minor_units(i64::try_from(regional_budget).unwrap_or(i64::MAX));
+                self.events.append(
+                    close_date,
+                    DomainEvent::RegionalServiceBudgetAllocated {
+                        country: country_update.id,
+                        region,
+                        source: allocation_source,
+                        share,
+                        service_budget: budget,
+                    },
+                );
+                let services =
+                    self.regional_public_services[&region].adjusted_toward_funding(funding_target);
+                self.regional_public_services.insert(region, services);
+                self.events.append(
+                    close_date,
+                    DomainEvent::RegionalPublicServicesUpdated {
+                        region,
+                        service_budget: budget,
+                        funding_target,
+                        healthcare: services.healthcare(),
+                        infrastructure: services.infrastructure(),
+                        administration: services.administration(),
+                    },
+                );
+            }
+        }
         for update in country_updates {
             self.apply_country_update(close_date, update);
         }
+        self.update_annual_regional_interests(close_date)
+            .expect("bounded annual regional policy evidence fits");
+        self.execute_annual_internal_migration(close_date);
+        self.execute_annual_housing_investment(close_date);
         self.date = close_date;
         self.last_annual_closure_year = Some(simulated_year);
         self.events.append(
@@ -654,6 +809,7 @@ fn output_rate(
     RatePpm::new(raw.clamp(-150_000, 200_000)).expect("clamped output rate")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_material_country(
     seed: crate::WorldSeed,
     year: i32,
@@ -662,6 +818,8 @@ fn plan_material_country(
     old_output: i128,
     new_output: i128,
     tax_revenue: i128,
+    social_pressure: BasisPoints,
+    regional_confidence: BasisPoints,
 ) -> Result<CountryUpdate, WorldError> {
     let debt_for_brake = i128::from(indicators.public_debt().minor_units()).max(0);
     let debt_ratio_bps = if debt_for_brake == 0 {
@@ -701,9 +859,16 @@ fn plan_material_country(
     let mut random = seed.stream_for(POLITICS_DOMAIN, id.get(), year);
     let political_shock = centered(&mut random, 90);
     let growth_signal = i32::try_from(growth_ppm / 250).expect("growth signal fits i32");
-    let mut legitimacy = indicators
-        .legitimacy()
-        .shifted(growth_signal + fiscal_signal + political_shock);
+    let legitimacy_effect = crate::political_economy::legitimacy_effect(social_pressure);
+    let regional_confidence_effect =
+        crate::regional_interests::regional_confidence_effect(regional_confidence);
+    let mut legitimacy = indicators.legitimacy().shifted(
+        growth_signal
+            + fiscal_signal
+            + political_shock
+            + legitimacy_effect
+            + regional_confidence_effect,
+    );
     let mut cohesion = indicators
         .elite_cohesion()
         .shifted(fiscal_signal / 2 + political_shock / 3);
@@ -721,11 +886,16 @@ fn plan_material_country(
         interest: interest_money,
         debt_before_restructuring,
         principal_written_off,
+        social_pressure,
+        legitimacy_effect,
+        regional_confidence,
+        regional_confidence_effect,
         legitimacy,
         cohesion,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_country(
     seed: crate::WorldSeed,
     year: i32,
@@ -733,6 +903,8 @@ fn plan_country(
     indicators: crate::CountryIndicators,
     old_output: i128,
     new_output: i128,
+    social_pressure: BasisPoints,
+    regional_confidence: BasisPoints,
 ) -> Result<CountryUpdate, WorldError> {
     let revenue_bps = 1_600 + i128::from(indicators.elite_cohesion().get()) / 20;
     let debt_for_brake = i128::from(indicators.public_debt().minor_units()).max(0);
@@ -773,9 +945,16 @@ fn plan_country(
     let mut random = seed.stream_for(POLITICS_DOMAIN, id.get(), year);
     let political_shock = centered(&mut random, 90);
     let growth_signal = i32::try_from(growth_ppm / 250).expect("growth signal fits i32");
-    let mut legitimacy = indicators
-        .legitimacy()
-        .shifted(growth_signal + fiscal_signal + political_shock);
+    let legitimacy_effect = crate::political_economy::legitimacy_effect(social_pressure);
+    let regional_confidence_effect =
+        crate::regional_interests::regional_confidence_effect(regional_confidence);
+    let mut legitimacy = indicators.legitimacy().shifted(
+        growth_signal
+            + fiscal_signal
+            + political_shock
+            + legitimacy_effect
+            + regional_confidence_effect,
+    );
     let mut cohesion = indicators
         .elite_cohesion()
         .shifted(fiscal_signal / 2 + political_shock / 3);
@@ -793,6 +972,10 @@ fn plan_country(
         interest: interest_money,
         debt_before_restructuring,
         principal_written_off,
+        social_pressure,
+        legitimacy_effect,
+        regional_confidence,
+        regional_confidence_effect,
         legitimacy,
         cohesion,
     })

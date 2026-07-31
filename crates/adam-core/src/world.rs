@@ -352,6 +352,7 @@ pub enum WorldError {
     DuplicateFirmAppointment,
     DuplicateBoardResolution(ResolutionId),
     DuplicateInvestmentProject(ProjectId),
+    DuplicateGovernmentProgram(crate::ProgramId),
     DuplicateOwnershipStake {
         firm: FirmId,
         owner: ActorId,
@@ -382,6 +383,9 @@ pub enum WorldError {
     UnknownPowerNode(PowerNodeId),
     EmptyName(&'static str),
     InvalidCohort(&'static str),
+    InvalidHousing(&'static str),
+    InvalidServiceAllocation(&'static str),
+    InvalidGovernmentProgram(&'static str),
     InvalidConsumptionProfile(&'static str),
     InvalidPrice,
     InvalidActorCash,
@@ -414,6 +418,7 @@ pub enum WorldError {
     MissingFirmPolicy(FirmId),
     UnknownBoardResolution(ResolutionId),
     UnknownInvestmentProject(ProjectId),
+    UnknownGovernmentProgram(crate::ProgramId),
     InsufficientCommittedInvestment(FirmId),
     InvalidInvestmentProject(&'static str),
     InvalidLogistics(&'static str),
@@ -468,6 +473,9 @@ impl fmt::Display for WorldError {
             Self::DuplicateFirmAppointment => {
                 formatter.write_str("duplicate corporate appointment")
             }
+            Self::DuplicateGovernmentProgram(id) => {
+                write!(formatter, "government program {id} already exists")
+            }
             Self::DuplicateInvestmentProject(id) => {
                 write!(formatter, "investment project {id} already exists")
             }
@@ -510,6 +518,13 @@ impl fmt::Display for WorldError {
             Self::UnknownPowerNode(id) => write!(formatter, "unknown power node {id}"),
             Self::EmptyName(kind) => write!(formatter, "{kind} name cannot be empty"),
             Self::InvalidCohort(reason) => write!(formatter, "invalid household cohort: {reason}"),
+            Self::InvalidHousing(reason) => write!(formatter, "invalid housing market: {reason}"),
+            Self::InvalidServiceAllocation(reason) => {
+                write!(formatter, "invalid public-service allocation: {reason}")
+            }
+            Self::InvalidGovernmentProgram(reason) => {
+                write!(formatter, "invalid government program: {reason}")
+            }
             Self::InvalidConsumptionProfile(reason) => {
                 write!(formatter, "invalid consumption profile: {reason}")
             }
@@ -572,6 +587,9 @@ impl fmt::Display for WorldError {
             }
             Self::MissingFirmPolicy(firm) => write!(formatter, "firm {firm} has no policy"),
             Self::UnknownBoardResolution(id) => write!(formatter, "unknown board resolution {id}"),
+            Self::UnknownGovernmentProgram(id) => {
+                write!(formatter, "unknown government program {id}")
+            }
             Self::UnknownInvestmentProject(id) => {
                 write!(formatter, "unknown investment project {id}")
             }
@@ -739,9 +757,15 @@ pub struct World {
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
+    pub(crate) regional_public_services: BTreeMap<RegionId, crate::RegionalPublicServices>,
+    pub(crate) regional_social_pressure: BTreeMap<RegionId, crate::RegionalSocialPressure>,
+    pub(crate) regional_interests: BTreeMap<RegionId, crate::RegionalInterest>,
+    pub(crate) regional_policy_outcomes: BTreeMap<RegionId, crate::RegionalPolicyOutcome>,
+    pub(crate) regional_housing: BTreeMap<RegionId, crate::RegionalHousingMarket>,
     pub(crate) monthly_consumption: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) household_import_dependence:
         BTreeMap<(RegionId, GoodId), crate::HouseholdImportDependence>,
+    pub(crate) household_supplier_preferences: BTreeMap<(CohortId, GoodId), FirmId>,
     pub(crate) unmet_demand: BTreeMap<(CohortId, GoodId, crate::NeedTier), QuantityMilli>,
     pub(crate) monthly_affordability_gaps: BTreeMap<CohortId, Money>,
     pub(crate) deprivation_pressure: BTreeMap<CohortId, BasisPoints>,
@@ -750,6 +774,11 @@ pub struct World {
     pub(crate) cohort_experience: BTreeMap<CohortId, crate::CohortExperience>,
     pub(crate) cohort_health: BTreeMap<CohortId, crate::CohortHealth>,
     pub(crate) government_emergency_policies: BTreeMap<CountryId, crate::GovernmentEmergencyPolicy>,
+    pub(crate) country_service_allocations: BTreeMap<CountryId, crate::CountryServiceAllocation>,
+    #[serde(default)]
+    pub(crate) government_programs: BTreeMap<crate::ProgramId, crate::GovernmentProgram>,
+    #[serde(default)]
+    pub(crate) government_program_labor_usage: BTreeMap<(i32, RegionId), u64>,
     pub(crate) government_reserves: BTreeMap<(RegionId, GoodId), QuantityMilli>,
     pub(crate) government_reserve_priorities: BTreeMap<(CountryId, RegionId, GoodId), BasisPoints>,
     pub(crate) reserve_priority_pressure:
@@ -838,8 +867,14 @@ impl World {
             route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
+            regional_public_services: BTreeMap::new(),
+            regional_social_pressure: BTreeMap::new(),
+            regional_interests: BTreeMap::new(),
+            regional_policy_outcomes: BTreeMap::new(),
+            regional_housing: BTreeMap::new(),
             monthly_consumption: BTreeMap::new(),
             household_import_dependence: BTreeMap::new(),
+            household_supplier_preferences: BTreeMap::new(),
             unmet_demand: BTreeMap::new(),
             monthly_affordability_gaps: BTreeMap::new(),
             deprivation_pressure: BTreeMap::new(),
@@ -848,6 +883,9 @@ impl World {
             cohort_experience: BTreeMap::new(),
             cohort_health: BTreeMap::new(),
             government_emergency_policies: BTreeMap::new(),
+            country_service_allocations: BTreeMap::new(),
+            government_programs: BTreeMap::new(),
+            government_program_labor_usage: BTreeMap::new(),
             government_reserves: BTreeMap::new(),
             government_reserve_priorities: BTreeMap::new(),
             reserve_priority_pressure: BTreeMap::new(),
@@ -906,6 +944,18 @@ impl World {
                 country: region.country(),
                 name: region.name().to_owned(),
             },
+        );
+        self.regional_public_services
+            .insert(region.id(), crate::RegionalPublicServices::default());
+        self.regional_social_pressure
+            .insert(region.id(), crate::RegionalSocialPressure::default());
+        self.regional_interests
+            .insert(region.id(), crate::RegionalInterest::default());
+        self.regional_policy_outcomes
+            .insert(region.id(), crate::RegionalPolicyOutcome::default());
+        self.regional_housing.insert(
+            region.id(),
+            crate::RegionalHousingMarket::derived(region.population(), region.annual_output()),
         );
         self.regions.insert(region.id(), region);
         Ok(())
@@ -1133,7 +1183,141 @@ impl World {
         &self.events
     }
 
+    fn write_service_allocation_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.country_service_allocations.len() as u64);
+        for (country, allocation) in &self.country_service_allocations {
+            hash.write_u32(country.get());
+            hash.write_u64(allocation.shares().len() as u64);
+            for (region, share) in allocation.shares() {
+                hash.write_u32(region.get());
+                hash.write_u16(share.get());
+            }
+        }
+    }
+
+    fn write_government_program_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.government_programs.len() as u64);
+        for (id, program) in &self.government_programs {
+            hash.write_u32(id.get());
+            hash.write_u32(program.country().get());
+            hash.write_u32(program.initiator().get());
+            hash.write_str(program.name());
+            hash.write_i64(program.promised_annual_funding().minor_units());
+            hash.write_u16(program.duration_years());
+            hash.write_u8(match program.priority() {
+                crate::PublicServicePriority::Healthcare => 1,
+                crate::PublicServicePriority::Infrastructure => 2,
+                crate::PublicServicePriority::Administration => 3,
+            });
+            hash.write_u16(program.promised_improvement().get());
+            hash.write_i32(program.start_year());
+            hash.write_u8(match program.status() {
+                crate::GovernmentProgramStatus::Announced => 1,
+                crate::GovernmentProgramStatus::Active => 2,
+                crate::GovernmentProgramStatus::Completed => 3,
+                crate::GovernmentProgramStatus::Cancelled => 4,
+                crate::GovernmentProgramStatus::Failed => 5,
+            });
+            hash.write_i64(program.appropriated_funding().minor_units());
+            hash.write_i64(program.delivered_funding().minor_units());
+            hash.write_i64(program.carryover_funding().minor_units());
+            hash.write_u16(program.years_delayed());
+            hash.write_i32(program.last_appropriation_year().unwrap_or(i32::MIN));
+            hash.write_i32(program.last_execution_year().unwrap_or(i32::MIN));
+            hash.write_u64(program.regional_memory().len() as u64);
+            for (region, memory) in program.regional_memory() {
+                hash.write_u32(region.get());
+                hash.write_i64(memory.promised().minor_units());
+                hash.write_i64(memory.committed().minor_units());
+                hash.write_i64(memory.delivered().minor_units());
+                hash.write_u16(memory.fulfillment().get());
+                hash.write_u8(match memory.outcome() {
+                    crate::ProgramRegionalOutcomeKind::Beneficiary => 1,
+                    crate::ProgramRegionalOutcomeKind::Underfulfilled => 2,
+                    crate::ProgramRegionalOutcomeKind::Excluded => 3,
+                });
+                hash.write_u16(memory.years_excluded());
+                hash.write_i32(memory.political_memory());
+            }
+            hash.write_u64(program.regional_shares().len() as u64);
+            for (region, share) in program.regional_shares() {
+                hash.write_u32(region.get());
+                hash.write_u16(share.get());
+            }
+            hash.write_u64(program.temporary_workers_required());
+            hash.write_u64(program.material_requirements().len() as u64);
+            for (good, quantity) in program.material_requirements() {
+                hash.write_u32(good.get());
+                hash.write_u64(quantity.get());
+            }
+        }
+    }
+
+    fn write_regional_interest_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.regional_interests.len() as u64);
+        for (region, interest) in &self.regional_interests {
+            hash.write_u32(region.get());
+            hash.write_u8(interest.priority().fingerprint_tag());
+            hash.write_u16(interest.priority_pressure().get());
+            hash.write_u16(interest.satisfaction().get());
+            hash.write_u8(interest.years_persistent());
+            hash.write_u16(interest.previous_priority_pressure().get());
+        }
+        hash.write_u64(self.regional_policy_outcomes.len() as u64);
+        for (region, outcome) in &self.regional_policy_outcomes {
+            hash.write_u32(region.get());
+            hash.write_i64(outcome.taxes_paid().minor_units());
+            hash.write_i64(outcome.service_allocation().minor_units());
+            hash.write_i64(outcome.net_transfer().minor_units());
+            hash.write_u8(outcome.fiscal_position().fingerprint_tag());
+        }
+    }
+
+    fn write_social_pressure_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.regional_social_pressure.len() as u64);
+        for (region, pressure) in &self.regional_social_pressure {
+            hash.write_u32(region.get());
+            hash.write_u16(pressure.chronic_unemployment().get());
+            hash.write_u16(pressure.livelihood_stress().get());
+            hash.write_u16(pressure.public_service_shortfall().get());
+            hash.write_u16(pressure.combined().get());
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn write_market_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.regional_public_services.len() as u64);
+        for (region, services) in &self.regional_public_services {
+            hash.write_u32(region.get());
+            hash.write_u16(services.healthcare().get());
+            hash.write_u16(services.infrastructure().get());
+            hash.write_u16(services.administration().get());
+        }
+        self.write_social_pressure_fingerprint(hash);
+        self.write_regional_interest_fingerprint(hash);
+        self.write_service_allocation_fingerprint(hash);
+        self.write_government_program_fingerprint(hash);
+        hash.write_u64(self.government_program_labor_usage.len() as u64);
+        for ((year, region), workers) in &self.government_program_labor_usage {
+            hash.write_i32(*year);
+            hash.write_u32(region.get());
+            hash.write_u64(*workers);
+        }
+        hash.write_u64(self.regional_housing.len() as u64);
+        for (region, housing) in &self.regional_housing {
+            hash.write_u32(region.get());
+            hash.write_u64(housing.dwelling_capacity());
+            hash.write_i64(housing.base_monthly_cost().minor_units());
+            hash.write_i64(housing.public_capital().minor_units());
+            if let Some(construction) = housing.construction() {
+                hash.write_u8(1);
+                hash.write_u64(construction.dwellings());
+                hash.write_u8(construction.years_remaining());
+                hash.write_i64(construction.committed_cost().minor_units());
+            } else {
+                hash.write_u8(0);
+            }
+        }
         hash.write_u64(self.monthly_consumption.len() as u64);
         for ((cohort, good, tier), q) in &self.monthly_consumption {
             hash.write_u32(cohort.get());
@@ -1152,6 +1336,12 @@ impl World {
             hash.write_u32(good.get());
             hash.write_u64(dependence.local_quantity.get());
             hash.write_u64(dependence.imported_quantity.get());
+        }
+        hash.write_u64(self.household_supplier_preferences.len() as u64);
+        for ((cohort, good), firm) in &self.household_supplier_preferences {
+            hash.write_u32(cohort.get());
+            hash.write_u32(good.get());
+            hash.write_u32(firm.get());
         }
         hash.write_u64(self.unmet_demand.len() as u64);
         for ((cohort, good, tier), q) in &self.unmet_demand {
@@ -1877,6 +2067,7 @@ impl World {
             hash.write_u64(cohort.people().people());
             hash.write_u64(cohort.households());
             hash.write_u8(cohort.age_band().fingerprint_tag());
+            hash.write_u8(cohort.years_in_age_band());
             hash.write_u8(cohort.household_type().fingerprint_tag());
             hash.write_u8(cohort.education().fingerprint_tag());
             hash.write_u8(cohort.employment().fingerprint_tag());

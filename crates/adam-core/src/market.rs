@@ -210,6 +210,25 @@ pub fn clear_market_with_delivery<F>(
     orders: &[MarketOrder],
     offers: &[MarketOffer],
     route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
+    delivery: F,
+) -> Result<MarketClearing, WorldError>
+where
+    F: FnMut(RegionId, RegionId) -> Option<(RouteId, Money)>,
+{
+    clear_market_with_delivery_preferences(
+        orders,
+        offers,
+        route_capacity,
+        &std::collections::BTreeMap::new(),
+        delivery,
+    )
+}
+
+pub(crate) fn clear_market_with_delivery_preferences<F>(
+    orders: &[MarketOrder],
+    offers: &[MarketOffer],
+    route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
+    preferences: &std::collections::BTreeMap<(CohortId, GoodId), FirmId>,
     mut delivery: F,
 ) -> Result<MarketClearing, WorldError>
 where
@@ -237,6 +256,7 @@ where
             &supply,
             &mut remaining,
             route_capacity,
+            preferences,
             &mut delivery,
             &mut fills,
             &mut constrained_routes,
@@ -285,11 +305,13 @@ where
 /// state, returning the unfilled remainder.
 /// # Errors
 /// Returns an error for arithmetic overflow while pricing or settling fills.
+#[allow(clippy::too_many_arguments)]
 fn fill_market_order<F>(
     order: MarketOrder,
     supply: &[MarketOffer],
     remaining: &mut [u64],
     route_capacity: &mut std::collections::BTreeMap<RouteId, u64>,
+    preferences: &std::collections::BTreeMap<(CohortId, GoodId), FirmId>,
     delivery: &mut F,
     fills: &mut Vec<MarketFill>,
     constrained_routes: &mut std::collections::BTreeSet<RouteId>,
@@ -299,7 +321,7 @@ where
 {
     let mut need = order.quantity.get();
     let mut budget = order.max_spend.minor_units();
-    let candidates = market_candidates(order, supply, remaining, delivery)?;
+    let candidates = market_candidates(order, supply, remaining, preferences, delivery)?;
     for candidate in candidates {
         if need == 0 {
             break;
@@ -377,6 +399,7 @@ fn market_candidates<F>(
     order: MarketOrder,
     supply: &[MarketOffer],
     remaining: &[u64],
+    preferences: &std::collections::BTreeMap<(CohortId, GoodId), FirmId>,
     delivery: &mut F,
 ) -> Result<Vec<MarketCandidate>, WorldError>
 where
@@ -402,6 +425,23 @@ where
                     .checked_add(tariff.minor_units())
                     .ok_or(WorldError::ArithmeticOverflow("market delivered price"))?;
                 imports.push((delivered, offer.region, offer.seller, index, tariff, route));
+            }
+        }
+    }
+    if let Some(preferred) = preferences.get(&(order.buyer, order.good)) {
+        if let Some(position) = candidates
+            .iter()
+            .position(|candidate| supply[candidate.index].seller == *preferred)
+        {
+            let cheapest = candidates
+                .iter()
+                .map(|candidate| supply[candidate.index].unit_price.minor_units())
+                .min()
+                .unwrap_or(i64::MAX);
+            let preferred_price = supply[candidates[position].index].unit_price.minor_units();
+            if i128::from(preferred_price) * 100 <= i128::from(cheapest) * 110 {
+                let preferred = candidates.remove(position);
+                candidates.insert(0, preferred);
             }
         }
     }
@@ -589,6 +629,31 @@ fn derive_household_import_dependence(
     Ok(dependence)
 }
 
+fn derive_household_supplier_preferences(
+    fills: &[MarketFill],
+) -> Result<std::collections::BTreeMap<(CohortId, GoodId), FirmId>, WorldError> {
+    let mut volumes = std::collections::BTreeMap::<(CohortId, GoodId, FirmId), u64>::new();
+    for fill in fills {
+        let total = volumes
+            .entry((fill.buyer, fill.good, fill.seller))
+            .or_default();
+        *total = total
+            .checked_add(fill.quantity.get())
+            .ok_or(WorldError::ArithmeticOverflow("household supplier volume"))?;
+    }
+    let mut chosen = std::collections::BTreeMap::<(CohortId, GoodId), (u64, FirmId)>::new();
+    for ((cohort, good, seller), volume) in volumes {
+        let entry = chosen.entry((cohort, good)).or_insert((volume, seller));
+        if volume > entry.0 || (volume == entry.0 && seller < entry.1) {
+            *entry = (volume, seller);
+        }
+    }
+    Ok(chosen
+        .into_iter()
+        .map(|(market, (_, seller))| (market, seller))
+        .collect())
+}
+
 fn household_import_dependence_events(
     world: &crate::World,
     dependence: &std::collections::BTreeMap<(RegionId, GoodId), HouseholdImportDependence>,
@@ -617,6 +682,7 @@ impl crate::World {
     /// Atomically settles pre-cleared market fills against household wealth and firm inventories.
     /// # Errors
     /// Returns an error without mutation for insufficient cash, stock, or arithmetic overflow.
+    #[allow(clippy::too_many_lines)]
     pub fn settle_local_market(&mut self, clearing: &MarketClearing) -> Result<(), WorldError> {
         validate_market_clearing(self, clearing)?;
         let mut cohorts = self.cohorts.clone();
@@ -662,6 +728,7 @@ impl crate::World {
         }
         let import_dependence = derive_household_import_dependence(&cohorts, &clearing.fills)?;
         let import_events = household_import_dependence_events(self, &import_dependence)?;
+        let supplier_preferences = derive_household_supplier_preferences(&clearing.fills)?;
         self.cohorts = cohorts;
         self.firms = firms;
         let mut weighted_desired: std::collections::BTreeMap<CohortId, u128> =
@@ -708,6 +775,22 @@ impl crate::World {
         for event in import_events {
             self.events.append(self.date, event);
         }
+        for ((cohort, good), seller) in supplier_preferences {
+            let previous_seller = self
+                .household_supplier_preferences
+                .insert((cohort, good), seller);
+            if previous_seller != Some(seller) {
+                self.events.append(
+                    self.date,
+                    crate::DomainEvent::HouseholdSupplierPreferenceChanged {
+                        cohort,
+                        good,
+                        previous_seller,
+                        seller,
+                    },
+                );
+            }
+        }
         record_market_settlement_evidence(self, clearing)?;
         Ok(())
     }
@@ -725,6 +808,13 @@ impl crate::World {
         &self,
     ) -> &std::collections::BTreeMap<(RegionId, GoodId), HouseholdImportDependence> {
         &self.household_import_dependence
+    }
+
+    #[must_use]
+    pub fn household_supplier_preferences(
+        &self,
+    ) -> &std::collections::BTreeMap<(CohortId, GoodId), FirmId> {
+        &self.household_supplier_preferences
     }
 
     #[must_use]
@@ -874,6 +964,61 @@ mod tests {
         assert_eq!(result.offer_outcomes[0].unmet_market_demand.get(), 400);
         assert!(result.offer_outcomes[0].sold_out_while_demand_remained());
     }
+    #[test]
+    fn supplier_loyalty_accepts_small_premium_but_not_large_one() {
+        let order = [MarketOrder {
+            buyer: CohortId::new(1),
+            tier: NeedTier::Participation,
+            region: RegionId::new(1),
+            good: GoodId::new(1),
+            quantity: QuantityMilli::new(1_000),
+            max_spend: Money::from_minor_units(100),
+        }];
+        let offers = [
+            MarketOffer {
+                seller: FirmId::new(1),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1_000),
+                unit_price: Money::from_minor_units(11),
+            },
+            MarketOffer {
+                seller: FirmId::new(2),
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1_000),
+                unit_price: Money::from_minor_units(10),
+            },
+        ];
+        let preferences = BTreeMap::from([((CohortId::new(1), GoodId::new(1)), FirmId::new(1))]);
+        let loyal = clear_market_with_delivery_preferences(
+            &order,
+            &offers,
+            &mut BTreeMap::new(),
+            &preferences,
+            |_, _| None,
+        )
+        .expect("loyal clearing");
+        assert_eq!(loyal.fills[0].seller, FirmId::new(1));
+
+        let expensive = [
+            MarketOffer {
+                unit_price: Money::from_minor_units(12),
+                ..offers[0]
+            },
+            offers[1],
+        ];
+        let switched = clear_market_with_delivery_preferences(
+            &order,
+            &expensive,
+            &mut BTreeMap::new(),
+            &preferences,
+            |_, _| None,
+        )
+        .expect("price-sensitive clearing");
+        assert_eq!(switched.fills[0].seller, FirmId::new(2));
+    }
+
     #[test]
     fn import_fills_are_limited_by_route_capacity() {
         let orders = [MarketOrder {

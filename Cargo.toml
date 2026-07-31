@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/adam-cli",
+    "apps/adam-observatory",
     "crates/adam-content",
     "crates/adam-core",
 ]

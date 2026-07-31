@@ -43,6 +43,7 @@ typed_id!(FirmId);
 typed_id!(RecipeId);
 typed_id!(ResolutionId);
 typed_id!(ProjectId);
+typed_id!(ProgramId);
 typed_id!(RouteId);
 typed_id!(ShipmentId);
 typed_id!(TerminalId);
@@ -74,6 +75,7 @@ mod tests {
         assert_eq!(size_of::<RecipeId>(), size_of::<u32>());
         assert_eq!(size_of::<ResolutionId>(), size_of::<u32>());
         assert_eq!(size_of::<ProjectId>(), size_of::<u32>());
+        assert_eq!(size_of::<ProgramId>(), size_of::<u32>());
         assert_eq!(size_of::<RouteId>(), size_of::<u32>());
         assert_eq!(size_of::<ShipmentId>(), size_of::<u32>());
         assert_eq!(size_of::<TerminalId>(), size_of::<u32>());

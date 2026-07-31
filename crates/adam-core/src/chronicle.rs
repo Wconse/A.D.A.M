@@ -24,6 +24,7 @@ impl World {
         let mut actor_names = BTreeMap::<ActorId, String>::new();
         let mut country_names = BTreeMap::<CountryId, String>::new();
         let mut region_names = BTreeMap::<RegionId, String>::new();
+        let mut program_names = BTreeMap::<crate::ProgramId, String>::new();
         for envelope in self.events().events() {
             match envelope.event() {
                 DomainEvent::CountryRegistered { country, name } => {
@@ -34,6 +35,9 @@ impl World {
                 }
                 DomainEvent::RegionRegistered { region, name, .. } => {
                     region_names.insert(*region, name.clone());
+                }
+                DomainEvent::GovernmentProgramDeclared { program, name, .. } => {
+                    program_names.insert(*program, name.clone());
                 }
                 _ => {}
             }
@@ -48,6 +52,7 @@ impl World {
                     &actor_names,
                     &country_names,
                     &region_names,
+                    &program_names,
                     self.firms(),
                     self.goods(),
                 )
@@ -59,6 +64,26 @@ impl World {
 #[derive(Default)]
 struct YearSummary {
     months: u64,
+    program_events: u64,
+    programs_declared: u64,
+    programs_cancelled: u64,
+    program_appropriated_minor: i128,
+    program_delivered_minor: i128,
+    program_carryover_minor: i128,
+    program_beneficiary_outcomes: u64,
+    program_underfulfilled_outcomes: u64,
+    program_excluded_outcomes: u64,
+    program_material_consumed_milli: u128,
+    program_temporary_workers: u64,
+    program_wages_minor: i128,
+    leading_program_execution: Option<(crate::ProgramId, i64, i64, u16)>,
+    leading_program_loser: Option<(
+        crate::ProgramId,
+        RegionId,
+        u16,
+        crate::ProgramRegionalOutcomeKind,
+    )>,
+    leading_program_consequence: Option<(CountryId, i32, i32, i32, i32)>,
     relief_by_actor: BTreeMap<ActorId, i128>,
     target_changes_by_actor: BTreeMap<ActorId, u64>,
     rationing_by_region: BTreeMap<RegionId, u64>,
@@ -128,6 +153,38 @@ struct YearSummary {
     maximum_vacancy_pressure_months: u8,
     leading_unemployment_region: Option<RegionId>,
     leading_vacancy_region: Option<RegionId>,
+    migrated_households: u64,
+    migrated_people: u64,
+    migration_fees_minor: i128,
+    leading_migration: Option<(RegionId, RegionId, u64, u16)>,
+    housing_projects_started: u64,
+    housing_dwellings_started: u64,
+    housing_committed_minor: i128,
+    housing_projects_completed: u64,
+    housing_dwellings_completed: u64,
+    housing_capacity_after_completion: u64,
+    leading_housing_region: Option<RegionId>,
+    regional_social_pressure_observations: u64,
+    leading_social_pressure: Option<(RegionId, u16, u16, u16, u16)>,
+    country_legitimacy_pressure_observations: u64,
+    leading_legitimacy_pressure: Option<(CountryId, u16, i32)>,
+    leading_regional_interest:
+        Option<(RegionId, crate::RegionalPolicyPriority, u16, u16, u8, bool)>,
+    regional_net_contributors: u64,
+    regional_net_beneficiaries: u64,
+    regional_net_transfers_minor: i128,
+    leading_policy_outcome: Option<(RegionId, i64)>,
+    leading_regional_confidence: Option<(CountryId, u16, i32)>,
+    explicit_service_allocations: u64,
+    autonomous_service_allocations: u64,
+    leading_service_allocation: Option<(RegionId, crate::ServiceAllocationSource, u16, i64)>,
+    leading_service_allocation_influence: Option<(
+        ActorId,
+        RegionId,
+        crate::ServiceAllocationInfluenceKind,
+        u16,
+        u16,
+    )>,
     firm_recapitalizations: u64,
     firm_recapitalization_minor: i128,
     autonomous_credit_acceptances: u64,
@@ -195,12 +252,16 @@ struct YearSummary {
 
 impl YearSummary {
     fn observe(&mut self, event: &DomainEvent) {
-        if self.observe_procurement_event(event)
+        if self.observe_government_program_event(event)
+            || self.observe_procurement_event(event)
             || self.observe_public_reserve_event(event)
             || self.observe_freight_event(event)
             || self.observe_route_expansion_event(event)
             || self.observe_firm_entry_event(event)
             || self.observe_labor_market_event(event)
+            || self.observe_settlement_event(event)
+            || self.observe_social_pressure_event(event)
+            || self.observe_regional_interest_event(event)
             || self.observe_firm_debt_service_event(event)
             || self.observe_firm_distress_event(event)
             || self.observe_fiscal_event(event)
@@ -283,6 +344,241 @@ impl YearSummary {
             DomainEvent::EconomicYearCompleted { .. } => self.completed = true,
             _ => {}
         }
+    }
+
+    fn observe_service_allocation_event(&mut self, event: &DomainEvent) -> bool {
+        if let DomainEvent::RegionalServiceAllocationInfluenceApplied {
+            actor,
+            region,
+            kind,
+            weight,
+            score_bonus,
+            ..
+        } = event
+        {
+            let candidate = (*actor, *region, *kind, weight.get(), *score_bonus);
+            if self
+                .leading_service_allocation_influence
+                .is_none_or(|current| (candidate.4, candidate.3) > (current.4, current.3))
+            {
+                self.leading_service_allocation_influence = Some(candidate);
+            }
+            return true;
+        }
+        let DomainEvent::RegionalServiceBudgetAllocated {
+            region,
+            source,
+            share,
+            service_budget,
+            ..
+        } = event
+        else {
+            return false;
+        };
+        match source {
+            crate::ServiceAllocationSource::AutonomousPrudent => {
+                self.autonomous_service_allocations =
+                    self.autonomous_service_allocations.saturating_add(1);
+            }
+            crate::ServiceAllocationSource::ExplicitPoliticalDecision => {
+                self.explicit_service_allocations =
+                    self.explicit_service_allocations.saturating_add(1);
+            }
+        }
+        let candidate = (*region, *source, share.get(), service_budget.minor_units());
+        let rank = |allocation: (RegionId, crate::ServiceAllocationSource, u16, i64)| {
+            let explicit =
+                u8::from(allocation.1 == crate::ServiceAllocationSource::ExplicitPoliticalDecision);
+            let funded = u8::from(allocation.3 > 0);
+            if explicit == 1 {
+                (explicit, funded, i64::from(allocation.2), allocation.3)
+            } else {
+                (explicit, funded, allocation.3, i64::from(allocation.2))
+            }
+        };
+        if self
+            .leading_service_allocation
+            .is_none_or(|current| rank(candidate) > rank(current))
+        {
+            self.leading_service_allocation = Some(candidate);
+        }
+        true
+    }
+
+    fn observe_regional_interest_event(&mut self, event: &DomainEvent) -> bool {
+        if self.observe_service_allocation_event(event) {
+            return true;
+        }
+        match event {
+            DomainEvent::RegionalPolicyOutcomeRecorded {
+                region,
+                net_transfer,
+                fiscal_position,
+                ..
+            } => {
+                match fiscal_position {
+                    crate::RegionalFiscalPosition::NetContributor => {
+                        self.regional_net_contributors =
+                            self.regional_net_contributors.saturating_add(1);
+                    }
+                    crate::RegionalFiscalPosition::Balanced => {}
+                    crate::RegionalFiscalPosition::NetBeneficiary => {
+                        self.regional_net_beneficiaries =
+                            self.regional_net_beneficiaries.saturating_add(1);
+                    }
+                }
+                self.regional_net_transfers_minor += i128::from(net_transfer.minor_units());
+                let candidate = (*region, net_transfer.minor_units());
+                if self
+                    .leading_policy_outcome
+                    .is_none_or(|current| candidate.1.unsigned_abs() > current.1.unsigned_abs())
+                {
+                    self.leading_policy_outcome = Some(candidate);
+                }
+            }
+            DomainEvent::RegionalInterestUpdated {
+                region,
+                previous_priority,
+                priority,
+                priority_pressure,
+                satisfaction,
+                years_persistent,
+            } => {
+                let candidate = (
+                    *region,
+                    *priority,
+                    priority_pressure.get(),
+                    satisfaction.get(),
+                    *years_persistent,
+                    previous_priority != priority,
+                );
+                if self.leading_regional_interest.is_none_or(|current| {
+                    candidate.3 < current.3 || (candidate.3 == current.3 && candidate.2 > current.2)
+                }) {
+                    self.leading_regional_interest = Some(candidate);
+                }
+            }
+            DomainEvent::CountryRegionalConfidenceApplied {
+                country,
+                population_weighted_confidence,
+                legitimacy_effect,
+            } => {
+                let candidate = (
+                    *country,
+                    population_weighted_confidence.get(),
+                    *legitimacy_effect,
+                );
+                if self
+                    .leading_regional_confidence
+                    .is_none_or(|current| candidate.1.abs_diff(5_000) > current.1.abs_diff(5_000))
+                {
+                    self.leading_regional_confidence = Some(candidate);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn observe_social_pressure_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::RegionalSocialPressureUpdated {
+                region,
+                chronic_unemployment,
+                livelihood_stress,
+                public_service_shortfall,
+                combined,
+            } => {
+                self.regional_social_pressure_observations =
+                    self.regional_social_pressure_observations.saturating_add(1);
+                let candidate = (
+                    *region,
+                    chronic_unemployment.get(),
+                    livelihood_stress.get(),
+                    public_service_shortfall.get(),
+                    combined.get(),
+                );
+                if self
+                    .leading_social_pressure
+                    .is_none_or(|current| candidate.4 > current.4)
+                {
+                    self.leading_social_pressure = Some(candidate);
+                }
+            }
+            DomainEvent::CountryLegitimacyPressureApplied {
+                country,
+                population_weighted_pressure,
+                legitimacy_effect,
+            } => {
+                self.country_legitimacy_pressure_observations = self
+                    .country_legitimacy_pressure_observations
+                    .saturating_add(1);
+                let candidate = (
+                    *country,
+                    population_weighted_pressure.get(),
+                    *legitimacy_effect,
+                );
+                if self.leading_legitimacy_pressure.is_none_or(|current| {
+                    candidate.1 > current.1 || (candidate.1 == current.1 && candidate.0 < current.0)
+                }) {
+                    self.leading_legitimacy_pressure = Some(candidate);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn observe_settlement_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::HouseholdMigrated {
+                from_region,
+                to_region,
+                people,
+                households,
+                relocation_fee,
+                destination_housing_pressure_basis_points,
+                ..
+            } => {
+                self.migrated_households = self.migrated_households.saturating_add(*households);
+                self.migrated_people = self.migrated_people.saturating_add(people.people());
+                self.migration_fees_minor += i128::from(relocation_fee.minor_units());
+                self.leading_migration.get_or_insert((
+                    *from_region,
+                    *to_region,
+                    people.people(),
+                    *destination_housing_pressure_basis_points,
+                ));
+            }
+            DomainEvent::RegionalHousingConstructionStarted {
+                region,
+                dwellings,
+                committed_cost,
+                ..
+            } => {
+                self.housing_projects_started = self.housing_projects_started.saturating_add(1);
+                self.housing_dwellings_started =
+                    self.housing_dwellings_started.saturating_add(*dwellings);
+                self.housing_committed_minor += i128::from(committed_cost.minor_units());
+                self.leading_housing_region.get_or_insert(*region);
+            }
+            DomainEvent::RegionalHousingConstructionCompleted {
+                region,
+                dwellings,
+                dwelling_capacity,
+                ..
+            } => {
+                self.housing_projects_completed = self.housing_projects_completed.saturating_add(1);
+                self.housing_dwellings_completed =
+                    self.housing_dwellings_completed.saturating_add(*dwellings);
+                self.housing_capacity_after_completion = self
+                    .housing_capacity_after_completion
+                    .saturating_add(*dwelling_capacity);
+                self.leading_housing_region.get_or_insert(*region);
+            }
+            _ => return false,
+        }
+        true
     }
 
     fn observe_firm_debt_service_event(&mut self, event: &DomainEvent) -> bool {
@@ -705,6 +1001,113 @@ impl YearSummary {
         true
     }
 
+    #[allow(clippy::too_many_lines)]
+    fn observe_government_program_event(&mut self, event: &DomainEvent) -> bool {
+        match event {
+            DomainEvent::GovernmentProgramDeclared { .. } => {
+                self.program_events += 1;
+                self.programs_declared += 1;
+            }
+            DomainEvent::GovernmentProgramAppropriated { appropriated, .. } => {
+                self.program_events += 1;
+                self.program_appropriated_minor += i128::from(appropriated.minor_units());
+            }
+            DomainEvent::GovernmentProgramCancelled { .. } => {
+                self.program_events += 1;
+                self.programs_cancelled += 1;
+            }
+            DomainEvent::GovernmentProgramExecuted {
+                program,
+                delivered,
+                remaining_carryover,
+                years_delayed,
+                ..
+            } => {
+                self.program_events += 1;
+                self.program_delivered_minor += i128::from(delivered.minor_units());
+                self.program_carryover_minor += i128::from(remaining_carryover.minor_units());
+                let candidate = (
+                    *program,
+                    delivered.minor_units(),
+                    remaining_carryover.minor_units(),
+                    *years_delayed,
+                );
+                if self
+                    .leading_program_execution
+                    .is_none_or(|current| candidate.2 > current.2)
+                {
+                    self.leading_program_execution = Some(candidate);
+                }
+            }
+            DomainEvent::GovernmentProgramRegionalOutcomeRecorded {
+                program,
+                region,
+                fulfillment,
+                outcome,
+                ..
+            } => {
+                self.program_events += 1;
+                match outcome {
+                    crate::ProgramRegionalOutcomeKind::Beneficiary => {
+                        self.program_beneficiary_outcomes += 1;
+                    }
+                    crate::ProgramRegionalOutcomeKind::Underfulfilled => {
+                        self.program_underfulfilled_outcomes += 1;
+                    }
+                    crate::ProgramRegionalOutcomeKind::Excluded => {
+                        self.program_excluded_outcomes += 1;
+                    }
+                }
+                let candidate = (*program, *region, fulfillment.get(), *outcome);
+                if self
+                    .leading_program_loser
+                    .is_none_or(|current| candidate.2 < current.2)
+                {
+                    self.leading_program_loser = Some(candidate);
+                }
+            }
+            DomainEvent::GovernmentProgramMaterialConsumed { quantity, .. } => {
+                self.program_events += 1;
+                self.program_material_consumed_milli += u128::from(quantity.get());
+            }
+            DomainEvent::GovernmentProgramTemporaryLaborEmployed { workers, wages, .. } => {
+                self.program_events += 1;
+                self.program_temporary_workers =
+                    self.program_temporary_workers.saturating_add(*workers);
+                self.program_wages_minor += i128::from(wages.minor_units());
+            }
+            DomainEvent::GovernmentProgramPoliticalConsequencesApplied {
+                country,
+                regional_average_shift,
+                polarization,
+                legitimacy_shift,
+                elite_cohesion_shift,
+                ..
+            } => {
+                self.program_events += 1;
+                let candidate = (
+                    *country,
+                    *regional_average_shift,
+                    *polarization,
+                    *legitimacy_shift,
+                    *elite_cohesion_shift,
+                );
+                if self
+                    .leading_program_consequence
+                    .is_none_or(|current| candidate.2 > current.2)
+                {
+                    self.leading_program_consequence = Some(candidate);
+                }
+            }
+            DomainEvent::GovernmentProgramPoliticalInfluenceApplied { .. }
+            | DomainEvent::GovernmentProgramRegionalDelivery { .. } => {
+                self.program_events += 1;
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn observe_procurement_event(&mut self, event: &DomainEvent) -> bool {
         let (buyer, good, quantity, cause) = match event {
             DomainEvent::FirmProcurementShortfall {
@@ -742,16 +1145,18 @@ impl YearSummary {
         *total = total.saturating_add(u128::from(quantity.get()));
     }
 
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn finish(
         self,
         year: i32,
         actor_names: &BTreeMap<ActorId, String>,
         country_names: &BTreeMap<CountryId, String>,
         region_names: &BTreeMap<RegionId, String>,
+        program_names: &BTreeMap<crate::ProgramId, String>,
         firms: &BTreeMap<crate::FirmId, crate::Firm>,
         goods: &BTreeMap<crate::GoodId, crate::Good>,
     ) -> Option<ChronicleEntry> {
-        if self.months == 0 && !self.completed {
+        if self.months == 0 && !self.completed && self.program_events == 0 {
             return None;
         }
         let mut sentences = Vec::new();
@@ -790,10 +1195,19 @@ impl YearSummary {
             country_names,
             region_names,
         );
+        self.push_program_narration(&mut sentences, country_names, region_names, program_names);
         self.push_conflict_narration(&mut sentences, country_names);
         self.push_procurement_shortfall_narration(&mut sentences, firms, goods);
         self.push_firm_entry_narration(&mut sentences, actor_names, region_names, firms, goods);
         self.push_labor_market_narration(&mut sentences, region_names);
+        self.push_social_pressure_narration(&mut sentences, country_names, region_names);
+        self.push_regional_interest_narration(
+            &mut sentences,
+            country_names,
+            actor_names,
+            region_names,
+        );
+        self.push_settlement_narration(&mut sentences, region_names);
         self.push_transport_narration(&mut sentences);
         self.push_firm_distress_narration(&mut sentences);
         if self.relief_minor > 0 {
@@ -851,6 +1265,179 @@ impl YearSummary {
             importance: self.importance(),
             text: sentences.join(" "),
         })
+    }
+
+    fn push_regional_interest_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        country_names: &BTreeMap<CountryId, String>,
+        actor_names: &BTreeMap<ActorId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if let Some((region, priority, pressure, satisfaction, years, changed)) =
+            self.leading_regional_interest
+        {
+            let region_name = region_names
+                .get(&region)
+                .map_or_else(|| region.to_string(), Clone::clone);
+            let priority_name = match priority {
+                crate::RegionalPolicyPriority::Employment => "employment",
+                crate::RegionalPolicyPriority::HouseholdSecurity => "household security",
+                crate::RegionalPolicyPriority::PublicServices => "public services",
+                crate::RegionalPolicyPriority::Stability => "stability",
+            };
+            let transition = if changed { "adopted" } else { "retained" };
+            sentences.push(format!(
+                "{region_name} {transition} {priority_name} as its leading policy interest at {pressure} basis points; regional satisfaction stood at {satisfaction} after {years} persistent years."
+            ));
+        }
+        if self.regional_net_contributors > 0 || self.regional_net_beneficiaries > 0 {
+            let leading = self.leading_policy_outcome.map_or_else(
+                || "no leading region".to_owned(),
+                |(region, net)| {
+                    let name = region_names
+                        .get(&region)
+                        .map_or_else(|| region.to_string(), Clone::clone);
+                    format!("{name} recorded the largest net position at {net}")
+                },
+            );
+            sentences.push(format!(
+                "Annual service allocation left {} regions as net fiscal beneficiaries and {} as net contributors; aggregate regional net transfers were {} minor currency units, and {leading}.",
+                self.regional_net_beneficiaries,
+                self.regional_net_contributors,
+                self.regional_net_transfers_minor
+            ));
+        }
+        if let Some((actor, region, kind, weight, score_bonus)) =
+            self.leading_service_allocation_influence
+        {
+            let actor_name = actor_names
+                .get(&actor)
+                .map_or_else(|| actor.to_string(), Clone::clone);
+            let region_name = region_names
+                .get(&region)
+                .map_or_else(|| region.to_string(), Clone::clone);
+            let mechanism = match kind {
+                crate::ServiceAllocationInfluenceKind::OfficeHolder => {
+                    "control of the political office"
+                }
+                crate::ServiceAllocationInfluenceKind::InfluenceEdge => {
+                    "influence over the political office"
+                }
+            };
+            sentences.push(format!(
+                "{actor_name}'s {mechanism}, measured at {weight} basis points, added {score_bonus} decision points toward {region_name} in the autonomous service allocation."
+            ));
+        }
+        if let Some((region, source, share, budget)) = self.leading_service_allocation {
+            let region_name = region_names
+                .get(&region)
+                .map_or_else(|| region.to_string(), Clone::clone);
+            let source_text = match source {
+                crate::ServiceAllocationSource::AutonomousPrudent => {
+                    "The autonomous government allocation"
+                }
+                crate::ServiceAllocationSource::ExplicitPoliticalDecision => {
+                    "An explicit political decision"
+                }
+            };
+            sentences.push(format!(
+                "{source_text} directed {}.{:02}% of the public-service budget, or {budget} minor currency units, to {region_name}.",
+                share / 100,
+                share % 100
+            ));
+        }
+        if let Some((country, confidence, effect)) = self.leading_regional_confidence {
+            let country_name = country_names
+                .get(&country)
+                .map_or_else(|| country.to_string(), Clone::clone);
+            let direction = if effect < 0 { "reduced" } else { "supported" };
+            sentences.push(format!(
+                "Population-weighted regional confidence of {confidence} basis points {direction} legitimacy in {country_name} by {} basis points.",
+                effect.unsigned_abs()
+            ));
+        }
+    }
+
+    fn push_social_pressure_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        country_names: &BTreeMap<CountryId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if let Some((region, unemployment, livelihood, services, combined)) =
+            self.leading_social_pressure
+        {
+            let name = region_names
+                .get(&region)
+                .map_or_else(|| region.to_string(), Clone::clone);
+            sentences.push(format!(
+                "Material social pressure peaked at {combined} basis points in {name}: chronic unemployment contributed {unemployment}, livelihood stress {livelihood}, and public-service shortfall {services}."
+            ));
+        }
+        if let Some((country, pressure, effect)) = self.leading_legitimacy_pressure {
+            let name = country_names
+                .get(&country)
+                .map_or_else(|| country.to_string(), Clone::clone);
+            let direction = if effect < 0 { "reduced" } else { "supported" };
+            sentences.push(format!(
+                "Population-weighted pressure of {pressure} basis points {direction} legitimacy in {name} by {} basis points.",
+                effect.unsigned_abs()
+            ));
+        }
+    }
+
+    fn push_settlement_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        region_names: &BTreeMap<RegionId, String>,
+    ) {
+        if self.migrated_households > 0 {
+            let route = self.leading_migration.map_or_else(
+                || "between regions".to_owned(),
+                |(from, to, _, pressure)| {
+                    let from_name = region_names
+                        .get(&from)
+                        .map_or_else(|| from.to_string(), Clone::clone);
+                    let to_name = region_names
+                        .get(&to)
+                        .map_or_else(|| to.to_string(), Clone::clone);
+                    format!(
+                        "from {from_name} to {to_name}, where projected housing pressure reached {pressure} basis points"
+                    )
+                },
+            );
+            sentences.push(format!(
+                "{} households containing {} people moved {route} and paid {} minor currency units in relocation fees.",
+                self.migrated_households,
+                self.migrated_people,
+                self.migration_fees_minor
+            ));
+        }
+        if self.housing_projects_started > 0 {
+            let place = self.leading_housing_region.map_or_else(
+                || "pressured regions".to_owned(),
+                |region| {
+                    region_names
+                        .get(&region)
+                        .map_or_else(|| region.to_string(), Clone::clone)
+                },
+            );
+            sentences.push(format!(
+                "Public authorities committed {} minor currency units to start {} housing projects for {} dwellings, led by {place}.",
+                self.housing_committed_minor,
+                self.housing_projects_started,
+                self.housing_dwellings_started
+            ));
+        }
+        if self.housing_projects_completed > 0 {
+            sentences.push(format!(
+                "{} public housing projects completed {} dwellings; their regions reported {} combined dwellings of capacity after completion.",
+                self.housing_projects_completed,
+                self.housing_dwellings_completed,
+                self.housing_capacity_after_completion
+            ));
+        }
     }
 
     fn observe_reserve_maintenance(
@@ -1117,6 +1704,67 @@ impl YearSummary {
             previous,
             new
         ));
+    }
+
+    fn push_program_narration(
+        &self,
+        sentences: &mut Vec<String>,
+        country_names: &BTreeMap<CountryId, String>,
+        region_names: &BTreeMap<RegionId, String>,
+        program_names: &BTreeMap<crate::ProgramId, String>,
+    ) {
+        if self.programs_declared > 0 || self.program_appropriated_minor > 0 {
+            sentences.push(format!(
+                "Governments declared {} programs and appropriated {} minor currency units; {} programs were cancelled.",
+                self.programs_declared, self.program_appropriated_minor, self.programs_cancelled
+            ));
+        }
+        if let Some((program, delivered, carryover, delayed)) = self.leading_program_execution {
+            let name = program_names
+                .get(&program)
+                .map_or("an established program", String::as_str);
+            sentences.push(format!(
+                "The program '{name}' delivered {delivered} minor currency units, left {carryover} in carryover, and had accumulated {delayed} delayed years."
+            ));
+        }
+        if self.program_material_consumed_milli > 0 || self.program_temporary_workers > 0 {
+            sentences.push(format!(
+                "Program execution consumed {} milli-units of public materials and employed {} temporary workers for {} minor currency units of wages.",
+                self.program_material_consumed_milli, self.program_temporary_workers, self.program_wages_minor
+            ));
+        }
+        if self.program_beneficiary_outcomes
+            + self.program_underfulfilled_outcomes
+            + self.program_excluded_outcomes
+            > 0
+        {
+            sentences.push(format!(
+                "Regional program outcomes recorded {} beneficiaries, {} underfulfilled promises, and {} exclusions.",
+                self.program_beneficiary_outcomes, self.program_underfulfilled_outcomes, self.program_excluded_outcomes
+            ));
+        }
+        if let Some((program, region, fulfillment, outcome)) = self.leading_program_loser {
+            let name = program_names
+                .get(&program)
+                .map_or("an established program", String::as_str);
+            let region = region_names
+                .get(&region)
+                .map_or("an unnamed region", String::as_str);
+            sentences.push(format!(
+                "In '{name}', {region} was the clearest regional loser at {}.{:02}% fulfillment ({outcome:?}).",
+                fulfillment / 100, fulfillment % 100
+            ));
+        }
+        if let Some((country, average, polarization, legitimacy, cohesion)) =
+            self.leading_program_consequence
+        {
+            let country = country_names
+                .get(&country)
+                .map_or("an unnamed country", String::as_str);
+            sentences.push(format!(
+                "Program memory in {country} produced an average political shift of {average}, polarization of {polarization}, legitimacy change {legitimacy}, and elite-cohesion change {cohesion}."
+            ));
+        }
     }
 
     fn push_public_reserve_narration(
@@ -1516,6 +2164,36 @@ impl YearSummary {
             72
         } else if self.relief_debt_minor > 0 || self.relief_minor > 0 {
             70
+        } else if self
+            .leading_service_allocation_influence
+            .is_some_and(|influence| influence.4 >= 2_500)
+        {
+            69
+        } else if self.leading_service_allocation.is_some_and(|allocation| {
+            allocation.1 == crate::ServiceAllocationSource::ExplicitPoliticalDecision
+                && allocation.2 >= 9_000
+        }) {
+            71
+        } else if self
+            .leading_regional_interest
+            .is_some_and(|interest| interest.3 < 3_000)
+        {
+            74
+        } else if self
+            .leading_social_pressure
+            .is_some_and(|pressure| pressure.4 >= 7_000)
+        {
+            77
+        } else if self
+            .leading_social_pressure
+            .is_some_and(|pressure| pressure.4 >= 4_000)
+        {
+            69
+        } else if self.migrated_households > 0
+            || self.housing_projects_started > 0
+            || self.housing_projects_completed > 0
+        {
+            68
         } else if self.household_borrowing_minor > 0 {
             60
         } else if !self.grievances_by_pair.is_empty() {
@@ -2322,5 +3000,310 @@ mod tests {
         assert!(chronicle[0].text.contains("1 restructuring"));
         assert!(chronicle[0].text.contains("writing off 400"));
         assert!(chronicle[0].text.contains("political cost"));
+    }
+
+    #[test]
+    fn chronicle_narrates_migration_and_housing_response() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        for (region, name) in [(RegionId::new(1), "Oldtown"), (RegionId::new(2), "Newport")] {
+            world.events.append(
+                date,
+                DomainEvent::RegionRegistered {
+                    region,
+                    country: CountryId::new(1),
+                    name: name.to_owned(),
+                },
+            );
+        }
+        world.events.append(
+            date,
+            DomainEvent::HouseholdMigrated {
+                source_cohort: CohortId::new(1),
+                migrant_cohort: CohortId::new(2),
+                from_region: RegionId::new(1),
+                to_region: RegionId::new(2),
+                people: Population::new(3),
+                households: 1,
+                liquid_wealth: Money::from_minor_units(90),
+                debt: Money::from_minor_units(4),
+                relocation_fee: Money::from_minor_units(10),
+                destination_vacancy_months: 7,
+                service_advantage_basis_points: 500,
+                destination_housing_pressure_basis_points: 9_500,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalHousingConstructionStarted {
+                region: RegionId::new(2),
+                dwellings: 2,
+                committed_cost: Money::from_minor_units(240),
+                housing_pressure_basis_points: 9_500,
+                years_remaining: 2,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalHousingConstructionCompleted {
+                region: RegionId::new(2),
+                dwellings: 2,
+                committed_cost: Money::from_minor_units(240),
+                dwelling_capacity: 22,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 68);
+        assert!(chronicle[0].text.contains("from Oldtown to Newport"));
+        assert!(chronicle[0].text.contains("paid 10"));
+        assert!(chronicle[0].text.contains("committed 240"));
+        assert!(chronicle[0].text.contains("completed 2 dwellings"));
+    }
+
+    #[test]
+    fn chronicle_explains_material_pressure_and_legitimacy_effect() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::CountryRegistered {
+                country: CountryId::new(1),
+                name: "Commonwealth".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: RegionId::new(1),
+                country: CountryId::new(1),
+                name: "Iron Valley".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalSocialPressureUpdated {
+                region: RegionId::new(1),
+                chronic_unemployment: BasisPoints::new(8_000).expect("pressure"),
+                livelihood_stress: BasisPoints::new(7_000).expect("pressure"),
+                public_service_shortfall: BasisPoints::new(5_000).expect("pressure"),
+                combined: BasisPoints::new(7_000).expect("pressure"),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::CountryLegitimacyPressureApplied {
+                country: CountryId::new(1),
+                population_weighted_pressure: BasisPoints::new(7_000).expect("pressure"),
+                legitimacy_effect: -200,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 77);
+        assert!(
+            chronicle[0]
+                .text
+                .contains("peaked at 7000 basis points in Iron Valley")
+        );
+        assert!(
+            chronicle[0]
+                .text
+                .contains("reduced legitimacy in Commonwealth by 200")
+        );
+    }
+
+    #[test]
+    fn chronicle_names_regional_interests_fiscal_incidence_and_confidence() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::CountryRegistered {
+                country: CountryId::new(1),
+                name: "Union".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: RegionId::new(1),
+                country: CountryId::new(1),
+                name: "Harbor".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalPolicyOutcomeRecorded {
+                region: RegionId::new(1),
+                taxes_paid: Money::from_minor_units(90),
+                service_allocation: Money::from_minor_units(40),
+                net_transfer: Money::from_minor_units(-50),
+                fiscal_position: crate::RegionalFiscalPosition::NetContributor,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalInterestUpdated {
+                region: RegionId::new(1),
+                previous_priority: crate::RegionalPolicyPriority::Stability,
+                priority: crate::RegionalPolicyPriority::Employment,
+                priority_pressure: BasisPoints::new(6_000).expect("pressure"),
+                satisfaction: BasisPoints::new(2_900).expect("satisfaction"),
+                years_persistent: 1,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::CountryRegionalConfidenceApplied {
+                country: CountryId::new(1),
+                population_weighted_confidence: BasisPoints::new(4_000).expect("confidence"),
+                legitimacy_effect: -40,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 74);
+        assert!(chronicle[0].text.contains("Harbor adopted employment"));
+        assert!(chronicle[0].text.contains("net contributors"));
+        assert!(
+            chronicle[0]
+                .text
+                .contains("reduced legitimacy in Union by 40")
+        );
+    }
+
+    #[test]
+    fn chronicle_exposes_unrestricted_explicit_service_concentration() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(7), date);
+        world.events.append(
+            date,
+            DomainEvent::RegionRegistered {
+                region: RegionId::new(1),
+                country: CountryId::new(1),
+                name: "Capital".to_owned(),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalServiceBudgetAllocated {
+                country: CountryId::new(1),
+                region: RegionId::new(1),
+                source: crate::ServiceAllocationSource::ExplicitPoliticalDecision,
+                share: BasisPoints::FULL,
+                service_budget: Money::from_minor_units(500),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 71);
+        assert!(
+            chronicle[0]
+                .text
+                .contains("explicit political decision directed 100.00%")
+        );
+        assert!(
+            chronicle[0]
+                .text
+                .contains("500 minor currency units, to Capital")
+        );
+    }
+
+    #[test]
+    fn chronicle_names_actor_whose_influence_biases_service_allocation() {
+        let date = SimDate::new(2025, 1).expect("date");
+        let mut world = World::new(WorldSeed::new(9), date);
+        world
+            .register_country(crate::Country::new(CountryId::new(1), "Union").expect("country"))
+            .expect("country");
+        world
+            .register_region(
+                crate::Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Harbor",
+                    crate::Population::new(100),
+                    Money::from_minor_units(1_000),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .register_actor(
+                crate::Actor::new(ActorId::new(2), "Industrial patron", RegionId::new(1), 1975)
+                    .expect("actor"),
+            )
+            .expect("actor");
+        world.events.append(
+            date,
+            DomainEvent::RegionalServiceAllocationInfluenceApplied {
+                country: CountryId::new(1),
+                actor: ActorId::new(2),
+                office: crate::PowerNodeId::new(1),
+                region: RegionId::new(1),
+                kind: crate::ServiceAllocationInfluenceKind::InfluenceEdge,
+                weight: BasisPoints::new(8_000).expect("weight"),
+                score_bonus: 4_000,
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::RegionalServiceBudgetAllocated {
+                country: CountryId::new(1),
+                region: RegionId::new(1),
+                source: crate::ServiceAllocationSource::AutonomousPrudent,
+                share: BasisPoints::FULL,
+                service_budget: Money::from_minor_units(500),
+            },
+        );
+        world.events.append(
+            date,
+            DomainEvent::EconomicYearCompleted {
+                closed_year: 2025,
+                monthly_cycles: 12,
+            },
+        );
+        let chronicle = world.chronicle();
+        assert_eq!(chronicle.len(), 1);
+        assert_eq!(chronicle[0].importance, 69);
+        assert!(
+            chronicle[0]
+                .text
+                .contains("Industrial patron's influence over the political office")
+        );
+        assert!(
+            chronicle[0]
+                .text
+                .contains("added 4000 decision points toward Harbor")
+        );
     }
 }

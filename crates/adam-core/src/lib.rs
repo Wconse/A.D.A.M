@@ -14,7 +14,9 @@ pub mod distress;
 pub mod event;
 pub mod firm_entry;
 pub mod freight;
+pub mod government_program;
 pub mod health;
+pub mod housing;
 pub mod ids;
 pub mod insolvency;
 pub mod investment;
@@ -22,14 +24,19 @@ pub mod labor;
 pub mod logistics;
 pub mod management;
 pub mod market;
+pub mod migration;
 pub mod observation;
+pub mod political_economy;
 pub mod procurement;
 pub mod production;
 pub mod public_reserve;
+pub mod public_services;
 pub mod rationing;
+pub mod regional_interests;
 pub mod relief;
 pub mod rng;
 pub mod route_investment;
+pub mod service_allocation;
 mod simulation;
 pub mod social;
 pub mod terminal;
@@ -61,10 +68,16 @@ pub use freight::{
     ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics,
     MonthlyFreightCapacityLedger, RouteOperatingCost, evaluate_freight_economics,
 };
+pub use government_program::{
+    GovernmentProgram, GovernmentProgramStatus, ProgramFundingSource, ProgramPoliticalStance,
+    ProgramRegionalMemory, ProgramRegionalOutcomeKind, PublicServicePriority,
+};
 pub use health::CohortHealth;
+pub use housing::{HousingConstruction, RegionalHousingMarket};
 pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
-    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, SkillId, TerminalId,
+    ProgramId, ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, SkillId,
+    TerminalId,
 };
 pub use insolvency::{
     FirmCreditOffer, FirmCreditSchedule, FirmCreditorClaim, FirmCreditorPriority,
@@ -88,7 +101,9 @@ pub use market::{
     FirmMarketOfferPlan, HouseholdImportDependence, MarketClearing, MarketFill, MarketOffer,
     MarketOfferOutcome, MarketOrder, clear_local_market, clear_market_with_delivery,
 };
+pub use migration::HouseholdMigration;
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
+pub use political_economy::RegionalSocialPressure;
 pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};
 pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
@@ -97,13 +112,20 @@ pub use public_reserve::{
     GovernmentReserveDistribution, GovernmentReserveMaintenance, GovernmentReservePolicyReview,
     GovernmentReserveProcurement, ReservePriorityRevisionReason,
 };
+pub use public_services::RegionalPublicServices;
 pub use rationing::{SurvivalRationingAllocation, SurvivalRationingOutcome};
+pub use regional_interests::{
+    RegionalFiscalPosition, RegionalInterest, RegionalPolicyOutcome, RegionalPolicyPriority,
+};
 pub use relief::{
     EmergencyReliefPayment, EmergencyReliefStrategy, GovernmentEmergencyPolicy,
     PhysicalShortageStrategy,
 };
 pub use rng::{RandomStream, WorldSeed};
 pub use route_investment::RouteCapacityExpansion;
+pub use service_allocation::{
+    CountryServiceAllocation, ServiceAllocationInfluenceKind, ServiceAllocationSource,
+};
 pub use simulation::EconomicYearResult;
 pub use social::{CohortExperience, SocialStress, SocialStressMemory};
 pub use terminal::{LogisticsTerminal, TerminalCapacityLedger, TerminalQueue, TerminalQueueEntry};
@@ -116,4 +138,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 74;
+pub const SIMULATION_VERSION: u32 = 94;

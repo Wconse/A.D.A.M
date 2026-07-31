@@ -483,7 +483,7 @@ impl World {
         &self.government_emergency_policies
     }
 
-    fn emergency_debt_headroom(&self, country: CountryId) -> Result<i64, WorldError> {
+    pub(crate) fn emergency_debt_headroom(&self, country: CountryId) -> Result<i64, WorldError> {
         let output = self
             .regions
             .values()

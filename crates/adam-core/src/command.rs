@@ -7,6 +7,21 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
     AdvanceEconomicYear,
+    DeclareGovernmentProgram(crate::GovernmentProgram),
+    AppropriateGovernmentProgram {
+        actor: ActorId,
+        program: crate::ProgramId,
+        amount: crate::Money,
+        source: crate::ProgramFundingSource,
+    },
+    CancelGovernmentProgram {
+        actor: ActorId,
+        program: crate::ProgramId,
+    },
+    ExecuteGovernmentProgram {
+        actor: ActorId,
+        program: crate::ProgramId,
+    },
     AdvanceMonth,
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
@@ -21,6 +36,11 @@ pub enum WorldCommand {
         actor: ActorId,
         country: crate::CountryId,
         policy: crate::GovernmentEmergencyPolicy,
+    },
+    SetCountryServiceAllocation {
+        actor: ActorId,
+        country: crate::CountryId,
+        allocation: crate::CountryServiceAllocation,
     },
     SetCountryHostility {
         first: crate::CountryId,
@@ -177,6 +197,21 @@ impl WorldCommand {
     pub fn apply(&self, world: &mut World) -> Result<(), WorldError> {
         match self {
             Self::AdvanceEconomicYear => world.advance_economic_year().map(|_| ()),
+            Self::DeclareGovernmentProgram(program) => {
+                world.declare_government_program(program.clone())
+            }
+            Self::AppropriateGovernmentProgram {
+                actor,
+                program,
+                amount,
+                source,
+            } => world.appropriate_government_program(*actor, *program, *amount, *source),
+            Self::CancelGovernmentProgram { actor, program } => {
+                world.cancel_government_program(*actor, *program)
+            }
+            Self::ExecuteGovernmentProgram { actor, program } => {
+                world.execute_government_program(*actor, *program)
+            }
             Self::AdvanceMonth => world.advance_month(),
             Self::ExecuteMonthlyEconomicCycle => world.execute_monthly_economic_cycle().map(|_| ()),
             Self::ExecuteMonthlyCommercialCycle => {
@@ -204,6 +239,11 @@ impl WorldCommand {
                 country,
                 policy,
             } => world.set_government_emergency_policy(*actor, *country, *policy),
+            Self::SetCountryServiceAllocation {
+                actor,
+                country,
+                allocation,
+            } => world.set_country_service_allocation(*actor, *country, allocation.clone()),
             Self::SetCountryHostility {
                 first,
                 second,

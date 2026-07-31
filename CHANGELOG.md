@@ -1,3 +1,29 @@
+- Completed Step 100, “The Governing State Becomes Visible”: the authoritative government-program loop now drives a playable Bevy map, inspector, overlays, command desk, and political timeline with end-to-end replay/snapshot acceptance.
+
+- The Bevy observatory now includes a graphical political timeline sourced directly from the shared authoritative chronicle and refreshed only after accepted commands.
+
+- The Bevy observatory now includes a command-backed government-program desk for treasury/debt funding, execution, cancellation, and annual advance, with authoritative snapshot refresh and visible domain rejection.
+
+- The Bevy observatory now provides keyboard-switchable confidence, population, and output overlays plus a canonical region inspector and selected-region highlight.
+
+- Added the first Bevy observatory executable with a deterministic read-only world snapshot and confidence-colored regional map; `adam-core` remains presentation-independent.
+
+- The annual chronicle now narrates government-program promises, funding, physical execution, labor, delay, regional winners and losers, and resulting polarization and legitimacy effects.
+
+- Annual closure now applies government-program memory to regional satisfaction, population-weighted legitimacy, and polarization-sensitive elite cohesion exactly once.
+
+- Government programs now retain persistent regional winners, underfulfilled promises, and explicit exclusions; broken promises carry a stronger negative political memory than making no promise.
+
+- Government programs now use finite temporary regional labor, prevent same-year worker reuse across programs, pay realized spending into household wealth, and respect an independent infrastructure ceiling.
+
+- Government programs may now require concrete goods: local public-reserve availability binds delivery, realized execution consumes physical stock, and missing materials remain visible as carryover and delay.
+
+- Program execution now converts existing political-office influence into attributable bounded support or friction according to whether each actor’s home region is favored or excluded, without granting politics an artificial veto.
+
+- Extended Step 100 through annual treasury/debt program appropriations, explicit zero funding and cancellation, plus administratively bounded regional execution with persistent carryover and delay evidence.
+
+- Began Step 100, **The Governing State Becomes Visible**: persistent replayable government-program charters now separate political promises from later appropriation and physical delivery; the anniversary plan carries this causal arc into the first Bevy world client.
+
 # Changelog
 
 All notable project changes are documented here. The format follows Keep a Changelog and the project uses semantic versioning once public releases begin.
@@ -103,3 +129,66 @@ All notable project changes are documented here. The format follows Keep a Chang
 - Advanced the simulation contract to version 74.
 - Accepted ADRs 0132-0135 and passed 182 workspace tests plus Clippy/docs/release audit.
 - Seed-1 50-year audit fingerprint: `18242524565653015855`; runtime: `99.6 ms/year`.
+## Steps 088-090 — lifecycle, supplier loyalty, and public services
+
+- Cohorts now advance through explicit age-band clocks; adulthood changes labor status and retirement closes active employment without moving financial stocks.
+- Household cohorts remember dominant suppliers and accept at most a ten-percent loyalty premium before switching.
+- Regional healthcare, infrastructure, and administrative capacity now evolve from an explicitly reported share of fiscal spending, with slow institutional absorption.
+- Advanced the simulation contract from version 74 to 77 and accepted ADRs 0136-0138.
+
+## Step 091 — resource-bounded internal migration
+
+- Added deterministic household-scale migration from persistent unemployment toward persistent vacancies and stronger public services.
+- Conserved population, household counts, income, liquid wealth, debt, health, experience, and skills across cohort partitioning.
+- Added typed migration evidence and advanced the simulation contract to version 78.
+
+## Step 092 — housing-constrained paid migration
+
+- Added persistent regional dwelling capacity and baseline housing costs.
+- Made projected housing pressure constrain migration and price relocation.
+- Transferred relocation fees from migrant wealth to destination treasury without creating money.
+- Advanced the simulation contract to version 79 and accepted ADR 0140.
+
+## Step 093 — pressure-funded delayed housing construction
+
+- Added treasury-funded public housing projects triggered by persistent physical occupancy pressure.
+- Added a two-year construction delay, bounded capacity increments, committed cost, and public housing capital.
+- Added typed project start/completion evidence and advanced the simulation contract to version 80.
+
+## Step 094 — settlement arc chronicle
+
+- Added named yearly narration for household migration, housing pressure, and relocation fees.
+- Added separate public housing authorization and completion narration with importance ranking.
+- Kept simulation rules, version 80, and fingerprint semantics unchanged.
+
+## Step 095 — material social pressure and legitimacy
+
+- Added population-weighted regional social pressure from unemployment duration, livelihood distress, and public-service shortfall.
+- Connected bounded material pressure to annual country legitimacy alongside existing growth, fiscal, and crisis signals.
+- Added persistent state, stable fingerprinting, typed evidence, explanatory chronicle narration, and focused weighting tests.
+- Advanced the simulation contract to version 81 and accepted ADR 0143.
+
+## Step 096 — persistent regional interests and fiscal incidence
+
+- Added persistent regional employment, household-security, public-service, and stability priorities with switching hysteresis.
+- Added regional satisfaction and physically attributable sales-tax/service-allocation winners and losers.
+- Added authoritative fingerprinted state, typed evidence, chronicle narration, and ADR 0144.
+
+## Step 097 — delayed regional confidence and legitimacy
+
+- Added population-weighted prior-year regional confidence as a bounded national legitimacy signal.
+- Kept current policy outcomes delayed until the following political closure to preserve causal memory.
+- Added typed evidence, chronicle narration, deterministic tests, ADR 0145, and simulation version 83.
+
+## Step 098 — unrestricted authorized service allocation
+
+- Added replayable political-office commands for exact regional public-service budget shares.
+- Explicitly allowed zero-funded regions and 100% concentration in one region under shared player/AI legality.
+- Added prudent need-sensitive autonomous allocation as behavior rather than an engine cap.
+- Added exact integer budget conservation, regional delivery effects, typed evidence, chronicle narration, ADR 0146, and simulation version 84.
+
+## Step 099 — power-network-biased autonomous service allocation
+
+- Connected political-office holders, actor home regions, and established influence edges to autonomous regional service allocation.
+- Kept all political weighting in AI decision policy; explicit authorized player allocations bypass it completely.
+- Added typed actor-to-region influence evidence, actor-attributed chronicle narration, ADR 0147, and simulation version 85.

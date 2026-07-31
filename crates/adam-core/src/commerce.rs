@@ -5,7 +5,6 @@ use crate::{
     GovernmentReservePolicyReview, GovernmentReserveProcurement, HouseholdCashflow,
     HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord, ProductionPlan,
     RouteCapacityExpansion, SimDate, SurvivalRationingOutcome, World, WorldError,
-    clear_market_with_delivery,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,10 +82,11 @@ impl World {
             })
             .collect();
         let rationing = next.apply_survival_rationing(&mut orders, &offers)?;
-        let mut clearing = clear_market_with_delivery(
+        let mut clearing = crate::market::clear_market_with_delivery_preferences(
             &orders,
             &offers,
             &mut route_capacity,
+            &next.household_supplier_preferences,
             |origin, destination| next.direct_market_route(origin, destination),
         )?;
         next.restore_rationed_unmet_demand(&mut clearing, &rationing)?;

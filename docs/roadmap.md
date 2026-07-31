@@ -1256,3 +1256,178 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 ### Steps 084-087 complete
 
 Labor mobility now includes solvent retention offers, household-scale training participation, employer tuition sponsorship, and content-defined occupation skill gates. The next labor iteration should turn the new occupation identity into persistent occupation-specific evidence and specialization-producing curricula, then expose those signals in the chronicle.
+### Steps 088-090 complete
+
+The simulation now spans household lifecycle transitions, durable but bounded consumer-supplier relationships, and fiscally grounded regional public-service capacity. Step 091 remains the integration gate: partial-cohort migration should react to employment opportunity, household resources, service quality, and destination pressure without creating population or money.
+
+### Resource-bounded internal migration gate (step 091)
+
+- Annual internal migration now links six-month labor-market evidence, household liquidity, and regional public-service quality. At most one eligible household partition leaves each persistently unemployed source for a persistently vacancy-constrained destination in the same country.
+- Cohorts split instead of teleporting wholesale. Population, households, annual income, liquid wealth, and debt are conserved exactly; persistent health, experience, stress, deprivation, and skill state follows the migrant household. Migration creates no job, so ordinary destination matching still determines employment.
+- A one-month proportional income reserve makes mobility resource-bounded, while a 1,000-basis-point service disadvantage veto prevents households from chasing vacancies into dramatically weaker institutions. Deterministic opportunity ranking and cohort selection keep replay stable.
+- Typed `HouseholdMigrated` evidence records origin, destination, people, wealth, debt, vacancy persistence, and service advantage. ADR 0139 records the boundary; `SIMULATION_VERSION` advances 77 -> 78. Focused gates prove household-scale movement, exact population/wealth/debt conservation, and rejection under weak evidence or insufficient liquidity. The full workspace gate passes 187 tests plus formatting, Clippy, docs, release build, and `git diff --check`; two seed-1 50-year timelines are identical with fingerprint `347025067225583205` at 119.6 ms/year.
+- Deliberate limits: domestic movement only; no housing capacity, moving-industry payment, family network, international law, or guaranteed job. Next gate: destination housing pressure and a real relocation-service payment, so rapid inflows raise costs and create a second balancing loop.
+
+### Housing-constrained paid migration gate (step 092)
+
+- Every region now has persistent, fingerprinted dwelling capacity and a positive baseline monthly housing cost. Legacy scenarios derive conservative defaults from initial population and output, while explicit scenario overrides are supported through the core API.
+- Migration evaluates projected destination occupancy. A full housing market blocks the move; rising pressure reduces the opportunity score and raises the relocation fee from 50% to 150% of baseline monthly cost.
+- Migrants must afford both their one-month income reserve and the separate fee. The fee moves real liquid wealth into the destination treasury after fiscal closure, so relocation does not destroy or create money and the receiving state gains auditable service revenue.
+- `HouseholdMigrated` now records the paid fee and projected housing pressure. Focused gates prove exact population, debt, and combined household-plus-treasury money conservation; they also prove rejection under full housing, weak labor evidence, and insufficient liquidity. ADR 0140 records the boundary; `SIMULATION_VERSION` advances 78 -> 79. The seed-1 50-year self-comparison is identical with fingerprint `12128517368621254933` at 108.6 ms/year.
+- Deliberate limits: aggregate dwellings, public relocation provider, no recurring rent or construction. Next gate: pressure- and revenue-funded housing construction with a construction delay, so destination capacity can respond without appearing for free.
+
+### Pressure-funded delayed housing construction gate (step 093)
+
+- Regions at or above 90% housing occupancy can now start one public housing project when their country can fund it from current treasury cash. Canonical region order makes competing projects deterministic.
+- Each project adds 10% of existing dwelling capacity, rounded up, and costs twelve baseline monthly housing payments per dwelling. The complete cost is committed at authorization; capacity appears only after two later annual advances.
+- Active construction and completed public housing capital are serialized and fingerprinted. Typed start/completion evidence records pressure, spending, delay, delivered dwellings, and resulting capacity. Insufficient treasury leaves both cash and capacity unchanged.
+- This closes the first settlement adaptation loop: migration raises occupancy and public fee revenue; crowding raises costs or blocks entry; a solvent state can then fund delayed capacity instead of receiving free housing. ADR 0141 records the boundary; `SIMULATION_VERSION` advances 79 -> 80. The final seed-1 50-year audit remains self-identical at fingerprint `10594705336716621082`; after chronicle projection work it runs at 99.4 ms/year.
+- Deliberate limits: public aggregate construction without contractors, materials, land, recurring rent, maintenance, or zoning. Next gate: narrate migration and housing projects in the chronicle, then route construction spending through concrete firms and labor.
+
+### Settlement arc chronicle gate (step 094)
+
+- The yearly chronicle now names migration origins and destinations and reports households, people, relocation fees, and projected destination housing pressure directly from typed events.
+- Public housing authorization and completion are narrated separately, preserving the causal delay between committed treasury funds and delivered dwellings. Settlement-only years receive importance 68: above routine production, below emergency relief and severe institutional crises.
+- The projection reads only the event journal and region-registration names; no simulation rule or state changed. ADR 0142 records the boundary, and `SIMULATION_VERSION` remains 80. Focused narration coverage raises the full workspace total to 190 tests.
+- Next gate: route housing construction spending through concrete construction firms, material inputs, and payroll so public capacity competes for cement, labor, and logistics instead of transforming treasury cash directly into committed capital.
+
+### Material social pressure and legitimacy gate (step 095)
+
+- Regional political pressure now comes from concrete lived evidence: chronic unemployment duration, persistent deprivation, debt distress, and the shortfall in delivered healthcare, infrastructure, and administration. It is stored in authoritative state and included in stable fingerprints.
+- Cohort evidence is population-weighted within regions, and regional pressure is population-weighted within countries. Large regions therefore matter because more people are affected, not because their IDs or number of administrative units happen to differ.
+- A bounded annual legitimacy signal is centered on 3,000 basis points of pressure: stable conditions can restore at most 150 basis points, while maximum material pressure can remove 350. Existing growth, fiscal, random, and sovereign-crisis signals remain independent.
+- Typed regional and country evidence makes the causal chain auditable. The chronicle names the leading region, decomposes pressure, and reports whether it supported or reduced national legitimacy. ADR 0143 records the boundary; `SIMULATION_VERSION` advances 80 -> 81. Focused composition, weighting, legitimacy-bound, and narration coverage raises the full workspace total to 194 tests. The seed-1 50-year release audit is self-identical at fingerprint `7833490598214856219` and 102.2 ms/year.
+- Deliberate limits: one national legitimacy stock, no constituencies, ideology, elections, protest organizations, or policy preferences. Next gate: persistent regional interests and policy-specific winners/losers, without prematurely building a full electoral simulator.
+
+### Persistent regional interests and fiscal incidence gate (step 096)
+
+- Regions now retain one leading material policy interest: employment, household security, public services, or stability. A 750-basis-point switching margin prevents noisy annual reversals, while materially pressured regions can leave baseline stability immediately.
+- Regional satisfaction responds to improvement or deterioration in the incumbent concern and to observable fiscal incidence. Firm sales taxes are assigned to the paying firm's region; recurring service budgets are assigned to the receiving region. Their difference identifies net contributors and beneficiaries without pretending to model unlocated spending.
+- Interests, satisfaction, persistence, and annual fiscal outcomes are authoritative and fingerprinted. Typed evidence and the chronicle identify policy priorities, regional winners and losers, and concrete net transfers. ADR 0144 records the boundary; `SIMULATION_VERSION` advances 81 -> 82.
+- Deliberate limits: the ledger covers only physically attributable sales tax and public-service allocation. No ideology, parties, elections, representation, or inferred incidence for debt service and national spending.
+
+### Delayed regional confidence legitimacy gate (step 097)
+
+- Prior-year regional satisfaction is now population-weighted into national confidence before annual political closure. Confidence contributes a separate bounded legitimacy effect from -200 to +200 basis points around a neutral 5,000.
+- Current fiscal outcomes update satisfaction only after politics closes, so a government inherits confidence produced by earlier outcomes rather than receiving an instantaneous same-year reward. Immediate social pressure, growth, fiscal balance, random variation, and sovereign crises remain independent signals.
+- Typed evidence and chronicle narration expose the exact confidence and legitimacy effect. Focused priority hysteresis, fiscal winner/loser, event-derived incidence, population weighting, bound, and narration tests bring the complete workspace to 200 tests. ADR 0145 records the boundary; `SIMULATION_VERSION` advances 82 -> 83. The seed-1 50-year release audit is self-identical at fingerprint `15365365975592083424` and 121.5 ms/year.
+- Next gate: let persistent regional interests influence bounded public-service allocation decisions through existing political offices and influence weights, while preserving treasury constraints and avoiding a full electoral simulator.
+
+### Unrestricted authorized service allocation gate (step 098)
+
+- A political-office holder can now set exact regional shares of the discretionary public-service budget through the same replayable command used by autonomous actors. Shares must conserve 10,000 basis points, but zero shares and a full 100% assignment to one region are deliberately legal. Omitted domestic regions receive zero.
+- Engine validation covers only authority, country ownership, and exact accounting. There is no universal fairness floor, concentration cap, or gradualism rule. Unauthorized and foreign-region decisions fail atomically; extreme authorized decisions execute and produce consequences.
+- Without an explicit decision, the autonomous planner uses a prudent behavior policy based on population, service need, persistent public-service interests, and low satisfaction. This policy does not narrow the engine action space and is completely replaced by an explicit command.
+- Largest-remainder settlement conserves every minor currency unit. Actual regional funding now determines the local service target, while administrative capacity still limits delivery. Typed evidence and chronicle narration distinguish autonomous from explicit allocation and expose extreme concentration.
+- ADR 0146 records the boundary and its compliance with the `AGENTS.md` simulation freedom principle. `SIMULATION_VERSION` advances 83 -> 84; authority, atomicity, 100% concentration, prudent AI, money conservation, and narration coverage raise the complete workspace total to 206 tests. The seed-1 50-year release audit is self-identical at fingerprint `6845839973059341690` and 114.1 ms/year.
+- Next gate: allow existing political influence relationships and actor policy traits to bias the autonomous allocation choice, without restricting explicit player commands or creating resources.
+
+### Power-network-biased autonomous service allocation gate (step 099)
+
+- Autonomous regional service allocation now reads the existing political graph instead of treating distributive policy as socially anonymous. A political-office holder contributes a 1,000-point home-region preference; established influence into that office contributes half its basis-point weight toward the influencing actor's home region.
+- Political bonuses join population, service need, persistent interest, and low satisfaction before deterministic share normalization. Only domestic home regions and political offices of the allocating country participate.
+- This remains AI behavior rather than engine law: an explicit authorized allocation bypasses every autonomous political bonus and may still assign any feasible 0-100% shares. Influence cannot veto player commands, expand the spending envelope, or evade delivery capacity.
+- Typed evidence identifies the actor, office, favored region, mechanism, source weight, and exact score bonus. Chronicle narration names the strongest actor-region pressure behind the autonomous choice.
+- ADR 0147 records the boundary. `SIMULATION_VERSION` advances 84 -> 85; influence causality and actor-attributed narration coverage raise the complete workspace total to 208 tests. The seed-1 50-year release audit is self-identical at fingerprint `9915252302055461441` and 122.9 ms/year.
+- Next gate: feed realized allocation bias into elite cohesion and regional satisfaction as separate consequences, so patronage may secure one base while alienating excluded regions and other power centers.
+
+### The Governing State Becomes Visible milestone (step 100)
+
+- Step 100 is now an anniversary sequence, 100.1-100.10, joining persistent government programs and political consequences to the first Bevy world client. The complete sequence and release definition live in `docs/design/step-100-the-governing-state-observatory.md`.
+- The ordering is intentional: core program identity, appropriation, contested physical execution, winners/losers, political memory, and chronicle projection precede the viewer, so the graphical client exposes real causality rather than owning or mocking simulation state.
+- Step 100.1 establishes the charter boundary. `GovernmentProgram` is persistent, serialized, inspectable, replayable, evented, and fingerprinted, with a political initiator, exact regional shares, annual funding promise, duration, service priority, promised improvement, lifecycle status, appropriation/delivery/carryover ledgers, and delay memory.
+- Announcement is separate from execution. An authorized office holder may promise more than the current treasury can fund; declaration creates no cash, appropriation, or services. Invalid accounting, unknown or foreign regions, past scheduling, duplicate identity, and absent authority remain atomic rejections.
+- ADR 0148 records the decision. `SIMULATION_VERSION` advances 85 -> 86. Focused tests prove legal over-promising, zero opening execution ledgers, command replay, fingerprint identity, and unauthorized atomicity.
+- Next gate (100.2): annual appropriation and competing-program budget allocation, including explicit zero funding, concentration, cancellation, and debt proposals under real authority and resource limits.
+
+### Government-program appropriation gate (step 100.2)
+
+- Authorized actors can now make one replayable annual appropriation decision per scheduled program. The decision may fully fund, underfund, or explicitly assign zero; the original promise remains unchanged and the shortfall is typed evidence.
+- Treasury appropriations remove exact existing cash into program carryover. Public-debt appropriations raise debt directly under the existing output-based sovereign headroom and do not create free uncommitted treasury cash. Multiple programs therefore compete for real fiscal capacity.
+- Cancellation is an explicit command that stops future appropriations without erasing already committed carryover. Terminal, duplicate-year, out-of-window, unauthorized, over-treasury, over-debt, and negative decisions reject atomically.
+- ADR 0149 records the boundary. `SIMULATION_VERSION` advances 86 -> 87. Focused tests prove treasury conservation, debt accounting, legal zero funding, cancellation, replay, and fingerprint identity.
+
+### Administratively bounded program-execution gate (step 100.3a)
+
+- A current-year appropriation can now execute once through the shared command boundary. Exact charter shares allocate committed carryover to regions before capacity constraints.
+- Existing regional administration creates a concrete 25-100% absorption rate. Only absorbed money becomes delivered funding and improves the declared service priority; the remainder persists as carryover and increments delay memory.
+- Regional typed evidence records share, commitment, delivery, administrative absorption, improvement, and priority. Aggregate evidence records opening carryover, delivered total, remaining carryover, and accumulated delay.
+- The controlled default-administration test commits 1,000, delivers 624, retains 376, and records one delayed year; duplicate execution rejects without mutation and replay is identical.
+- ADR 0150 records the boundary. `SIMULATION_VERSION` advances 87 -> 88. This is the first execution gate, not the end of 100.3: next add goods, labor, infrastructure, logistics, and political support/friction before calling contested physical execution complete.
+
+### Power-network-contested program execution gate (step 100.3b)
+
+- Government-program execution now reads established influence into domestic political offices. Each influencing actor compares the program share received by their home region with an equal domestic reference share.
+- Favored power bases add bounded execution support; underrepresented or excluded bases add bounded political friction. Existing influence weight scales the effect, and the combined program modifier is clamped to ±2,000 basis points before composing with regional administrative absorption.
+- Opposition never silently vetoes an authorized command. It reduces realized delivery, leaves more carryover, and lengthens visible delay; support can accelerate delivery but cannot exceed 100% absorption or create money.
+- Typed evidence identifies actor, office, home region, support/opposition stance, influence weight, actual share, fair reference, and exact execution modifier. Focused coverage proves a favored 8,000-bps patron raises delivery above the neutral 624 baseline while excluding the same base lowers delivery below it.
+- ADR 0151 records the rule. `SIMULATION_VERSION` advances 88 -> 89. Next 100.3 gate: material inputs, temporary public-project labor, and logistics so political and administrative capacity are joined by consumed physical resources.
+
+### Materially bounded program execution gate (step 100.3c)
+
+- Program charters may now declare positive annual requirements for concrete goods. Required goods are validated at declaration and the requirement map is serialized, inspectable, replayable, and fingerprinted. Programs without material requirements retain their previous behavior.
+- Each requirement is split by the charter’s exact regional shares. Local public-reserve stock determines a material-availability ratio; the scarcest complementary good binds final execution alongside administration and political support/friction.
+- Realized execution consumes the corresponding physical quantity from the receiving region’s reserve. Stock elsewhere cannot teleport, and money cannot substitute for missing material within the execution command. Typed events identify program, country, region, good, and consumed quantity.
+- Focused coverage gives both beneficiary regions exactly half their required construction material. Delivery is therefore capped at 500 rather than the neutral administrative 624, all 500 units are physically consumed, 500 funding remains as carryover, and no stock or money is invented.
+- ADR 0152 records the boundary. `SIMULATION_VERSION` advances 89 -> 90. Next gate: temporary public-project labor and then explicit interregional public logistics for moving program materials.
+
+### Resource-bounded temporary program-labor gate (step 100.3d)
+
+- Program charters may now declare annual temporary-worker requirements. Exact regional shares split demand, and only unemployed local population not already committed to another program in the same year can participate.
+- A serialized and fingerprinted `(year, region)` usage ledger prevents competing programs from double-using the same labor pool. Labor availability joins administration, infrastructure, political support/friction, and materials as a binding execution ratio.
+- Realized spending for labor-bearing programs moves into household liquid wealth as temporary wages. Durable employment status is unchanged because this is bounded project participation rather than a permanent job. Typed evidence records program, country, region, workers, and wages.
+- Infrastructure is now an independent execution ceiling. Focused coverage proves scarce workers reduce delivery below the neutral 624 baseline, receive real wages, and leave authoritative annual usage evidence.
+- ADR 0153 records the boundary. `SIMULATION_VERSION` advances 90 -> 91. The first complete 100.3 vertical slice now has finance, administration, infrastructure, politics, local physical materials, labor, carryover, and delay. Next gate: 100.4 persistent winners, losers, and broken-promise memory.
+
+### Persistent regional program-memory gate (step 100.4a)
+
+- Every annual execution now records cumulative regional promised, committed, and delivered funding, current fulfillment, outcome type, consecutive excluded years, and bounded political memory for every domestic region.
+- Outcomes distinguish beneficiaries, underfulfilled promised regions, and explicit zero-share exclusion. Promise failure is intentionally harsher than receiving no promise: a fully broken non-zero promise shifts memory by -300, while explicit exclusion shifts it by -100; full delivery rewards +150.
+- Typed events retain the complete causal evidence and incremental shift. Program memory is serialized, inspectable, replayable, and fingerprinted. Focused coverage proves a capital-only charter creates different durable memories for the funded and excluded regions.
+- ADR 0154 records the boundary. `SIMULATION_VERSION` advances 91 -> 92. Next gate: apply this stored evidence once per year to satisfaction, confidence, legitimacy, and elite cohesion.
+
+### Annual program political-consequence gate (step 100.4b)
+
+- Program memory now becomes causal once during annual regional-interest closure. Only programs executed in the closing year contribute, preventing command-order effects and repeated application.
+- Regional satisfaction receives the bounded sum of local fulfillment, broken-promise, and exclusion shifts. Country legitimacy receives the population-weighted national result. Elite cohesion also pays a distinct polarization penalty for the spread between the best- and worst-treated regions.
+- Typed evidence retains execution year, national average, polarization, indicator shifts, and final legitimacy/cohesion. Focused coverage proves an unfunded unequal promise lowers satisfaction in both the promised and excluded regions while also reducing legitimacy and cohesion.
+- ADR 0155 records the boundary. `SIMULATION_VERSION` advances 92 -> 93. Step 100.4 is complete as a political-memory vertical slice; next gate is 100.5, the program chronicle.
+
+### Government-program chronicle gate (step 100.5)
+
+- The deterministic event-derived chronicle now narrates program declarations, appropriations, cancellations, delivery, carryover, accumulated delay, material consumption, temporary labor and wages, regional winners/underfulfillment/exclusion, the clearest regional loser, polarization, legitimacy, and elite-cohesion consequences.
+- Program names are learned from declaration evidence and remain available to later annual entries. Political activity can produce a chronicle entry even before an ordinary economic-year closure; narration remains read-only and never becomes a second simulation.
+- Focused coverage proves the chronicle names the program, identifies a regional loser, and reports polarization from the same replayable evidence used by the simulation.
+- ADR 0156 records the boundary. `SIMULATION_VERSION` advances 93 -> 94. Steps 100.1-100.5 complete the authoritative simulation-side governing-state loop; next gate: 100.6, an independent Bevy observatory foundation.
+
+### Independent Bevy observatory foundation (step 100.6)
+
+- Added the `adam-observatory` workspace application on Bevy 0.16. The dependency direction remains one-way: the client reads `adam-core`; the authoritative simulation knows nothing about Bevy.
+- A read-only deterministic snapshot exposes date, fingerprint, canonical regions, population, output, confidence, and chronicle entries. Stable region order produces deterministic non-overlapping map coordinates, proven by focused tests.
+- The executable opens the first A.D.A.M window and renders a dark regional map with confidence coloring and population/output labels. Bevy transitive dependencies are locked to versions compatible with the workspace Rust 1.85 MSRV.
+- ADR 0157 records the boundary. Presentation does not advance `SIMULATION_VERSION`. Next gate: 100.7 interactive inspector and overlays.
+
+### Interactive region inspector and overlays (step 100.7)
+
+- The Bevy observatory now has client-owned selection state and switchable confidence, population, and annual-output overlays. `[1]`, `[2]`, and `[3]` change layers; `Tab` cycles regions in canonical snapshot order.
+- A fixed inspector shows the selected region’s identity, country, population, output, and confidence. The selected map card is highlighted, while all color ratios are bounded and safe for empty or zero-valued worlds.
+- Interaction remains presentation-only: it changes no core state, event, save, or fingerprint. ADR 0158 records the boundary. Next gate: 100.8, a command-backed playable program desk.
+
+### Command-backed playable program desk (step 100.8)
+
+- Added an observatory content scenario with a legitimate cabinet, political office, and announced national-renewal program. The Bevy client now retains the authoritative `World`; all post-startup decisions use existing `WorldCommand` variants rather than direct mutation.
+- `[T]` requests treasury appropriation, `[D]` debt appropriation, `[E]` execution, `[C]` cancellation, and `[Y]` an annual advance. Accepted commands rebuild the immutable snapshot; rejected commands preserve state and display the domain error.
+- The desk displays program status, promise, cumulative appropriation, delivery, carryover, and delayed years. Focused coverage proves an authorized command changes the core fingerprint before the refreshed snapshot exposes the transition.
+- ADR 0159 records the boundary. Presentation/content setup does not advance `SIMULATION_VERSION`. Next gate: 100.9 graphical political timeline.
+
+### Graphical political timeline (step 100.9)
+
+- The observatory now renders the four latest authoritative chronicle entries with year and importance. Promise, funding, delivery, regional losers, polarization, and legitimacy language comes from the shared core chronicle rather than Bevy-side event interpretation.
+- The timeline refreshes only after successful commands rebuild the snapshot; rejection cannot create history. Empty worlds receive an explicit empty state. Focused coverage proves a command-created program cancellation appears in the captured political chronology.
+- ADR 0160 records the boundary. Next gate: 100.10 anniversary integration and release audit.
+
+### Step 100 anniversary acceptance gate (step 100.10)
+
+- Accepted the complete promise-to-consequence vertical and the first playable Bevy governing-state observatory. An end-to-end acceptance test applies a program command sequence directly and by replay, then proves equality of both authoritative fingerprints and complete graphical snapshots.
+- The full workspace release gate covers tests, warning-free Clippy, formatting, documentation, optimized compilation, and diff hygiene. ADR 0161 and `docs/release/step-100-anniversary-acceptance.md` record scope, controls, and the explicit distinction between the accepted engineering visual baseline and future final art direction.
+- **Step 100 — The Governing State Becomes Visible: COMPLETE.** `SIMULATION_VERSION` remains 94.

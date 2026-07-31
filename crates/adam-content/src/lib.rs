@@ -19,8 +19,9 @@ use adam_core::{
     CorporateRole, Country, CountryId, DemandBasis, EducationLevel, EmploymentAgreement,
     EmploymentStatus, Firm, FirmAppointment, FirmId, FirmPolicy, Good, GoodId, HouseholdCohort,
     HouseholdType, LogisticsRoute, Money, NeedProfileId, NeedTier, OwnershipStake, Population,
-    ProductionInput, ProductionRecipe, QuantityMilli, RecipeId, Region, RegionId, RouteId, SimDate,
-    TransportMode, World, WorldError, WorldSeed,
+    PowerNode, PowerNodeId, PowerNodeKind, ProductionInput, ProductionRecipe, ProgramId,
+    PublicServicePriority, QuantityMilli, RecipeId, Region, RegionId, RouteId, SimDate,
+    TransportMode, World, WorldCommand, WorldError, WorldSeed,
 };
 
 /// Content schema version understood by this crate.
@@ -256,6 +257,77 @@ pub fn demo_world(seed: u64) -> Result<World, WorldError> {
         Err(ContentError::World(error)) => Err(error),
         Err(error) => panic!("embedded demo scenario is invalid: {error}"),
     }
+}
+
+/// Stable political actor used by the interactive observatory scenario.
+pub const OBSERVATORY_ACTOR_ID: ActorId = ActorId::new(9_001);
+/// Initial program controlled by the interactive observatory desk.
+pub const OBSERVATORY_PROGRAM_ID: ProgramId = ProgramId::new(1);
+
+/// Builds the embedded world with a legitimate political office and one announced program.
+///
+/// Player actions remain ordinary [`WorldCommand`] transitions; this function only supplies
+/// scenario content that makes the first program desk immediately usable.
+/// # Errors
+/// Returns a world registration or declaration error.
+#[allow(clippy::missing_panics_doc)]
+pub fn observatory_world(seed: u64) -> Result<World, WorldError> {
+    let mut world = demo_world(seed)?;
+    let country = *world
+        .countries()
+        .keys()
+        .next()
+        .ok_or(WorldError::ArithmeticOverflow("observatory country"))?;
+    let regions: Vec<_> = world
+        .regions()
+        .values()
+        .filter(|region| region.country() == country)
+        .map(Region::id)
+        .collect();
+    let home = *regions
+        .first()
+        .ok_or(WorldError::ArithmeticOverflow("observatory region"))?;
+    world.register_actor(Actor::new(
+        OBSERVATORY_ACTOR_ID,
+        "Observatory Cabinet",
+        home,
+        1980,
+    )?)?;
+    world.register_power_node(PowerNode::new(
+        PowerNodeId::new(9_001),
+        country,
+        "National Program Office",
+        PowerNodeKind::PoliticalOffice,
+        Some(OBSERVATORY_ACTOR_ID),
+    )?)?;
+    let count = u16::try_from(regions.len()).unwrap_or(u16::MAX).max(1);
+    let base = 10_000 / count;
+    let remainder = 10_000 % count;
+    let shares = regions
+        .into_iter()
+        .enumerate()
+        .map(|(index, region)| {
+            let bonus = u16::from(index < usize::from(remainder));
+            (
+                region,
+                BasisPoints::new(base + bonus).expect("observatory share is bounded"),
+            )
+        })
+        .collect();
+    let program = adam_core::GovernmentProgram::new(
+        OBSERVATORY_PROGRAM_ID,
+        country,
+        OBSERVATORY_ACTOR_ID,
+        "National Renewal Program",
+        shares,
+        Money::from_minor_units(100_000),
+        4,
+        PublicServicePriority::Infrastructure,
+        BasisPoints::new(1_500).expect("observatory improvement is bounded"),
+        world.date().year(),
+    )?;
+    WorldCommand::DeclareGovernmentProgram(program).apply(&mut world)?;
+    Ok(world)
 }
 
 /// Builds a [`World`] from a content schema v8 TOML scenario document.

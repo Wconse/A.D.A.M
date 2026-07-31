@@ -99,6 +99,7 @@ pub struct HouseholdCohort {
     people: Population,
     households: u64,
     age_band: AgeBand,
+    years_in_age_band: u8,
     household_type: HouseholdType,
     education: EducationLevel,
     employment: EmploymentStatus,
@@ -151,6 +152,7 @@ impl HouseholdCohort {
             people,
             households,
             age_band,
+            years_in_age_band: 0,
             household_type,
             education,
             employment,
@@ -185,6 +187,47 @@ impl HouseholdCohort {
         self.age_band
     }
     #[must_use]
+    pub const fn years_in_age_band(&self) -> u8 {
+        self.years_in_age_band
+    }
+    pub(crate) fn advance_lifecycle_year(&mut self) -> Option<(AgeBand, AgeBand)> {
+        let threshold = match self.age_band {
+            AgeBand::Child => 13,
+            AgeBand::Youth => 5,
+            AgeBand::Adult => 30,
+            AgeBand::Mature => 17,
+            AgeBand::Senior => {
+                self.years_in_age_band = self.years_in_age_band.saturating_add(1);
+                return None;
+            }
+        };
+        self.years_in_age_band = self.years_in_age_band.saturating_add(1);
+        if self.years_in_age_band < threshold {
+            return None;
+        }
+        let previous = self.age_band;
+        self.years_in_age_band = 0;
+        self.age_band = match previous {
+            AgeBand::Child => AgeBand::Youth,
+            AgeBand::Youth => AgeBand::Adult,
+            AgeBand::Adult => AgeBand::Mature,
+            AgeBand::Mature => AgeBand::Senior,
+            AgeBand::Senior => return None,
+        };
+        match self.age_band {
+            AgeBand::Adult if self.employment == EmploymentStatus::Dependent => {
+                self.employment = EmploymentStatus::Unemployed;
+                self.household_type = HouseholdType::WorkingAge;
+            }
+            AgeBand::Senior => {
+                self.employment = EmploymentStatus::Retired;
+                self.household_type = HouseholdType::Retired;
+            }
+            _ => {}
+        }
+        Some((previous, self.age_band))
+    }
+    #[must_use]
     pub const fn household_type(&self) -> HouseholdType {
         self.household_type
     }
@@ -199,6 +242,22 @@ impl HouseholdCohort {
     pub(crate) fn split_training_household(
         &mut self,
         new_id: CohortId,
+    ) -> Result<Self, WorldError> {
+        self.split_household(new_id, self.region)
+    }
+
+    pub(crate) fn split_migrating_household(
+        &mut self,
+        new_id: CohortId,
+        destination: RegionId,
+    ) -> Result<Self, WorldError> {
+        self.split_household(new_id, destination)
+    }
+
+    fn split_household(
+        &mut self,
+        new_id: CohortId,
+        destination: RegionId,
     ) -> Result<Self, WorldError> {
         let people = self.people.people();
         if people <= 1 || self.households <= 1 {
@@ -220,9 +279,9 @@ impl HouseholdCohort {
         let annual_income = split_money(self.annual_income)?;
         let liquid_wealth = split_money(self.liquid_wealth)?;
         let debt = split_money(self.debt)?;
-        let training = Self::new(
+        let mut training = Self::new(
             new_id,
-            self.region,
+            destination,
             self.need_profile,
             Population::new(participants),
             1,
@@ -234,6 +293,7 @@ impl HouseholdCohort {
             liquid_wealth,
             debt,
         )?;
+        training.years_in_age_band = self.years_in_age_band;
         self.people = Population::new(remaining_people);
         self.households -= 1;
         self.annual_income =
@@ -707,6 +767,49 @@ mod tests {
             )
             .expect("fully contracted income"),
             Money::default()
+        );
+    }
+
+    #[test]
+    fn lifecycle_ages_cohort_without_changing_real_stocks() {
+        let mut cohort = HouseholdCohort::new(
+            CohortId::new(1),
+            RegionId::new(1),
+            NeedProfileId::new(1),
+            Population::new(20),
+            10,
+            AgeBand::Mature,
+            HouseholdType::WorkingAge,
+            EducationLevel::Secondary,
+            EmploymentStatus::Employed,
+            Money::from_minor_units(2_400),
+            Money::from_minor_units(500),
+            Money::from_minor_units(200),
+        )
+        .expect("cohort");
+        cohort.years_in_age_band = 16;
+        let stocks = (
+            cohort.people(),
+            cohort.households(),
+            cohort.annual_income(),
+            cohort.liquid_wealth(),
+            cohort.debt(),
+        );
+        assert_eq!(
+            cohort.advance_lifecycle_year(),
+            Some((AgeBand::Mature, AgeBand::Senior))
+        );
+        assert_eq!(cohort.employment(), EmploymentStatus::Retired);
+        assert_eq!(cohort.household_type(), HouseholdType::Retired);
+        assert_eq!(
+            stocks,
+            (
+                cohort.people(),
+                cohort.households(),
+                cohort.annual_income(),
+                cohort.liquid_wealth(),
+                cohort.debt(),
+            )
         );
     }
 
