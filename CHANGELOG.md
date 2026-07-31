@@ -94,3 +94,12 @@ All notable project changes are documented here. The format follows Keep a Chang
 ### Fixed
 
 - Autonomous funding now separates recurring payroll from legacy wage arrears, reserves the first loan payment, removes inadequate offers, and closes debt-only matured defaults through insolvency.
+## Steps 084-087 — retention, targeted training, sponsorship, and occupations
+
+- Added forecast-solvent incumbent counteroffers with typed retention commands/events.
+- Training now partitions one deterministic household instead of upgrading an aggregate cohort.
+- Solvent local employers can fund tuition when households cannot, without guaranteed hiring.
+- Added typed occupation skills layered over education; legacy recipes remain compatible.
+- Advanced the simulation contract to version 74.
+- Accepted ADRs 0132-0135 and passed 182 workspace tests plus Clippy/docs/release audit.
+- Seed-1 50-year audit fingerprint: `18242524565653015855`; runtime: `99.6 ms/year`.

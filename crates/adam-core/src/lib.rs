@@ -64,7 +64,7 @@ pub use freight::{
 pub use health::CohortHealth;
 pub use ids::{
     ActorId, CohortId, ContractId, CountryId, FirmId, GoodId, NeedProfileId, PowerNodeId,
-    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, TerminalId,
+    ProjectId, RecipeId, RegionId, ResolutionId, RouteId, ShipmentId, SkillId, TerminalId,
 };
 pub use insolvency::{
     FirmCreditOffer, FirmCreditSchedule, FirmCreditorClaim, FirmCreditorPriority,
@@ -73,8 +73,9 @@ pub use insolvency::{
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use labor::{
-    EmploymentAgreement, EmploymentMatch, EmploymentSwitch, PayrollRecord,
-    RegionalLaborMarketObservation, RegionalSkillLaborMarketObservation, WorkforceTraining,
+    EmploymentAgreement, EmploymentMatch, EmploymentRetention, EmploymentSwitch, PayrollRecord,
+    RegionalLaborMarketObservation, RegionalOccupationLaborMarketObservation,
+    RegionalSkillLaborMarketObservation, TrainingSponsor, WorkforceTraining,
 };
 pub use logistics::{
     IntermodalPhase, IntermodalShipmentLifecycle, LegShipmentLifecycle, LogisticsRoute,
@@ -115,4 +116,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 70;
+pub const SIMULATION_VERSION: u32 = 74;

@@ -694,6 +694,8 @@ pub struct World {
     pub(crate) goods: BTreeMap<GoodId, Good>,
     pub(crate) production_recipes: BTreeMap<RecipeId, ProductionRecipe>,
     pub(crate) recipe_minimum_education: BTreeMap<RecipeId, crate::EducationLevel>,
+    pub(crate) recipe_required_skill: BTreeMap<RecipeId, crate::SkillId>,
+    pub(crate) cohort_skills: BTreeMap<(CohortId, crate::SkillId), u8>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
     pub(crate) firm_entry_pressure: BTreeMap<(RegionId, GoodId), u8>,
     pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
@@ -713,6 +715,8 @@ pub struct World {
     pub(crate) regional_labor_market: BTreeMap<RegionId, crate::RegionalLaborMarketObservation>,
     pub(crate) regional_skill_labor_market:
         BTreeMap<(RegionId, crate::EducationLevel), crate::RegionalSkillLaborMarketObservation>,
+    pub(crate) regional_occupation_labor_market:
+        BTreeMap<(RegionId, crate::SkillId), crate::RegionalOccupationLaborMarketObservation>,
     pub(crate) workforce_training: BTreeMap<CohortId, crate::WorkforceTraining>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
@@ -794,6 +798,8 @@ impl World {
             goods: BTreeMap::new(),
             production_recipes: BTreeMap::new(),
             recipe_minimum_education: BTreeMap::new(),
+            recipe_required_skill: BTreeMap::new(),
+            cohort_skills: BTreeMap::new(),
             firms: BTreeMap::new(),
             firm_entry_pressure: BTreeMap::new(),
             firm_production_targets: BTreeMap::new(),
@@ -809,6 +815,7 @@ impl World {
             employment_agreements: BTreeMap::new(),
             regional_labor_market: BTreeMap::new(),
             regional_skill_labor_market: BTreeMap::new(),
+            regional_occupation_labor_market: BTreeMap::new(),
             workforce_training: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
@@ -1647,6 +1654,17 @@ impl World {
             }
         }
         self.write_recipe_education_fingerprint(hash);
+        hash.write_u64(self.recipe_required_skill.len() as u64);
+        for (recipe, skill) in &self.recipe_required_skill {
+            hash.write_u32(recipe.get());
+            hash.write_u32(skill.get());
+        }
+        hash.write_u64(self.cohort_skills.len() as u64);
+        for ((cohort, skill), proficiency) in &self.cohort_skills {
+            hash.write_u32(cohort.get());
+            hash.write_u32(skill.get());
+            hash.write_u8(*proficiency);
+        }
         hash.write_u64(self.regional_labor_market.len() as u64);
         for (region, observation) in &self.regional_labor_market {
             hash.write_u32(region.get());
@@ -1674,6 +1692,13 @@ impl World {
             hash.write_u8(training.target_education.fingerprint_tag());
             hash.write_u8(training.months_remaining);
             hash.write_i64(training.tuition_paid.minor_units());
+            match training.sponsor {
+                crate::TrainingSponsor::Household => hash.write_u8(1),
+                crate::TrainingSponsor::Firm(firm) => {
+                    hash.write_u8(2);
+                    hash.write_u32(firm.get());
+                }
+            }
         }
         hash.write_u64(self.firms.len() as u64);
         for (id, firm) in &self.firms {

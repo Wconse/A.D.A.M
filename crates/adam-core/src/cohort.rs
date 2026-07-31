@@ -195,6 +195,54 @@ impl HouseholdCohort {
     pub(crate) const fn set_education(&mut self, education: EducationLevel) {
         self.education = education;
     }
+
+    pub(crate) fn split_training_household(
+        &mut self,
+        new_id: CohortId,
+    ) -> Result<Self, WorldError> {
+        let people = self.people.people();
+        if people <= 1 || self.households <= 1 {
+            return Err(WorldError::InvalidCohort(
+                "training split requires multiple people and households",
+            ));
+        }
+        let participants = people.div_ceil(self.households);
+        let remaining_people = people - participants;
+        let split_money = |value: Money| -> Result<Money, WorldError> {
+            let share = i128::from(value.minor_units())
+                .checked_mul(i128::from(participants))
+                .ok_or(WorldError::ArithmeticOverflow("training cohort split"))?
+                / i128::from(people);
+            Ok(Money::from_minor_units(i64::try_from(share).map_err(
+                |_| WorldError::ArithmeticOverflow("training cohort split"),
+            )?))
+        };
+        let annual_income = split_money(self.annual_income)?;
+        let liquid_wealth = split_money(self.liquid_wealth)?;
+        let debt = split_money(self.debt)?;
+        let training = Self::new(
+            new_id,
+            self.region,
+            self.need_profile,
+            Population::new(participants),
+            1,
+            self.age_band,
+            self.household_type,
+            self.education,
+            self.employment,
+            annual_income,
+            liquid_wealth,
+            debt,
+        )?;
+        self.people = Population::new(remaining_people);
+        self.households -= 1;
+        self.annual_income =
+            Money::from_minor_units(self.annual_income.minor_units() - annual_income.minor_units());
+        self.liquid_wealth =
+            Money::from_minor_units(self.liquid_wealth.minor_units() - liquid_wealth.minor_units());
+        self.debt = Money::from_minor_units(self.debt.minor_units() - debt.minor_units());
+        Ok(training)
+    }
     #[must_use]
     pub const fn employment(&self) -> EmploymentStatus {
         self.employment

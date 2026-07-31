@@ -1253,3 +1253,6 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Focused coverage proves a Secondary cohort pays 100, remains unavailable for three months, completes Vocational training, and replays with identical state and fingerprint. The combined step 080-083 workspace gate passes 179 tests; formatting, Clippy, docs, release build, and `git diff --check` pass. `SIMULATION_VERSION` advances 69 -> 70.
 - Two seed-1 50-year timelines remain identical with fingerprint `9052706876239142019` at 103.8 ms/year. The demo remains behaviorally unchanged because competitive labor profiles are opt-in.
 - Deliberate limits: training capacity is regional and household-funded; employer sponsorship, public education budgets, dropout risk, cohort splitting, and occupation-specific curricula remain future work. Next gate: introduce bounded incumbent counteroffers that must pass forward payroll-solvency checks.
+### Steps 084-087 complete
+
+Labor mobility now includes solvent retention offers, household-scale training participation, employer tuition sponsorship, and content-defined occupation skill gates. The next labor iteration should turn the new occupation identity into persistent occupation-specific evidence and specialization-producing curricula, then expose those signals in the chronicle.

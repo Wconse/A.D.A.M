@@ -47,6 +47,7 @@ typed_id!(RouteId);
 typed_id!(ShipmentId);
 typed_id!(TerminalId);
 typed_id!(NeedProfileId);
+typed_id!(SkillId);
 typed_id!(CohortId);
 typed_id!(RegionId);
 typed_id!(ActorId);
@@ -77,6 +78,7 @@ mod tests {
         assert_eq!(size_of::<ShipmentId>(), size_of::<u32>());
         assert_eq!(size_of::<TerminalId>(), size_of::<u32>());
         assert_eq!(size_of::<NeedProfileId>(), size_of::<u32>());
+        assert_eq!(size_of::<SkillId>(), size_of::<u32>());
         assert_eq!(size_of::<CohortId>(), size_of::<u32>());
         assert_eq!(size_of::<RegionId>(), size_of::<u32>());
         assert_eq!(size_of::<ActorId>(), size_of::<u32>());

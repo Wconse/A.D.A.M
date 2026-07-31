@@ -1,6 +1,6 @@
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, EmploymentMatch,
-    EmploymentSwitch, FirmExpectations, FirmFoundingPlan, FirmId, FirmPolicy,
+    EmploymentRetention, EmploymentSwitch, FirmExpectations, FirmFoundingPlan, FirmId, FirmPolicy,
     FirmReorganizationPlan, FreightContract, InvestmentProject, MarketClearing, ProjectId,
     ResolutionId, ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
 };
@@ -61,6 +61,7 @@ pub enum WorldCommand {
         workers: u64,
     },
     MatchEmploymentWorker(EmploymentMatch),
+    RetainEmploymentWorker(EmploymentRetention),
     SwitchEmploymentWorker(EmploymentSwitch),
     ExecuteObservedLaborMatching,
     ExecuteMonthlyPayroll,
@@ -246,6 +247,7 @@ impl WorldCommand {
                 workers,
             } => world.change_employment_workers(*firm, *cohort, *workers),
             Self::MatchEmploymentWorker(matched) => world.match_employment_worker(*matched),
+            Self::RetainEmploymentWorker(retained) => world.retain_employment_worker(*retained),
             Self::SwitchEmploymentWorker(switched) => world.switch_employment_worker(*switched),
             Self::ExecuteObservedLaborMatching => {
                 world.execute_observed_labor_matching().map(|_| ())
