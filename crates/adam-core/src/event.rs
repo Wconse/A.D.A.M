@@ -57,9 +57,19 @@ pub enum DomainEvent {
         minimum_education: EducationLevel,
         labor_market_adjustment_basis_points: i16,
     },
+    EmploymentSwitched {
+        from_firm: FirmId,
+        to_firm: FirmId,
+        cohort: CohortId,
+        previous_wage: Money,
+        offered_wage: Money,
+        minimum_education: EducationLevel,
+        labor_market_adjustment_basis_points: i16,
+    },
     ObservedLaborMatchingCompleted {
         offers: u64,
         matches: u64,
+        switches: u64,
     },
     RegionalLaborMarketObserved {
         region: RegionId,
@@ -70,6 +80,26 @@ pub enum DomainEvent {
         average_offered_wage: Money,
         unemployment_pressure_months: u8,
         vacancy_pressure_months: u8,
+    },
+    RegionalSkillLaborMarketObserved {
+        region: RegionId,
+        minimum_education: EducationLevel,
+        qualified_available_workers: u64,
+        vacancies: u64,
+        unemployment_pressure_months: u8,
+        vacancy_pressure_months: u8,
+    },
+    WorkforceTrainingStarted {
+        cohort: CohortId,
+        previous_education: EducationLevel,
+        target_education: EducationLevel,
+        months: u8,
+        tuition_paid: Money,
+    },
+    WorkforceTrainingCompleted {
+        cohort: CohortId,
+        previous_education: EducationLevel,
+        new_education: EducationLevel,
     },
     SurvivalRationingApplied {
         country: CountryId,

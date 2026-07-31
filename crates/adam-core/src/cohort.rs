@@ -192,6 +192,9 @@ impl HouseholdCohort {
     pub const fn education(&self) -> EducationLevel {
         self.education
     }
+    pub(crate) const fn set_education(&mut self, education: EducationLevel) {
+        self.education = education;
+    }
     #[must_use]
     pub const fn employment(&self) -> EmploymentStatus {
         self.employment

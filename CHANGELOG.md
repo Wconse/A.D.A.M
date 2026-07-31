@@ -6,6 +6,12 @@ All notable project changes are documented here. The format follows Keep a Chang
 
 ### Added
 
+- Added employment tenure and a three-month switching cooldown so new hires cannot be serially poached.
+- Added qualification-specific regional labor evidence and skill-bucket wage pressure.
+- Added household-funded three-month workforce training after persistent skill shortages.
+
+- Added bounded voluntary employment switching: workers can accept materially better funded local offers without duplication, same-month chains, or replay ambiguity.
+
 - Added bounded evidence-driven wage adaptation: persistent vacancies raise competitive bids, persistent unemployment restrains them, and replayable matches retain the signed causal adjustment.
 
 - Added persistent regional labor-market evidence with residual unemployment and vacancy counts, funded offers, hires, average offered wages, bounded pressure streaks, fingerprints, typed events, and yearly chronicle attribution.

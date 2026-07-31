@@ -711,6 +711,9 @@ pub struct World {
     pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) regional_labor_market: BTreeMap<RegionId, crate::RegionalLaborMarketObservation>,
+    pub(crate) regional_skill_labor_market:
+        BTreeMap<(RegionId, crate::EducationLevel), crate::RegionalSkillLaborMarketObservation>,
+    pub(crate) workforce_training: BTreeMap<CohortId, crate::WorkforceTraining>,
     pub(crate) ownership_stakes: BTreeMap<(FirmId, ActorId), OwnershipStake>,
     pub(crate) firm_policies: BTreeMap<FirmId, FirmPolicy>,
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
@@ -805,6 +808,8 @@ impl World {
             monthly_firm_procurement_purchases: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             regional_labor_market: BTreeMap::new(),
+            regional_skill_labor_market: BTreeMap::new(),
+            workforce_training: BTreeMap::new(),
             ownership_stakes: BTreeMap::new(),
             firm_policies: BTreeMap::new(),
             firm_appointments: BTreeMap::new(),
@@ -1301,6 +1306,7 @@ impl World {
             hash.write_u64(row.workers());
             hash.write_i64(row.wage().minor_units());
             hash.write_i64(row.arrears().minor_units());
+            hash.write_u8(row.months_at_current_firm());
         }
     }
 
@@ -1651,6 +1657,23 @@ impl World {
             hash.write_i64(observation.average_offered_wage.minor_units());
             hash.write_u8(observation.unemployment_pressure_months);
             hash.write_u8(observation.vacancy_pressure_months);
+        }
+        hash.write_u64(self.regional_skill_labor_market.len() as u64);
+        for ((region, education), observation) in &self.regional_skill_labor_market {
+            hash.write_u32(region.get());
+            hash.write_u8(education.fingerprint_tag());
+            hash.write_u64(observation.qualified_available_workers);
+            hash.write_u64(observation.vacancies);
+            hash.write_u8(observation.unemployment_pressure_months);
+            hash.write_u8(observation.vacancy_pressure_months);
+        }
+        hash.write_u64(self.workforce_training.len() as u64);
+        for (cohort, training) in &self.workforce_training {
+            hash.write_u32(cohort.get());
+            hash.write_u8(training.previous_education.fingerprint_tag());
+            hash.write_u8(training.target_education.fingerprint_tag());
+            hash.write_u8(training.months_remaining);
+            hash.write_i64(training.tuition_paid.minor_units());
         }
         hash.write_u64(self.firms.len() as u64);
         for (id, firm) in &self.firms {

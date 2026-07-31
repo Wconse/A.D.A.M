@@ -8,6 +8,7 @@ pub struct EmploymentAgreement {
     monthly_wage_per_worker: Money,
     arrears: Money,
     active: bool,
+    months_at_current_firm: u8,
 }
 impl EmploymentAgreement {
     /// Creates a firm-to-cohort wage agreement.
@@ -31,6 +32,7 @@ impl EmploymentAgreement {
             monthly_wage_per_worker: wage,
             arrears: Money::default(),
             active: true,
+            months_at_current_firm: 0,
         })
     }
     #[must_use]
@@ -57,9 +59,22 @@ impl EmploymentAgreement {
     pub const fn active(&self) -> bool {
         self.active
     }
+    #[must_use]
+    pub const fn months_at_current_firm(&self) -> u8 {
+        self.months_at_current_firm
+    }
     pub(crate) fn set_workers(&mut self, workers: u64) {
+        if self.workers == 0 && workers > 0 {
+            self.months_at_current_firm = 0;
+        }
         self.workers = workers;
         self.active = workers > 0;
+    }
+
+    pub(crate) fn advance_tenure(&mut self) {
+        if self.active {
+            self.months_at_current_firm = self.months_at_current_firm.saturating_add(1);
+        }
     }
 
     pub(crate) const fn set_wage(&mut self, wage: Money) {
@@ -99,6 +114,17 @@ pub struct EmploymentMatch {
     pub labor_market_adjustment_basis_points: i16,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmploymentSwitch {
+    pub from_firm: FirmId,
+    pub to_firm: FirmId,
+    pub cohort: CohortId,
+    pub previous_wage: Money,
+    pub offered_wage: Money,
+    pub minimum_education: crate::EducationLevel,
+    pub labor_market_adjustment_basis_points: i16,
+}
+
 /// Persistent monthly evidence for one regional competitive labor market.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionalLaborMarketObservation {
@@ -110,6 +136,25 @@ pub struct RegionalLaborMarketObservation {
     pub average_offered_wage: Money,
     pub unemployment_pressure_months: u8,
     pub vacancy_pressure_months: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RegionalSkillLaborMarketObservation {
+    pub region: crate::RegionId,
+    pub minimum_education: crate::EducationLevel,
+    pub qualified_available_workers: u64,
+    pub vacancies: u64,
+    pub unemployment_pressure_months: u8,
+    pub vacancy_pressure_months: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WorkforceTraining {
+    pub cohort: CohortId,
+    pub previous_education: crate::EducationLevel,
+    pub target_education: crate::EducationLevel,
+    pub months_remaining: u8,
+    pub tuition_paid: Money,
 }
 impl World {
     /// Configures the minimum education accepted by one production recipe.
@@ -196,6 +241,7 @@ impl World {
                 .ok_or(WorldError::ArithmeticOverflow("regional labor offer wages"))?;
         }
         let mut next = self.clone();
+        next.progress_workforce_training()?;
         let mut matches = Vec::new();
         for offer in offers {
             if next.firm_labor_vacancy(offer.firm)? == 0
@@ -206,6 +252,7 @@ impl World {
             crate::WorldCommand::MatchEmploymentWorker(offer).apply(&mut next)?;
             matches.push(offer);
         }
+        let switches = next.execute_observed_job_switches(&matches, &mut offer_stats)?;
         let configured_regions: BTreeSet<_> = next
             .firms
             .values()
@@ -216,9 +263,10 @@ impl World {
             let available_workers = next
                 .cohorts
                 .iter()
-                .filter(|(_, cohort)| {
+                .filter(|(cohort_id, cohort)| {
                     cohort.region() == region
                         && cohort.employment() == crate::EmploymentStatus::Unemployed
+                        && !next.workforce_training.contains_key(cohort_id)
                 })
                 .map(|(cohort, _)| next.available_cohort_workers(*cohort))
                 .sum();
@@ -238,7 +286,13 @@ impl World {
                 matches
                     .iter()
                     .filter(|matched| next.firms[&matched.firm].region() == region)
-                    .count(),
+                    .count()
+                    .saturating_add(
+                        switches
+                            .iter()
+                            .filter(|switched| next.firms[&switched.to_firm].region() == region)
+                            .count(),
+                    ),
             )
             .map_err(|_| WorldError::ArithmeticOverflow("regional labor hires"))?;
             let average_offered_wage = if offers == 0 {
@@ -284,15 +338,89 @@ impl World {
                     vacancy_pressure_months,
                 },
             );
+            let skill_levels: BTreeSet<_> = next
+                .firms
+                .values()
+                .filter(|firm| firm.region() == region)
+                .filter_map(|firm| next.recipe_minimum_education.get(&firm.recipe()).copied())
+                .collect();
+            for minimum_education in skill_levels {
+                let qualified_available_workers = next
+                    .cohorts
+                    .iter()
+                    .filter(|(cohort_id, cohort)| {
+                        cohort.region() == region
+                            && cohort.employment() == crate::EmploymentStatus::Unemployed
+                            && cohort.education() >= minimum_education
+                            && !next.workforce_training.contains_key(cohort_id)
+                    })
+                    .map(|(cohort, _)| next.available_cohort_workers(*cohort))
+                    .sum();
+                let skill_vacancies = next
+                    .firms
+                    .iter()
+                    .filter(|(_, firm)| {
+                        firm.region() == region
+                            && next
+                                .recipe_minimum_education
+                                .get(&firm.recipe())
+                                .is_some_and(|level| *level == minimum_education)
+                    })
+                    .try_fold(0_u64, |sum, (firm, _)| {
+                        sum.checked_add(next.firm_labor_vacancy(*firm)?)
+                            .ok_or(WorldError::ArithmeticOverflow("skill labor vacancies"))
+                    })?;
+                let key = (region, minimum_education);
+                let previous = next.regional_skill_labor_market.get(&key).copied();
+                let skill_unemployment_pressure_months =
+                    if qualified_available_workers > skill_vacancies {
+                        previous.map_or(1, |row| row.unemployment_pressure_months.saturating_add(1))
+                    } else {
+                        0
+                    };
+                let skill_vacancy_pressure_months = if skill_vacancies > qualified_available_workers
+                {
+                    previous.map_or(1, |row| row.vacancy_pressure_months.saturating_add(1))
+                } else {
+                    0
+                };
+                let skill_observation = RegionalSkillLaborMarketObservation {
+                    region,
+                    minimum_education,
+                    qualified_available_workers,
+                    vacancies: skill_vacancies,
+                    unemployment_pressure_months: skill_unemployment_pressure_months,
+                    vacancy_pressure_months: skill_vacancy_pressure_months,
+                };
+                next.regional_skill_labor_market
+                    .insert(key, skill_observation);
+                next.events.append(
+                    next.date,
+                    crate::DomainEvent::RegionalSkillLaborMarketObserved {
+                        region,
+                        minimum_education,
+                        qualified_available_workers,
+                        vacancies: skill_vacancies,
+                        unemployment_pressure_months: skill_unemployment_pressure_months,
+                        vacancy_pressure_months: skill_vacancy_pressure_months,
+                    },
+                );
+            }
+        }
+        next.enroll_observed_workforce_training()?;
+        for agreement in next.employment_agreements.values_mut() {
+            agreement.advance_tenure();
         }
         next.last_labor_market_date = Some(next.date);
         next.events.append(
             next.date,
             crate::DomainEvent::ObservedLaborMatchingCompleted {
-                offers: u64::try_from(offers_count)
+                offers: u64::try_from(offers_count.saturating_add(switches.len()))
                     .map_err(|_| WorldError::ArithmeticOverflow("labor offers"))?,
                 matches: u64::try_from(matches.len())
                     .map_err(|_| WorldError::ArithmeticOverflow("labor matches"))?,
+                switches: u64::try_from(switches.len())
+                    .map_err(|_| WorldError::ArithmeticOverflow("labor switches"))?,
             },
         );
         *self = next;
@@ -370,6 +498,295 @@ impl World {
         Ok(())
     }
 
+    fn progress_workforce_training(&mut self) -> Result<(), WorldError> {
+        let cohorts: Vec<_> = self.workforce_training.keys().copied().collect();
+        for cohort in cohorts {
+            let training = self.workforce_training[&cohort];
+            if training.months_remaining > 1 {
+                self.workforce_training
+                    .get_mut(&cohort)
+                    .ok_or(WorldError::UnknownCohort(cohort))?
+                    .months_remaining -= 1;
+                continue;
+            }
+            self.cohorts
+                .get_mut(&cohort)
+                .ok_or(WorldError::UnknownCohort(cohort))?
+                .set_education(training.target_education);
+            self.workforce_training.remove(&cohort);
+            self.events.append(
+                self.date,
+                crate::DomainEvent::WorkforceTrainingCompleted {
+                    cohort,
+                    previous_education: training.previous_education,
+                    new_education: training.target_education,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn enroll_observed_workforce_training(&mut self) -> Result<(), WorldError> {
+        let shortages: Vec<_> = self
+            .regional_skill_labor_market
+            .values()
+            .copied()
+            .filter(|row| row.vacancy_pressure_months >= 6 && row.vacancies > 0)
+            .collect();
+        let mut enrolled_regions = BTreeSet::new();
+        for shortage in shortages {
+            if enrolled_regions.contains(&shortage.region) {
+                continue;
+            }
+            let mut candidates = Vec::new();
+            for (cohort_id, cohort) in &self.cohorts {
+                if cohort.region() != shortage.region
+                    || cohort.employment() != crate::EmploymentStatus::Unemployed
+                    || cohort.education() >= shortage.minimum_education
+                    || self.workforce_training.contains_key(cohort_id)
+                    || self.available_cohort_workers(*cohort_id) == 0
+                {
+                    continue;
+                }
+                let Some(target_education) = Self::next_education_level(cohort.education()) else {
+                    continue;
+                };
+                if target_education > shortage.minimum_education {
+                    continue;
+                }
+                let tuition =
+                    Money::from_minor_units((cohort.annual_income().minor_units() / 12).max(1));
+                if cohort.liquid_wealth().minor_units() < tuition.minor_units() {
+                    continue;
+                }
+                candidates.push((
+                    cohort.education(),
+                    std::cmp::Reverse(*cohort_id),
+                    *cohort_id,
+                    target_education,
+                    tuition,
+                ));
+            }
+            let Some((previous_education, _, cohort, target_education, tuition_paid)) =
+                candidates.into_iter().max()
+            else {
+                continue;
+            };
+            self.cohorts
+                .get_mut(&cohort)
+                .ok_or(WorldError::UnknownCohort(cohort))?
+                .debit_wealth(tuition_paid)?;
+            self.workforce_training.insert(
+                cohort,
+                WorkforceTraining {
+                    cohort,
+                    previous_education,
+                    target_education,
+                    months_remaining: 3,
+                    tuition_paid,
+                },
+            );
+            self.events.append(
+                self.date,
+                crate::DomainEvent::WorkforceTrainingStarted {
+                    cohort,
+                    previous_education,
+                    target_education,
+                    months: 3,
+                    tuition_paid,
+                },
+            );
+            enrolled_regions.insert(shortage.region);
+        }
+        Ok(())
+    }
+
+    const fn next_education_level(
+        education: crate::EducationLevel,
+    ) -> Option<crate::EducationLevel> {
+        match education {
+            crate::EducationLevel::None => Some(crate::EducationLevel::Basic),
+            crate::EducationLevel::Basic => Some(crate::EducationLevel::Secondary),
+            crate::EducationLevel::Secondary => Some(crate::EducationLevel::Vocational),
+            crate::EducationLevel::Vocational => Some(crate::EducationLevel::Tertiary),
+            crate::EducationLevel::Tertiary => None,
+        }
+    }
+
+    fn execute_observed_job_switches(
+        &mut self,
+        matches: &[EmploymentMatch],
+        offer_stats: &mut BTreeMap<crate::RegionId, (u64, i128)>,
+    ) -> Result<Vec<EmploymentSwitch>, WorldError> {
+        let mut touched_firms: BTreeSet<_> = matches.iter().map(|matched| matched.firm).collect();
+        let target_firms: Vec<_> = self.firms.keys().copied().collect();
+        let mut completed_switches = Vec::new();
+        for to_firm in target_firms {
+            if touched_firms.contains(&to_firm)
+                || self.is_firm_insolvent(to_firm)
+                || self.firm_labor_vacancy(to_firm)? == 0
+            {
+                continue;
+            }
+            let target = &self.firms[&to_firm];
+            let Some(minimum_education) =
+                self.recipe_minimum_education.get(&target.recipe()).copied()
+            else {
+                continue;
+            };
+            let mut candidates = Vec::new();
+            for agreement in self.employment_agreements.values().filter(|agreement| {
+                agreement.active()
+                    && agreement.workers() > 0
+                    && agreement.months_at_current_firm() >= 3
+                    && agreement.firm() != to_firm
+                    && !touched_firms.contains(&agreement.firm())
+            }) {
+                let cohort = &self.cohorts[&agreement.cohort()];
+                if cohort.region() != target.region() || cohort.education() < minimum_education {
+                    continue;
+                }
+                let (offered_wage, labor_market_adjustment_basis_points) =
+                    self.competitive_labor_bid(to_firm, agreement.cohort())?;
+                if target.cash().minor_units() < offered_wage.minor_units()
+                    || i128::from(offered_wage.minor_units()) * 100
+                        < i128::from(agreement.wage().minor_units()) * 110
+                {
+                    continue;
+                }
+                candidates.push(EmploymentSwitch {
+                    from_firm: agreement.firm(),
+                    to_firm,
+                    cohort: agreement.cohort(),
+                    previous_wage: agreement.wage(),
+                    offered_wage,
+                    minimum_education,
+                    labor_market_adjustment_basis_points,
+                });
+            }
+            candidates.sort_by(|first, second| {
+                second
+                    .offered_wage
+                    .cmp(&first.offered_wage)
+                    .then_with(|| first.previous_wage.cmp(&second.previous_wage))
+                    .then_with(|| first.from_firm.cmp(&second.from_firm))
+                    .then_with(|| first.cohort.cmp(&second.cohort))
+            });
+            let Some(switched) = candidates.into_iter().next() else {
+                continue;
+            };
+            let region = target.region();
+            let stats = offer_stats.entry(region).or_default();
+            stats.0 = stats.0.saturating_add(1);
+            stats.1 = stats
+                .1
+                .checked_add(i128::from(switched.offered_wage.minor_units()))
+                .ok_or(WorldError::ArithmeticOverflow(
+                    "regional switch offer wages",
+                ))?;
+            crate::WorldCommand::SwitchEmploymentWorker(switched).apply(self)?;
+            touched_firms.insert(switched.from_firm);
+            touched_firms.insert(switched.to_firm);
+            completed_switches.push(switched);
+        }
+        Ok(completed_switches)
+    }
+
+    /// Moves one worker from an existing agreement to a materially better funded offer.
+    /// # Errors
+    /// Rejects stale, underqualified, underfunded, or sub-threshold switches atomically.
+    pub fn switch_employment_worker(
+        &mut self,
+        switched: EmploymentSwitch,
+    ) -> Result<(), WorldError> {
+        if switched.from_firm == switched.to_firm || self.firm_labor_vacancy(switched.to_firm)? == 0
+        {
+            return Err(WorldError::InvalidEmployment(
+                "employment switch requires a distinct firm with a vacancy",
+            ));
+        }
+        let source = self
+            .firms
+            .get(&switched.from_firm)
+            .ok_or(WorldError::UnknownFirm(switched.from_firm))?;
+        let target = self
+            .firms
+            .get(&switched.to_firm)
+            .ok_or(WorldError::UnknownFirm(switched.to_firm))?;
+        let minimum = self
+            .recipe_minimum_education
+            .get(&target.recipe())
+            .copied()
+            .ok_or(WorldError::InvalidEmployment(
+                "employment switch requires an explicitly configured target recipe",
+            ))?;
+        let cohort = self
+            .cohorts
+            .get(&switched.cohort)
+            .ok_or(WorldError::UnknownCohort(switched.cohort))?;
+        let source_key = (switched.from_firm, switched.cohort);
+        let source_agreement =
+            self.employment_agreements
+                .get(&source_key)
+                .ok_or(WorldError::InvalidEmployment(
+                    "employment switch source agreement is missing",
+                ))?;
+        let (expected_wage, expected_adjustment) =
+            self.competitive_labor_bid(switched.to_firm, switched.cohort)?;
+        if source.region() != target.region()
+            || cohort.region() != target.region()
+            || cohort.education() < minimum
+            || switched.minimum_education != minimum
+            || !source_agreement.active()
+            || source_agreement.workers() == 0
+            || source_agreement.months_at_current_firm() < 3
+            || source_agreement.wage() != switched.previous_wage
+            || switched.offered_wage != expected_wage
+            || switched.labor_market_adjustment_basis_points != expected_adjustment
+            || target.cash().minor_units() < switched.offered_wage.minor_units()
+            || i128::from(switched.offered_wage.minor_units()) * 100
+                < i128::from(switched.previous_wage.minor_units()) * 110
+        {
+            return Err(WorldError::InvalidEmployment(
+                "employment switch requires a qualified worker and a current 10% better funded bid",
+            ));
+        }
+        let mut next = self.clone();
+        let source_workers = next.employment_agreements[&source_key].workers();
+        next.employment_agreements
+            .get_mut(&source_key)
+            .ok_or(WorldError::InvalidEmployment(
+                "validated employment switch source disappeared",
+            ))?
+            .set_workers(source_workers - 1);
+        let target_key = (switched.to_firm, switched.cohort);
+        if let Some(agreement) = next.employment_agreements.get_mut(&target_key) {
+            agreement.set_workers(agreement.workers().saturating_add(1));
+            agreement.set_wage(switched.offered_wage);
+        } else {
+            next.register_employment_agreement(EmploymentAgreement::new(
+                switched.to_firm,
+                switched.cohort,
+                1,
+                switched.offered_wage,
+            )?)?;
+        }
+        next.events.append(
+            next.date,
+            crate::DomainEvent::EmploymentSwitched {
+                from_firm: switched.from_firm,
+                to_firm: switched.to_firm,
+                cohort: switched.cohort,
+                previous_wage: switched.previous_wage,
+                offered_wage: switched.offered_wage,
+                minimum_education: switched.minimum_education,
+                labor_market_adjustment_basis_points: switched.labor_market_adjustment_basis_points,
+            },
+        );
+        *self = next;
+        Ok(())
+    }
+
     fn firm_labor_vacancy(&self, firm: FirmId) -> Result<u64, WorldError> {
         let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
         let recipe = self
@@ -419,6 +836,7 @@ impl World {
                 cohort.region() == region
                     && cohort.employment() == crate::EmploymentStatus::Unemployed
                     && cohort.education() >= minimum
+                    && !self.workforce_training.contains_key(id)
                     && self.available_cohort_workers(**id) > 0
             })
             .max_by_key(|(id, cohort)| (cohort.education(), std::cmp::Reverse(**id)))
@@ -438,7 +856,13 @@ impl World {
             .unwrap_or(definition.capacity_batches());
         let capacity = definition.capacity_batches().max(1);
         let urgency = 500_u64.saturating_add(target.saturating_mul(1_500) / capacity);
-        let pressure = self.regional_labor_market.get(&definition.region());
+        let pressure = self
+            .recipe_minimum_education
+            .get(&definition.recipe())
+            .and_then(|minimum| {
+                self.regional_skill_labor_market
+                    .get(&(definition.region(), *minimum))
+            });
         let labor_market_adjustment_basis_points = pressure.map_or(0_i16, |row| {
             if row.vacancy_pressure_months >= 3 {
                 i16::from((row.vacancy_pressure_months / 3).min(4)) * 500
@@ -656,6 +1080,19 @@ impl World {
     ) -> &BTreeMap<crate::RegionId, RegionalLaborMarketObservation> {
         &self.regional_labor_market
     }
+
+    #[must_use]
+    pub fn regional_skill_labor_market(
+        &self,
+    ) -> &BTreeMap<(crate::RegionId, crate::EducationLevel), RegionalSkillLaborMarketObservation>
+    {
+        &self.regional_skill_labor_market
+    }
+
+    #[must_use]
+    pub fn workforce_training(&self) -> &BTreeMap<CohortId, WorkforceTraining> {
+        &self.workforce_training
+    }
 }
 
 #[cfg(test)]
@@ -838,6 +1275,77 @@ mod tests {
     }
 
     #[test]
+    fn worker_switches_to_materially_better_offer_and_replays() {
+        let mut direct = labor_market_world();
+        direct
+            .register_employment_agreement(
+                EmploymentAgreement::new(
+                    FirmId::new(1),
+                    CohortId::new(1),
+                    1,
+                    Money::from_minor_units(100),
+                )
+                .expect("source agreement"),
+            )
+            .expect("register source agreement");
+        for _ in 0..3 {
+            let early_matches = direct
+                .execute_observed_labor_matching()
+                .expect("tenure-building labor market");
+            assert!(early_matches.is_empty());
+            assert!(
+                !direct
+                    .employment_agreements()
+                    .contains_key(&(FirmId::new(2), CohortId::new(1)))
+            );
+            direct.advance_month().expect("tenure month");
+        }
+        let mut replayed = direct.clone();
+
+        let matches = direct
+            .execute_observed_labor_matching()
+            .expect("labor market with switching");
+        WorldCommand::ExecuteObservedLaborMatching
+            .apply(&mut replayed)
+            .expect("replayed switching market");
+
+        assert!(matches.is_empty());
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        assert_eq!(
+            direct.employment_agreements()[&(FirmId::new(1), CohortId::new(1))].workers(),
+            0
+        );
+        let destination = &direct.employment_agreements()[&(FirmId::new(2), CohortId::new(1))];
+        assert_eq!(destination.workers(), 1);
+        assert_eq!(destination.wage(), Money::from_minor_units(118));
+        assert_eq!(destination.months_at_current_firm(), 1);
+        assert!(direct.events().events().iter().any(|envelope| matches!(
+            envelope.event(),
+            crate::DomainEvent::EmploymentSwitched {
+                from_firm,
+                to_firm,
+                cohort,
+                previous_wage,
+                offered_wage,
+                ..
+            } if *from_firm == FirmId::new(1)
+                && *to_firm == FirmId::new(2)
+                && *cohort == CohortId::new(1)
+                && *previous_wage == Money::from_minor_units(100)
+                && *offered_wage == Money::from_minor_units(118)
+        )));
+        assert!(direct.events().events().iter().any(|envelope| matches!(
+            envelope.event(),
+            crate::DomainEvent::ObservedLaborMatchingCompleted {
+                matches: 0,
+                switches: 1,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn persistent_regional_pressure_adapts_funded_wage_bids_boundedly() {
         let mut scarcity = labor_market_world();
         scarcity.regional_labor_market.insert(
@@ -849,6 +1357,17 @@ mod tests {
                 offers: 0,
                 hires: 0,
                 average_offered_wage: Money::default(),
+                unemployment_pressure_months: 0,
+                vacancy_pressure_months: 3,
+            },
+        );
+        scarcity.regional_skill_labor_market.insert(
+            (RegionId::new(1), EducationLevel::Basic),
+            RegionalSkillLaborMarketObservation {
+                region: RegionId::new(1),
+                minimum_education: EducationLevel::Basic,
+                qualified_available_workers: 0,
+                vacancies: 1,
                 unemployment_pressure_months: 0,
                 vacancy_pressure_months: 3,
             },
@@ -876,6 +1395,17 @@ mod tests {
                 vacancy_pressure_months: 0,
             },
         );
+        surplus.regional_skill_labor_market.insert(
+            (RegionId::new(1), EducationLevel::Basic),
+            RegionalSkillLaborMarketObservation {
+                region: RegionId::new(1),
+                minimum_education: EducationLevel::Basic,
+                qualified_available_workers: 1,
+                vacancies: 0,
+                unemployment_pressure_months: 3,
+                vacancy_pressure_months: 0,
+            },
+        );
         let surplus_matches = surplus
             .execute_observed_labor_matching()
             .expect("surplus-adjusted matching");
@@ -884,6 +1414,78 @@ mod tests {
             surplus_matches[0].labor_market_adjustment_basis_points,
             -250
         );
+    }
+
+    #[test]
+    fn persistent_skill_shortage_funds_timed_training_and_replays() {
+        let mut direct = labor_market_world();
+        direct
+            .set_recipe_minimum_education(RecipeId::new(1), EducationLevel::Vocational)
+            .expect("vocational profile");
+        direct
+            .cohorts
+            .get_mut(&CohortId::new(1))
+            .expect("training cohort")
+            .credit_wealth(Money::from_minor_units(100))
+            .expect("training savings");
+        direct.regional_skill_labor_market.insert(
+            (RegionId::new(1), EducationLevel::Vocational),
+            RegionalSkillLaborMarketObservation {
+                region: RegionId::new(1),
+                minimum_education: EducationLevel::Vocational,
+                qualified_available_workers: 0,
+                vacancies: 2,
+                unemployment_pressure_months: 0,
+                vacancy_pressure_months: 6,
+            },
+        );
+        let mut replayed = direct.clone();
+
+        for month in 0..4 {
+            WorldCommand::ExecuteObservedLaborMatching
+                .apply(&mut direct)
+                .expect("direct training month");
+            WorldCommand::ExecuteObservedLaborMatching
+                .apply(&mut replayed)
+                .expect("replayed training month");
+            if month < 3 {
+                direct.advance_month().expect("direct training calendar");
+                replayed
+                    .advance_month()
+                    .expect("replayed training calendar");
+            }
+        }
+
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+        assert!(direct.workforce_training().is_empty());
+        let cohort = &direct.cohorts[&CohortId::new(1)];
+        assert_eq!(cohort.education(), EducationLevel::Vocational);
+        assert_eq!(cohort.liquid_wealth(), Money::default());
+        assert!(direct.events().events().iter().any(|envelope| matches!(
+            envelope.event(),
+            crate::DomainEvent::WorkforceTrainingStarted {
+                cohort,
+                previous_education: EducationLevel::Secondary,
+                target_education: EducationLevel::Vocational,
+                months: 3,
+                tuition_paid,
+            } if *cohort == CohortId::new(1)
+                && *tuition_paid == Money::from_minor_units(100)
+        )));
+        assert!(direct.events().events().iter().any(|envelope| matches!(
+            envelope.event(),
+            crate::DomainEvent::WorkforceTrainingCompleted {
+                cohort,
+                previous_education: EducationLevel::Secondary,
+                new_education: EducationLevel::Vocational,
+            } if *cohort == CohortId::new(1)
+        )));
+        let skill_row = direct
+            .regional_skill_labor_market()
+            .get(&(RegionId::new(1), EducationLevel::Vocational))
+            .expect("vocational evidence");
+        assert!(skill_row.vacancy_pressure_months >= 6);
     }
 
     #[test]

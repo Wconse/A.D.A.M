@@ -1221,3 +1221,35 @@ Next gate: named elite actors in the chronicle. Scenario actors (Mara Voss, Ilya
 - Focused coverage proves three scarcity months move the representative bid from 120 to 125 with +500 basis points, while three surplus months restrain it to 118 with -250 basis points. Existing no-pressure competition remains unchanged. The full workspace gate passes 177 tests; formatting, Clippy, docs, release build, and `git diff --check` pass. `SIMULATION_VERSION` advances 65 -> 66.
 - Two seed-1 50-year timelines remain identical with fingerprint `9534485292765561832` at 102.8 ms/year. Because the demo has no opted-in competitive recipes, the economic chronicle remains behaviorally unchanged.
 - Deliberate limits: only new hires receive adapted bids; existing contracts do not renegotiate and workers do not switch employers. Next gate: permit bounded employed-worker search and voluntary job switching when a competing offer materially exceeds the current wage, while preserving firm capacity, notice, and one-worker-per-firm monthly limits.
+
+### Bounded voluntary employment-switching gate (step 080)
+
+- After unemployment matching, configured firms with residual vacancies may recruit one qualified worker from an active local agreement only when the deterministic funded offer is at least 10% above the current wage.
+- Ordinary job seekers retain priority. A firm may participate in only one monthly labor transition as hiring destination, switching destination, or source, preventing same-month chains and oscillation. Source staffing falls exactly as destination staffing rises; source arrears remain enforceable.
+- Replayable switch commands re-derive vacancy, locality, qualification, cash coverage, current source wage, material gain, and pressure-adjusted target bid. Typed events and yearly chronicle evidence retain the old wage, new wage, source, destination, and aggregate worker gain. ADR 0128 records the boundary.
+- Focused coverage proves a worker moves from 100 to a funded 113 offer, direct/replay state and fingerprints are identical, and monthly completion distinguishes ordinary matches from switches. The full workspace gate passes 178 tests; formatting, Clippy, docs, release build, and `git diff --check` pass. `SIMULATION_VERSION` advances 66 -> 67.
+- Two seed-1 50-year timelines remain identical with fingerprint `9855621930944341265` at 99.6 ms/year. The demo remains behaviorally unchanged because competitive labor profiles are opt-in.
+- Deliberate limits: switching has no tenure friction, counteroffers, notice periods, or non-wage preferences. Next gate: add bounded employment tenure and switch cooldown before introducing qualification-specific evidence and training.
+
+### Employment-tenure stability gate (step 081)
+
+- Every agreement now retains bounded months at the current firm. New and reactivated agreements begin at zero, active tenure advances once per completed labor-market month, and inactive agreements do not age.
+- Voluntary switching requires three completed source-firm months. The destination tenure resets, creating a deterministic cooldown without a separate timer; the one-transition-per-firm monthly rule still prevents chains. Tenure is serialized and fingerprinted. ADR 0129 records the boundary.
+- Focused coverage proves the worker remains with the incumbent for three markets, then moves on the fourth when the pressure-adjusted offer is materially better. Direct and replayed tenure, switch state, and fingerprints remain equal. `SIMULATION_VERSION` advances 67 -> 68.
+- Deliberate limits: firms do not make counteroffers and employment has no notice period or non-wage utility. Next gate: separate evidence by demanded qualification so specialist scarcity does not distort every wage.
+
+### Qualification-specific labor-evidence gate (step 082)
+
+- Each configured region now retains one authoritative labor observation per exact recipe education floor: qualified unallocated supply, exact-threshold vacancies, and bounded surplus/scarcity streaks.
+- Higher-educated workers count as qualified supply for lower thresholds, while every vacancy belongs to one exact demand bucket. Cohorts currently in training are excluded from available supply.
+- Competitive wage adaptation now reads the target recipe's qualification bucket rather than aggregate regional pressure. Typed events, save state, stable fingerprints, getters, and yearly chronicle attribution expose the evidence. ADR 0130 records the semantics. `SIMULATION_VERSION` advances 68 -> 69.
+- Deliberate limits: education floors still aggregate occupations that share a credential level. Next gate: allow persistent skill scarcity to expand qualified supply through costly, delayed training.
+
+### Household-funded workforce-training gate (step 083)
+
+- Six consecutive months of qualification-specific vacancy pressure can start at most one local program per region and month for an unemployed, unallocated, underqualified cohort with sufficient savings.
+- Training costs one month of aggregate baseline income, with a positive floor, debits real household wealth, lasts three completed labor-market months, and advances education by exactly one adjacent level. Trainees cannot be hired until the month after completion.
+- Active programs are serialized and fingerprinted. Typed start/completion events and yearly chronicle narration expose enrollment, completion, skill shortage, and tuition. ADR 0131 records the mechanism.
+- Focused coverage proves a Secondary cohort pays 100, remains unavailable for three months, completes Vocational training, and replays with identical state and fingerprint. The combined step 080-083 workspace gate passes 179 tests; formatting, Clippy, docs, release build, and `git diff --check` pass. `SIMULATION_VERSION` advances 69 -> 70.
+- Two seed-1 50-year timelines remain identical with fingerprint `9052706876239142019` at 103.8 ms/year. The demo remains behaviorally unchanged because competitive labor profiles are opt-in.
+- Deliberate limits: training capacity is regional and household-funded; employer sponsorship, public education budgets, dropout risk, cohort splitting, and occupation-specific curricula remain future work. Next gate: introduce bounded incumbent counteroffers that must pass forward payroll-solvency checks.

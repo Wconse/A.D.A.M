@@ -115,6 +115,14 @@ struct YearSummary {
     labor_vacancies: u64,
     labor_wage_pressure_increases: u64,
     labor_wage_pressure_decreases: u64,
+    labor_switches: u64,
+    labor_switch_wage_gain_minor: i128,
+    skill_labor_observations: u64,
+    maximum_skill_vacancy_pressure_months: u8,
+    leading_skill_shortage: Option<(RegionId, crate::EducationLevel)>,
+    workforce_training_started: u64,
+    workforce_training_completed: u64,
+    workforce_training_tuition_minor: i128,
     labor_wage_adjustment_basis_points: i64,
     maximum_unemployment_pressure_months: u8,
     maximum_vacancy_pressure_months: u8,
@@ -507,6 +515,38 @@ impl YearSummary {
                     }
                     std::cmp::Ordering::Equal => {}
                 }
+            }
+            DomainEvent::EmploymentSwitched {
+                previous_wage,
+                offered_wage,
+                ..
+            } => {
+                self.labor_switches = self.labor_switches.saturating_add(1);
+                self.labor_switch_wage_gain_minor += i128::from(
+                    offered_wage
+                        .minor_units()
+                        .saturating_sub(previous_wage.minor_units()),
+                );
+            }
+            DomainEvent::RegionalSkillLaborMarketObserved {
+                region,
+                minimum_education,
+                vacancy_pressure_months,
+                ..
+            } => {
+                self.skill_labor_observations = self.skill_labor_observations.saturating_add(1);
+                if *vacancy_pressure_months > self.maximum_skill_vacancy_pressure_months {
+                    self.maximum_skill_vacancy_pressure_months = *vacancy_pressure_months;
+                    self.leading_skill_shortage = Some((*region, *minimum_education));
+                }
+            }
+            DomainEvent::WorkforceTrainingStarted { tuition_paid, .. } => {
+                self.workforce_training_started = self.workforce_training_started.saturating_add(1);
+                self.workforce_training_tuition_minor += i128::from(tuition_paid.minor_units());
+            }
+            DomainEvent::WorkforceTrainingCompleted { .. } => {
+                self.workforce_training_completed =
+                    self.workforce_training_completed.saturating_add(1);
             }
             DomainEvent::RegionalLaborMarketObserved {
                 region,
@@ -1005,6 +1045,32 @@ impl YearSummary {
                 self.labor_wage_adjustment_basis_points
             ));
         }
+        if self.labor_switches > 0 {
+            sentences.push(format!(
+                "Workers voluntarily changed employers {} times for materially better offers, gaining {} minor currency units of monthly wage across those moves.",
+                self.labor_switches, self.labor_switch_wage_gain_minor
+            ));
+        }
+        if let Some((region, education)) = self.leading_skill_shortage {
+            let name = region_names
+                .get(&region)
+                .map_or_else(|| format!("region {}", region.get()), Clone::clone);
+            sentences.push(format!(
+                "Qualification-specific markets recorded {} observations; the longest {:?}-qualified shortage reached {} months in {}.",
+                self.skill_labor_observations,
+                education,
+                self.maximum_skill_vacancy_pressure_months,
+                name
+            ));
+        }
+        if self.workforce_training_started > 0 || self.workforce_training_completed > 0 {
+            sentences.push(format!(
+                "Households started {} workforce training programs and completed {}, paying {} minor currency units of tuition.",
+                self.workforce_training_started,
+                self.workforce_training_completed,
+                self.workforce_training_tuition_minor
+            ));
+        }
         if let Some(region) = self.leading_unemployment_region {
             let name = region_names
                 .get(&region)
@@ -1496,6 +1562,18 @@ mod tests {
         );
         world.events.append(
             date,
+            DomainEvent::EmploymentSwitched {
+                from_firm: crate::FirmId::new(1),
+                to_firm: crate::FirmId::new(2),
+                cohort: CohortId::new(1),
+                previous_wage: Money::from_minor_units(100),
+                offered_wage: Money::from_minor_units(113),
+                minimum_education: crate::EducationLevel::Basic,
+                labor_market_adjustment_basis_points: 0,
+            },
+        );
+        world.events.append(
+            date,
             DomainEvent::RegionalLaborMarketObserved {
                 region: RegionId::new(1),
                 available_workers: 0,
@@ -1517,6 +1595,10 @@ mod tests {
         let entry = world.chronicle().pop().expect("chronicle entry");
         assert!(entry.text.contains("2 funded offers and 1 hires"));
         assert!(entry.text.contains("3 residual vacancies"));
+        assert!(entry.text.contains(
+            "Workers voluntarily changed employers 1 times for materially better offers"
+        ));
+        assert!(entry.text.contains("gaining 13 minor currency units"));
         assert!(
             entry
                 .text

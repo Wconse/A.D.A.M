@@ -1,8 +1,8 @@
 use crate::{
     ActorId, BasisPoints, BoardResolution, BoardVote, ContractId, EmploymentMatch,
-    FirmExpectations, FirmFoundingPlan, FirmId, FirmPolicy, FirmReorganizationPlan,
-    FreightContract, InvestmentProject, MarketClearing, ProjectId, ResolutionId, ShipmentId,
-    ShipmentOrder, TerminalId, World, WorldError,
+    EmploymentSwitch, FirmExpectations, FirmFoundingPlan, FirmId, FirmPolicy,
+    FirmReorganizationPlan, FreightContract, InvestmentProject, MarketClearing, ProjectId,
+    ResolutionId, ShipmentId, ShipmentOrder, TerminalId, World, WorldError,
 };
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum WorldCommand {
@@ -61,6 +61,7 @@ pub enum WorldCommand {
         workers: u64,
     },
     MatchEmploymentWorker(EmploymentMatch),
+    SwitchEmploymentWorker(EmploymentSwitch),
     ExecuteObservedLaborMatching,
     ExecuteMonthlyPayroll,
     UpdateMonthlyCohortHealth,
@@ -245,6 +246,7 @@ impl WorldCommand {
                 workers,
             } => world.change_employment_workers(*firm, *cohort, *workers),
             Self::MatchEmploymentWorker(matched) => world.match_employment_worker(*matched),
+            Self::SwitchEmploymentWorker(switched) => world.switch_employment_worker(*switched),
             Self::ExecuteObservedLaborMatching => {
                 world.execute_observed_labor_matching().map(|_| ())
             }

@@ -73,7 +73,8 @@ pub use insolvency::{
 };
 pub use investment::{InvestmentProject, InvestmentStatus};
 pub use labor::{
-    EmploymentAgreement, EmploymentMatch, PayrollRecord, RegionalLaborMarketObservation,
+    EmploymentAgreement, EmploymentMatch, EmploymentSwitch, PayrollRecord,
+    RegionalLaborMarketObservation, RegionalSkillLaborMarketObservation, WorkforceTraining,
 };
 pub use logistics::{
     IntermodalPhase, IntermodalShipmentLifecycle, LegShipmentLifecycle, LogisticsRoute,
@@ -114,4 +115,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 66;
+pub const SIMULATION_VERSION: u32 = 70;
