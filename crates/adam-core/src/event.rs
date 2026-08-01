@@ -554,6 +554,12 @@ pub enum DomainEvent {
         treasury: Money,
         debt: Money,
     },
+    /// One country's executed public outlay arriving as household purchasing power.
+    PublicOutlayDistributed {
+        country: CountryId,
+        cohort: CohortId,
+        amount: Money,
+    },
     PublicDebtInterestCharged {
         country: CountryId,
         opening_debt: Money,

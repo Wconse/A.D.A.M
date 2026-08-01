@@ -332,8 +332,11 @@ fn intermediate_turnover_is_excluded_from_regional_output_and_money_is_conserved
     );
     assert_eq!(annual_output, final_consumption + inventory_change);
 
-    // Money conservation: initial firm cash (2000) + household wealth (100)
-    // is preserved across firms, households, and paid sales taxes.
+    // Money conservation across the closed fiscal circuit: sales tax leaves firm
+    // cash, nets against public spending in the treasury, and the spending itself
+    // arrives as household wealth. The only way the stock of money can grow is
+    // public borrowing, so firms + households + treasury must equal the opening
+    // stock (2000 firm cash + 100 household wealth) plus the debt issued.
     let taxes_paid: i64 = direct
         .events()
         .events()
@@ -353,10 +356,14 @@ fn intermediate_turnover_is_excluded_from_regional_output_and_money_is_conserved
         Money::default(),
         "no survival borrowing may mint money in this world"
     );
+    assert!(taxes_paid > 0, "the producing chain does pay sales tax");
+    let indicators = direct.countries()[&CountryId::new(1)].indicators();
+    let treasury = indicators.treasury().minor_units();
+    let public_debt = indicators.public_debt().minor_units();
     assert_eq!(
-        farm_cash + bakery_cash + household_wealth + taxes_paid,
-        2_100,
-        "cash moved between agents without creation or destruction"
+        farm_cash + bakery_cash + household_wealth + treasury,
+        2_100 + public_debt,
+        "money is created only by public borrowing, never by taxation"
     );
 
     // The year is replayable through the shared command boundary.

@@ -1,3 +1,5 @@
+- Closed the fiscal circuit so taxation moves money instead of destroying it: executed public spending now reaches household cohorts as public wages, transfers, and coupon on domestic debt, split by population without rounding loss and reported as a typed `PublicOutlayDistributed` event. Money is now created only by public borrowing, proven by a dedicated invariant gate. The demo economy no longer dies at once: output is sustained for roughly four decades where it previously fell to zero almost immediately. ADR 0170; simulation version is now 96.
+
 - Fixed the Linux workspace build by explicitly enabling the `x11` and `wayland` windowing backends for the observatory, which Bevy's disabled default features had removed; corrected the Step 100 roadmap entry that claimed COMPLETE while CI was red, and pointed README/performance docs at commands that actually exist. ADR 0169.
 
 - Recorded two confirmed simulation defects as open, deliberately unfixed: the demo economy collapses to a few hundred people on every seed because the 20% final-sales tax leaves the circuit without returning to it, and chronicle `importance` is saturated at 100 so ranking does nothing.

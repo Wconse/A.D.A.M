@@ -45,6 +45,10 @@ struct CountryUpdate {
     id: CountryId,
     revenue: Money,
     spending: Money,
+    /// Share of the executed spending that is actually paid out to households.
+    /// The legacy non-material scaffold pays nothing, because its revenue is a
+    /// coefficient of output rather than tax collected from real firms.
+    household_outlay: Money,
     treasury: Money,
     debt: Money,
     opening_debt: Money,
@@ -743,6 +747,7 @@ impl World {
         }
         for update in country_updates {
             self.apply_country_update(close_date, update);
+            self.distribute_public_outlay(close_date, update);
         }
         self.update_annual_regional_interests(close_date)
             .expect("bounded annual regional policy evidence fits");
@@ -756,6 +761,91 @@ impl World {
                 year: close_date.year(),
             },
         );
+    }
+
+    /// Pays one country's executed public spending to its households.
+    ///
+    /// Public employment and public procurement are not modeled as separate
+    /// counterparties yet, so every executed outlay reaches households directly
+    /// as public wages, transfers, and domestic debt coupons. This is what keeps
+    /// the fiscal circuit closed: tax leaves firm cash, becomes treasury cash,
+    /// and returns to the economy as household purchasing power instead of
+    /// disappearing from the world.
+    fn distribute_public_outlay(&mut self, close_date: crate::SimDate, update: &CountryUpdate) {
+        for (cohort, amount) in self.plan_public_outlay_shares(update.id, update.household_outlay) {
+            self.cohorts
+                .get_mut(&cohort)
+                .expect("planned outlay cohort exists")
+                .credit_wealth(amount)
+                .expect("planned outlay share is non-negative");
+            self.events.append(
+                close_date,
+                DomainEvent::PublicOutlayDistributed {
+                    country: update.id,
+                    cohort,
+                    amount,
+                },
+            );
+        }
+    }
+
+    /// Splits an outlay across a country's cohorts by population with the
+    /// largest-remainder method, so the paid total equals the spent total to the
+    /// minor unit and no money is created or destroyed in the split.
+    fn plan_public_outlay_shares(
+        &self,
+        country: CountryId,
+        outlay: Money,
+    ) -> Vec<(CohortId, Money)> {
+        let total = u128::try_from(outlay.minor_units().max(0)).expect("non-negative outlay");
+        if total == 0 {
+            return Vec::new();
+        }
+        let mut rows: Vec<(CohortId, u128, u128)> = Vec::new();
+        let mut population = 0_u128;
+        for cohort in self.cohorts.values() {
+            let in_country = self
+                .regions
+                .get(&cohort.region())
+                .is_some_and(|region| region.country() == country);
+            let people = u128::from(cohort.people().people());
+            if in_country && people > 0 {
+                population += people;
+                rows.push((cohort.id(), people, 0));
+            }
+        }
+        if population == 0 {
+            return Vec::new();
+        }
+        let mut assigned = 0_u128;
+        for row in &mut rows {
+            let numerator = total * row.1;
+            row.1 = numerator / population;
+            row.2 = numerator % population;
+            assigned += row.1;
+        }
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        order.sort_by(|&first, &second| {
+            rows[second]
+                .2
+                .cmp(&rows[first].2)
+                .then_with(|| rows[first].0.cmp(&rows[second].0))
+        });
+        let leftover = usize::try_from(total - assigned).expect("largest remainder fits");
+        for index in order.into_iter().take(leftover) {
+            rows[index].1 += 1;
+        }
+        rows.into_iter()
+            .filter(|row| row.1 > 0)
+            .map(|(id, amount, _)| {
+                (
+                    id,
+                    Money::from_minor_units(
+                        i64::try_from(amount).expect("outlay share fits currency"),
+                    ),
+                )
+            })
+            .collect()
     }
 }
 
@@ -880,6 +970,7 @@ fn plan_material_country(
         id,
         revenue,
         spending,
+        household_outlay: spending,
         treasury,
         debt,
         opening_debt: indicators.public_debt(),
@@ -966,6 +1057,7 @@ fn plan_country(
         id,
         revenue,
         spending,
+        household_outlay: Money::default(),
         treasury,
         debt,
         opening_debt: indicators.public_debt(),
