@@ -694,6 +694,8 @@ impl From<TimeError> for WorldError {
 pub struct World {
     pub(crate) seed: WorldSeed,
     pub(crate) date: SimDate,
+    #[serde(default)]
+    pub(crate) hour_of_day: u8,
     pub(crate) last_commercial_cycle_date: Option<SimDate>,
     pub(crate) last_firm_management_date: Option<SimDate>,
     pub(crate) last_firm_entry_date: Option<SimDate>,
@@ -809,6 +811,7 @@ impl World {
         Self {
             seed,
             date: start_date,
+            hour_of_day: 0,
             last_commercial_cycle_date: None,
             last_firm_management_date: None,
             last_firm_entry_date: None,
@@ -1073,6 +1076,11 @@ impl World {
     #[must_use]
     pub const fn date(&self) -> SimDate {
         self.date
+    }
+
+    #[must_use]
+    pub const fn hour_of_day(&self) -> u8 {
+        self.hour_of_day
     }
 
     #[must_use]
@@ -1915,6 +1923,7 @@ impl World {
         hash.write_u64(self.seed.get());
         hash.write_i32(self.date.year());
         hash.write_u16(self.date.day_of_year());
+        hash.write_u8(self.hour_of_day);
         hash.write_u64(self.goods.len() as u64);
         for (id, good) in &self.goods {
             hash.write_u32(id.get());

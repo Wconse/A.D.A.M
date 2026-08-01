@@ -71,11 +71,13 @@ Windows PowerShell:
 
 The gate checks formatting, compilation, Clippy warnings, tests, and generated documentation.
 
-A reproducible foundation-scale probe is also available:
+A reproducible fifty-year determinism and throughput probe is also available:
 
 ```bash
-cargo run --release -p adam-core --example foundation_scale -- 100000
+cargo run --release -p adam-cli -- --seed 1 --years 50 --compare-seed 2
 ```
+
+It prints the yearly chronicle, per-year timing, the stable fingerprint, and the first point where two seeds diverge.
 
 ## Non-negotiable invariants
 

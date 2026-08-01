@@ -158,6 +158,7 @@ impl World {
     /// Returns an error if crossing the calendar boundary overflows the year.
     pub fn advance_month(&mut self) -> Result<(), WorldError> {
         self.date.advance_one_month()?;
+        self.hour_of_day = 0;
         self.events.append(
             self.date,
             crate::DomainEvent::MonthAdvanced { date: self.date },
@@ -170,6 +171,41 @@ impl World {
     /// Returns the first stage error without changing authoritative state.
     pub fn execute_monthly_economic_cycle(
         &mut self,
+    ) -> Result<MonthlyEconomicCycleResult, WorldError> {
+        self.execute_monthly_economic_cycle_with_calendar_advance(true)
+    }
+
+    /// Advances one authoritative hour and settles the monthly economy at month end.
+    /// # Errors
+    /// Returns the first monthly-stage or calendar error without changing the world.
+    pub fn advance_hour(&mut self) -> Result<bool, WorldError> {
+        let mut next = self.clone();
+        let mut monthly_economy_ticked = false;
+        if next.hour_of_day < 23 {
+            next.hour_of_day += 1;
+        } else {
+            if next.date.is_last_day_of_month() {
+                next.execute_monthly_economic_cycle_with_calendar_advance(false)?;
+                monthly_economy_ticked = true;
+            }
+            next.date.advance_one_day()?;
+            next.hour_of_day = 0;
+        }
+        next.events.append(
+            next.date,
+            crate::DomainEvent::HourAdvanced {
+                date: next.date,
+                hour: next.hour_of_day,
+                monthly_economy_ticked,
+            },
+        );
+        *self = next;
+        Ok(monthly_economy_ticked)
+    }
+
+    fn execute_monthly_economic_cycle_with_calendar_advance(
+        &mut self,
+        advance_calendar: bool,
     ) -> Result<MonthlyEconomicCycleResult, WorldError> {
         let mut next = self.clone();
         let completed_date = next.date;
@@ -202,7 +238,9 @@ impl World {
                     .map_err(|_| WorldError::ArithmeticOverflow("monthly market fills"))?,
             },
         );
-        next.advance_month()?;
+        if advance_calendar {
+            next.advance_month()?;
+        }
         let result = MonthlyEconomicCycleResult {
             completed_date,
             next_date: next.date,

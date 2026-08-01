@@ -22,6 +22,7 @@ pub enum WorldCommand {
         actor: ActorId,
         program: crate::ProgramId,
     },
+    AdvanceHour,
     AdvanceMonth,
     ExecuteMonthlyEconomicCycle,
     ExecuteMonthlyCommercialCycle,
@@ -212,6 +213,7 @@ impl WorldCommand {
             Self::ExecuteGovernmentProgram { actor, program } => {
                 world.execute_government_program(*actor, *program)
             }
+            Self::AdvanceHour => world.advance_hour().map(|_| ()),
             Self::AdvanceMonth => world.advance_month(),
             Self::ExecuteMonthlyEconomicCycle => world.execute_monthly_economic_cycle().map(|_| ()),
             Self::ExecuteMonthlyCommercialCycle => {
@@ -456,6 +458,34 @@ mod tests {
         .expect("replay");
         assert_eq!(direct, replayed);
     }
+    #[test]
+    fn hourly_commands_replay_and_monthly_economy_ticks_at_boundary() {
+        let direct_start = World::new(WorldSeed::new(2), SimDate::new(2025, 31).expect("date"));
+        let mut direct = direct_start.clone();
+        let mut replayed = direct_start;
+        let commands = vec![WorldCommand::AdvanceHour; 24];
+        for command in &commands {
+            command.apply(&mut direct).expect("hour");
+        }
+        replay_commands(&mut replayed, &commands).expect("replay hours");
+        assert_eq!(direct.date(), SimDate::new(2025, 32).expect("date"));
+        assert_eq!(direct.hour_of_day(), 0);
+        let monthly_ticks = direct
+            .events()
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.event(),
+                    crate::DomainEvent::MonthlyEconomicCycleCompleted { .. }
+                )
+            })
+            .count();
+        assert_eq!(monthly_ticks, 1);
+        assert_eq!(direct, replayed);
+        assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
+    }
+
     #[test]
     fn firm_registration_is_replayable_and_atomic() {
         use crate::{

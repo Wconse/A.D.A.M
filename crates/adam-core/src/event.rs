@@ -11,6 +11,11 @@ pub enum DomainEvent {
         closed_year: i32,
         monthly_cycles: u8,
     },
+    HourAdvanced {
+        date: SimDate,
+        hour: u8,
+        monthly_economy_ticked: bool,
+    },
     MonthAdvanced {
         date: SimDate,
     },

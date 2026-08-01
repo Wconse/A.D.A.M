@@ -2,15 +2,15 @@
 
 Performance claims are accepted only with a reproducible command and representative data shape.
 
-## Foundation graph construction
+## Foundation graph construction (retired, not reproducible)
 
-Command:
+This baseline was produced by a `foundation_scale` example that no longer exists in the workspace. The command below is kept only as provenance for the recorded numbers; it will fail with `no example target named foundation_scale`. Do not cite these figures as a current measurement.
 
 ```powershell
 cargo run --release -p adam-core --example foundation_scale -- 100000
 ```
 
-Baseline on the initial Windows development machine (2026-07-21):
+Historical numbers on the initial Windows development machine (2026-07-21):
 
 - 100,000 actors;
 - 100,000 power nodes;

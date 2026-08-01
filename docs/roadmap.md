@@ -1430,4 +1430,43 @@ The simulation now spans household lifecycle transitions, durable but bounded co
 
 - Accepted the complete promise-to-consequence vertical and the first playable Bevy governing-state observatory. An end-to-end acceptance test applies a program command sequence directly and by replay, then proves equality of both authoritative fingerprints and complete graphical snapshots.
 - The full workspace release gate covers tests, warning-free Clippy, formatting, documentation, optimized compilation, and diff hygiene. ADR 0161 and `docs/release/step-100-anniversary-acceptance.md` record scope, controls, and the explicit distinction between the accepted engineering visual baseline and future final art direction.
-- **Step 100 — The Governing State Becomes Visible: COMPLETE.** `SIMULATION_VERSION` remains 94.
+- **Step 100 — The Governing State Becomes Visible: accepted on Windows only, later corrected.** `SIMULATION_VERSION` remains 94.
+- Correction: this gate was recorded as complete while `cargo check --workspace --all-targets` failed on Linux CI. The observatory enabled `bevy_winit` with Bevy default features disabled and without `x11`/`wayland`, so the workspace could not compile on the only platform CI runs. The acceptance was therefore not valid when it was written; the build fix is recorded in ADR 0169. A green cross-platform CI run is a precondition for every future completion claim.
+
+
+### Open defects confirmed by external review (not yet fixed)
+
+- **The demo economy is structurally insolvent on every seed.** Seeds 1-5 over 50 years all end at ~266-271 people with zero output. This is not stochastic variance: each firm runs a fixed monthly loss and dies exactly when its starting cash is exhausted. Northreach Bakery loses 2,500/month against 400,000 cash and stops producing after ~13 years; Southvale Bakery loses ~2,400/month against 1,500,000 cash and stops after ~52 years. Eastport is unviable from year one because it owns no grain producer and Northreach grain is fully consumed by its own bakery, so the single route has nothing to carry.
+- **Root cause is a missing fiscal circuit, not content tuning.** The 20% final-sales tax leaves firm revenue and never returns to households or firms as income or demand. With wages as the only household income, no price vector can satisfy both firm solvency (0.8*P*Q >= wages + inputs) and household solvency (wages >= P*Q) at once. A price-raising experiment confirmed this by making the collapse faster, and was reverted. The fix belongs in the core: government revenue must be spent into the economy. Balance tuning is deferred until the economic simulation is complete.
+- **Chronicle ranking is inert.** `importance` is almost always 100, so the chronicle reads as an accounting log rather than history. The prerequisite is an operational definition of a reportable event, such as deviation from expectation, rather than narrating every computed quantity.
+
+### Authoritative hourly observatory clock and visual correction
+
+- Fixed the stale upper-left date by making the header react to every authoritative snapshot refresh. It now shows day, month, year, hour, pause state, and speed.
+- Added replayable hourly world time. The client can run at 1/4/12/24/72 simulated hours per real second, pause, or single-step; crossing month end atomically settles the monthly economy before entering the next day. Program decisions remain legal between economic ticks.
+- Introduced a clearer top command bar and separate inspector, program, and political-timeline surfaces using a coherent observatory palette. ADR 0162 records the boundary and `SIMULATION_VERSION` 95.
+
+### Strategic province-map blockout
+
+- Replaced technical region rectangles with adjoining province clusters forming a continuous two-country landmass. Irregular edge tiles establish a coastline silhouette while dark province borders, a gold selected border, country-scale labels, and compact province labels establish a grand-strategy visual hierarchy.
+- Added a subdued ocean grid, land shadow, and the visible Arcadia-Borealia transport connection. Overlay colors remain authoritative presentation data; the geometry does not invent simulation adjacency.
+- ADR 0163 records the prototype boundary. Authored polygon meshes, mouse picking, terrain, rivers, and zoom-dependent detail remain future map-production work.
+
+### Interactive strategic-map command surface
+
+- Political ownership is now the default map language, with stable Arcadian and Borealian colors plus alternate confidence, population, and production modes. Province fills and borders react independently to hover and selection.
+- Added deterministic mouse hit testing, click-to-inspect, a cursor-following regional tooltip, UI occlusion, and presentation-only camera navigation. Camera controls use I/J/K/L, U/O, and R so they cannot accidentally trigger treasury, debt, execution, cancellation, or time decisions.
+- Reworked the visual hierarchy into a strategic masthead, reactive command clock, map-mode rail, contextual legend, inspector, program desk, and political timeline. The map now carries city/capital markers, terrain strokes, country labels, and a dashed strategic route.
+- ADR 0164 records the interaction boundary. The next production-level map pass should move from clustered sprites to authored shared-edge polygon meshes and zoom-dependent rendering.
+
+### Russian strategic interface and map level of detail
+
+- Converted the full graphical command surface to Russian, including time state, map modes, camera guidance, inspection, tooltips, program decisions and statuses, current demo geography, city roles, and political-timeline presentation.
+- Added authoritative country snapshots for treasury, public debt, legitimacy, and elite cohesion. The selected region now drives a state-resource strip in the strategic masthead.
+- Added zoom-dependent hierarchy: country labels for strategic scale, province labels for operational scale, and city/terrain marks for close inspection. Localization and visibility remain presentation-only. ADR 0165 records the boundary.
+
+### Clickable strategic control deck
+
+- Added visible Russian buttons for political, confidence, population, and production map modes, together with pause and 1/4/12/24/72-hour speed controls. Active, hover, and inactive states now have distinct strategic-command treatments.
+- Added a selected-country color flag and authoritative inspector bars for confidence, relative population, and relative production. Selection and snapshot changes rebuild these indicators without creating client-owned simulation values.
+- Real executable smoke launch remained stable for five seconds after the new Bevy interaction systems were installed. ADR 0166 records the boundary.

@@ -1,3 +1,25 @@
+- Fixed the Linux workspace build by explicitly enabling the `x11` and `wayland` windowing backends for the observatory, which Bevy's disabled default features had removed; corrected the Step 100 roadmap entry that claimed COMPLETE while CI was red, and pointed README/performance docs at commands that actually exist. ADR 0169.
+
+- Recorded two confirmed simulation defects as open, deliberately unfixed: the demo economy collapses to a few hundred people on every seed because the 20% final-sales tax leaves the circuit without returning to it, and chronicle `importance` is saturated at 100 so ranking does nothing.
+
+- Fixed fully invisible interface text by embedding the Cyrillic font directly in the executable instead of loading it from a manifest-relative asset path, and by applying it to every newly added text component rather than only at startup.
+
+- Replaced the rectangular province blockout with a deterministic organic province map: jittered hex lattice with shared seam-free corners, noise-generated continent and coastline, balanced contiguous country/region partitioning, terrain relief shading, layered province/coast/region/country borders, capital markers, and zoom-dependent labels.
+
+- Fixed missing-glyph squares in the Russian observatory by bundling OFL-licensed Noto Sans, applying it to every UI and world-space text entity at startup, and verifying the asset in a captured runtime smoke launch.
+
+- Added a clickable Russian strategic control deck for map modes, pause, and five time speeds, plus active/hover styling, a selected-country flag, and authoritative confidence, population, and production bars in the regional inspector.
+
+- Localized the complete Bevy command surface into Russian, including current country/region/program names and graphical chronicle summaries; added an authoritative country resource bar and zoom-dependent country, province, city, and terrain detail.
+
+- Fixed the observatory startup panic by making the inspector, map-mode, and legend text queries explicitly pairwise disjoint; added a real executable smoke launch to the verification pass.
+
+- Expanded the Bevy observatory into an interactive strategic-map command surface with a default political mode, stable country palettes, mouse hover and click selection, regional tooltips, camera pan/zoom/reset, map-mode legend rail, city/capital markers, terrain marks, and conflict-free controls.
+
+- Replaced the observatory region-card grid with a first grand-strategy province-map blockout: contiguous Arcadian and Borealian land, irregular coast silhouettes, province borders, country labels, an inter-country route, ocean grid, overlay coloring, and selected-province emphasis.
+
+- Added an authoritative replayable hourly clock, automatic monthly economic settlement at calendar boundaries, a reactive date header, pause/speed controls, and a first structured visual-panel pass for the Bevy observatory; simulation version is now 95.
+
 - Completed Step 100, “The Governing State Becomes Visible”: the authoritative government-program loop now drives a playable Bevy map, inspector, overlays, command desk, and political timeline with end-to-end replay/snapshot acceptance.
 
 - The Bevy observatory now includes a graphical political timeline sourced directly from the shared authoritative chronicle and refreshed only after accepted commands.

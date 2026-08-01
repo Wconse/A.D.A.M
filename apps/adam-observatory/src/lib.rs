@@ -8,11 +8,24 @@ use adam_core::{BasisPoints, CountryId, Money, RegionId, World};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObservatorySnapshot {
     pub date_year: i32,
-    pub date_day: u16,
+    pub date_month: u8,
+    pub date_day: u8,
+    pub date_hour: u8,
     pub fingerprint: u64,
+    pub countries: Vec<CountrySnapshot>,
     pub regions: Vec<RegionSnapshot>,
     pub programs: Vec<ProgramSnapshot>,
     pub chronicle: Vec<ChronicleSnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CountrySnapshot {
+    pub id: CountryId,
+    pub name: String,
+    pub treasury: Money,
+    pub public_debt: Money,
+    pub legitimacy: BasisPoints,
+    pub elite_cohesion: BasisPoints,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +62,21 @@ pub struct ChronicleSnapshot {
 impl ObservatorySnapshot {
     #[must_use]
     pub fn capture(world: &World) -> Self {
+        let countries = world
+            .countries()
+            .values()
+            .map(|country| {
+                let indicators = country.indicators();
+                CountrySnapshot {
+                    id: country.id(),
+                    name: country.name().to_owned(),
+                    treasury: indicators.treasury(),
+                    public_debt: indicators.public_debt(),
+                    legitimacy: indicators.legitimacy(),
+                    elite_cohesion: indicators.elite_cohesion(),
+                }
+            })
+            .collect();
         let regions = world
             .regions()
             .values()
@@ -98,8 +126,11 @@ impl ObservatorySnapshot {
             .collect();
         Self {
             date_year: world.date().year(),
-            date_day: world.date().day_of_year(),
+            date_month: world.date().month(),
+            date_day: world.date().day_of_month(),
+            date_hour: world.hour_of_day(),
             fingerprint: world.stable_fingerprint(),
+            countries,
             regions,
             programs,
             chronicle,
@@ -189,6 +220,33 @@ mod tests {
             ObservatorySnapshot::capture(&replayed)
         );
         assert!(!ObservatorySnapshot::capture(&direct).chronicle.is_empty());
+    }
+
+    #[test]
+    fn hourly_snapshot_exposes_authoritative_calendar_change() {
+        let mut world = adam_content::observatory_world(17).expect("world");
+        let before = ObservatorySnapshot::capture(&world);
+        adam_core::WorldCommand::AdvanceHour
+            .apply(&mut world)
+            .expect("hour");
+        let after = ObservatorySnapshot::capture(&world);
+        assert_eq!(before.date_hour, 0);
+        assert_eq!(after.date_hour, 1);
+        assert_ne!(before.fingerprint, after.fingerprint);
+    }
+
+    #[test]
+    fn country_command_bar_snapshot_is_authoritative() {
+        let world = adam_content::observatory_world(23).expect("world");
+        let snapshot = ObservatorySnapshot::capture(&world);
+        assert_eq!(snapshot.countries.len(), world.countries().len());
+        assert_eq!(snapshot.countries[0].id, CountryId::new(1));
+        assert_eq!(
+            snapshot.countries[0].treasury,
+            world.countries()[&CountryId::new(1)]
+                .indicators()
+                .treasury()
+        );
     }
 
     #[test]

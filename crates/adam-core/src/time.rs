@@ -66,6 +66,12 @@ impl SimDate {
     }
 
     #[must_use]
+    pub fn is_last_day_of_month(self) -> bool {
+        let index = usize::from(self.month().saturating_sub(1));
+        u16::from(self.day_of_month()) == Self::MONTH_LENGTHS[index]
+    }
+
+    #[must_use]
     pub fn day_of_month(self) -> u8 {
         let mut remaining = self.day_of_year;
         for length in Self::MONTH_LENGTHS {
