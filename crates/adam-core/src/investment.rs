@@ -1,4 +1,6 @@
-use crate::{DomainEvent, FirmId, Money, ProjectId, RegionId, World, WorldError};
+use crate::{
+    ActorId, CorporateAction, DomainEvent, FirmId, Money, ProjectId, RegionId, World, WorldError,
+};
 use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum InvestmentStatus {
@@ -113,6 +115,29 @@ impl InvestmentProject {
     }
 }
 impl World {
+    /// Commits firm cash to future capacity under investment-scoped authority.
+    ///
+    /// The money leaves the firm's balance the moment the works are ordered,
+    /// which is what makes an expansion a real decision with a real cost.
+    ///
+    /// # Errors
+    /// Returns an authority, unknown-firm, or insufficient-cash error without mutation.
+    pub fn commit_firm_investment(
+        &mut self,
+        actor: ActorId,
+        firm: FirmId,
+        amount: Money,
+    ) -> Result<(), WorldError> {
+        if !self.firms().contains_key(&firm) {
+            return Err(WorldError::UnknownFirm(firm));
+        }
+        if !self.can_perform_corporate_action(actor, firm, CorporateAction::ProposeMajorInvestment)
+        {
+            return Err(WorldError::UnauthorizedFirmControl { actor, firm });
+        }
+        self.execute_investment_commitment(firm, amount)
+    }
+
     /// Launches a project using previously committed firm investment funds.
     /// # Errors
     /// Returns an error for duplicates, unknown references, or insufficient commitment.

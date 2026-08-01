@@ -113,6 +113,11 @@ pub enum WorldCommand {
         shipment: ShipmentId,
         days: u32,
     },
+    CommitFirmInvestment {
+        actor: ActorId,
+        firm: FirmId,
+        amount: crate::Money,
+    },
     LaunchInvestmentProject(InvestmentProject),
     AdvanceInvestmentProject(ProjectId),
     ProposeBoardResolution(BoardResolution),
@@ -326,6 +331,11 @@ impl WorldCommand {
             Self::AdvanceInventoryShipment { shipment, days } => {
                 world.advance_inventory_shipment(*shipment, *days)
             }
+            Self::CommitFirmInvestment {
+                actor,
+                firm,
+                amount,
+            } => world.commit_firm_investment(*actor, *firm, *amount),
             Self::LaunchInvestmentProject(project) => {
                 world.launch_investment_project(project.clone())
             }

@@ -662,6 +662,48 @@ fn lean_bakery_world() -> World {
     world
 }
 
+/// Capacity is bought, not wished for. Both firms in this chain run at a cash
+/// loss on every batch, so no amount of hunger in the market justifies paying
+/// builders to make more of a losing product.
+#[test]
+fn a_loss_making_firm_refuses_to_buy_capacity() {
+    let mut world = production_chain_world();
+    let opening_capacity = world.firms()[&FirmId::new(FARM)].capacity_batches();
+
+    world.advance_economic_year().expect("economic year");
+
+    let proposals = world
+        .plan_observed_production_adjustments()
+        .expect("proposals");
+    assert!(
+        proposals.iter().all(|proposal| proposal
+            .expected_operating_cash_margin
+            .is_some_and(|margin| margin.minor_units() < 0)),
+        "this chain is expected to run at a loss: {proposals:?}"
+    );
+
+    let launched: u64 = world
+        .events()
+        .events()
+        .iter()
+        .filter_map(|envelope| match envelope.event() {
+            DomainEvent::ObservedCapacityInvestmentCompleted {
+                projects_launched, ..
+            } => Some(*projects_launched),
+            _ => None,
+        })
+        .sum();
+    assert_eq!(
+        launched, 0,
+        "nobody spends cash to install capacity for a product that loses money"
+    );
+    assert_eq!(
+        world.firms()[&FirmId::new(FARM)].capacity_batches(),
+        opening_capacity,
+        "capacity cannot grow without somebody paying for it"
+    );
+}
+
 #[test]
 fn inventory_investment_is_valued_at_observed_prices_not_reference_prices() {
     let mut world = lean_bakery_world();

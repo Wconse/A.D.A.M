@@ -3,6 +3,7 @@
 pub mod accounting;
 pub mod board;
 pub mod business;
+pub mod capacity_investment;
 pub mod chronicle;
 pub mod cohort;
 pub mod command;
@@ -51,6 +52,7 @@ pub use accounting::{
 };
 pub use board::{BoardMandate, BoardResolution, BoardVote, ResolutionStatus};
 pub use business::{CorporateAction, CorporateRole, FirmAppointment, FirmPolicy, OwnershipStake};
+pub use capacity_investment::CapacityInvestmentDecision;
 pub use chronicle::ChronicleEntry;
 pub use cohort::{
     AgeBand, EducationLevel, EmploymentStatus, HouseholdCashflow, HouseholdCohort, HouseholdType,
@@ -140,4 +142,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 98;
+pub const SIMULATION_VERSION: u32 = 99;

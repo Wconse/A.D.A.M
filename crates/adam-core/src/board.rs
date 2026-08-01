@@ -351,7 +351,7 @@ impl World {
             .append(self.date, DomainEvent::DividendPaid { firm, amount });
         Ok(())
     }
-    fn execute_investment_commitment(
+    pub(crate) fn execute_investment_commitment(
         &mut self,
         firm: FirmId,
         amount: Money,

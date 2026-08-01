@@ -34,6 +34,7 @@ pub struct MonthlyEconomicCycleResult {
     pub firm_entries: Vec<FirmEntryDecision>,
     pub labor_matches: Vec<EmploymentMatch>,
     pub management_decisions: Vec<FirmManagementDecision>,
+    pub capacity_investments: Vec<crate::CapacityInvestmentDecision>,
     pub credit_decisions: Vec<AutonomousFirmCreditDecision>,
     pub emergency_relief: Vec<EmergencyReliefPayment>,
 }
@@ -222,6 +223,7 @@ impl World {
         let firm_entries = next.execute_observed_firm_entry()?;
         let labor_matches = next.execute_observed_labor_matching()?;
         let management_decisions = next.execute_observed_firm_management()?;
+        let capacity_investments = next.execute_observed_capacity_investment()?;
         let credit_decisions = next.execute_observed_firm_credit_market()?;
         next.derive_monthly_social_stress()?;
         next.update_monthly_cohort_health()?;
@@ -254,6 +256,7 @@ impl World {
             firm_entries,
             labor_matches,
             management_decisions,
+            capacity_investments,
             credit_decisions,
             emergency_relief,
         };

@@ -225,7 +225,7 @@ impl World {
     /// households directly as building income. This is what keeps the circuit
     /// closed on the investment side: founding capital changes hands instead of
     /// vanishing from the world, exactly as ADR 0170 did for taxation.
-    fn distribute_capital_outlay(
+    pub(crate) fn distribute_capital_outlay(
         &mut self,
         firm: FirmId,
         region: RegionId,
@@ -520,7 +520,7 @@ fn startup_policy() -> Result<FirmPolicy, WorldError> {
     )
 }
 
-fn quantity_value(price: Money, quantity: QuantityMilli) -> Result<Money, WorldError> {
+pub(crate) fn quantity_value(price: Money, quantity: QuantityMilli) -> Result<Money, WorldError> {
     let value = i128::from(price.minor_units())
         .checked_mul(i128::from(quantity.get()))
         .ok_or(WorldError::ArithmeticOverflow("startup quantity value"))?

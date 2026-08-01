@@ -572,6 +572,11 @@ pub enum DomainEvent {
         cohort: CohortId,
         amount: Money,
     },
+    /// One monthly review of whether sold-out firms bought more capacity.
+    ObservedCapacityInvestmentCompleted {
+        firms_reviewed: u64,
+        projects_launched: u64,
+    },
     /// Capital spending on productive capacity arriving as household income.
     /// Somebody builds the works and is paid for it, so founding capital
     /// changes hands instead of vanishing from the world.
