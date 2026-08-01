@@ -572,6 +572,14 @@ pub enum DomainEvent {
         cohort: CohortId,
         amount: Money,
     },
+    /// Capital spending on productive capacity arriving as household income.
+    /// Somebody builds the works and is paid for it, so founding capital
+    /// changes hands instead of vanishing from the world.
+    CapitalOutlayDistributed {
+        firm: FirmId,
+        cohort: CohortId,
+        amount: Money,
+    },
     PublicDebtInterestCharged {
         country: CountryId,
         opening_debt: Money,

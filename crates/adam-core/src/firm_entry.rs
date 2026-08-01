@@ -193,6 +193,7 @@ impl World {
             plan.working_capital,
             BTreeMap::new(),
         )?)?;
+        next.distribute_capital_outlay(plan.firm, plan.region, plan.capital_cost)?;
         next.register_ownership_stake(OwnershipStake::new(
             plan.firm,
             plan.founder,
@@ -215,6 +216,95 @@ impl World {
         next.record_firm_founded_event(plan, recipe.output_good());
         *self = next;
         Ok(())
+    }
+
+    /// Pays capital spending to the households that build the works.
+    ///
+    /// Construction firms and equipment makers are not modelled as separate
+    /// counterparties yet, so the capital cost of new capacity reaches local
+    /// households directly as building income. This is what keeps the circuit
+    /// closed on the investment side: founding capital changes hands instead of
+    /// vanishing from the world, exactly as ADR 0170 did for taxation.
+    fn distribute_capital_outlay(
+        &mut self,
+        firm: FirmId,
+        region: RegionId,
+        amount: Money,
+    ) -> Result<(), WorldError> {
+        let shares = self.plan_regional_capital_shares(region, amount);
+        if shares.is_empty() {
+            return Err(WorldError::InvalidProduction(
+                "capital spending needs local households to build the works",
+            ));
+        }
+        for (cohort, share) in shares {
+            self.cohorts
+                .get_mut(&cohort)
+                .ok_or(WorldError::UnknownCohort(cohort))?
+                .credit_wealth(share)?;
+            self.events.append(
+                self.date,
+                DomainEvent::CapitalOutlayDistributed {
+                    firm,
+                    cohort,
+                    amount: share,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Splits capital spending across a region's cohorts by population with the
+    /// largest-remainder method, so the paid total equals the spent total to the
+    /// minor unit and no money is created or destroyed in the split.
+    fn plan_regional_capital_shares(
+        &self,
+        region: RegionId,
+        amount: Money,
+    ) -> Vec<(CohortId, Money)> {
+        let total = u128::try_from(amount.minor_units().max(0)).unwrap_or_default();
+        if total == 0 {
+            return Vec::new();
+        }
+        let mut rows: Vec<(CohortId, u128, u128)> = Vec::new();
+        let mut population = 0_u128;
+        for cohort in self.cohorts.values() {
+            let people = u128::from(cohort.people().people());
+            if cohort.region() == region && people > 0 {
+                population += people;
+                rows.push((cohort.id(), people, 0));
+            }
+        }
+        if population == 0 {
+            return Vec::new();
+        }
+        let mut assigned = 0_u128;
+        for row in &mut rows {
+            let numerator = total * row.1;
+            row.1 = numerator / population;
+            row.2 = numerator % population;
+            assigned += row.1;
+        }
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        order.sort_by(|&first, &second| {
+            rows[second]
+                .2
+                .cmp(&rows[first].2)
+                .then_with(|| rows[first].0.cmp(&rows[second].0))
+        });
+        let leftover = usize::try_from(total - assigned).unwrap_or_default();
+        for index in order.into_iter().take(leftover) {
+            rows[index].1 += 1;
+        }
+        rows.into_iter()
+            .filter(|row| row.1 > 0)
+            .map(|(id, share, _)| {
+                (
+                    id,
+                    Money::from_minor_units(i64::try_from(share).unwrap_or(i64::MAX)),
+                )
+            })
+            .collect()
     }
 
     fn record_firm_founded_event(&mut self, plan: FirmFoundingPlan, good: GoodId) {
@@ -599,6 +689,37 @@ mod tests {
                 && *capital_cost == Money::from_minor_units(20)
                 && *working_capital == Money::from_minor_units(3)
         )));
+    }
+
+    #[test]
+    fn founding_capital_is_paid_to_the_households_that_build_the_works() {
+        let mut world = entry_world(100);
+        for _ in 0..2 {
+            world.execute_observed_firm_entry().expect("entry review");
+            world.advance_month().expect("month");
+        }
+        world
+            .execute_observed_firm_entry()
+            .expect("third entry review");
+
+        let paid: i64 = world
+            .events()
+            .events()
+            .iter()
+            .filter_map(|envelope| match envelope.event() {
+                DomainEvent::CapitalOutlayDistributed { firm, amount, .. }
+                    if *firm == FirmId::new(1) =>
+                {
+                    Some(amount.minor_units())
+                }
+                _ => None,
+            })
+            .sum();
+
+        assert_eq!(
+            paid, 20,
+            "every minor unit of founding capital must reach the builders instead of vanishing"
+        );
     }
 
     #[test]
