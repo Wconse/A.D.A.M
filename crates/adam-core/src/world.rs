@@ -759,6 +759,12 @@ pub struct World {
     pub(crate) route_operating_costs: BTreeMap<RouteId, RouteOperatingCost>,
     pub(crate) consumption_profiles: BTreeMap<NeedProfileId, ConsumptionProfile>,
     pub(crate) regional_prices: BTreeMap<(RegionId, GoodId), Money>,
+    /// Fractional price movement carried between months, in thousandths of a minor unit.
+    ///
+    /// Reference prices are whole minor units, so a bounded monthly move of a cheap
+    /// good rounds to nothing. Carrying the remainder lets a slow pressure express
+    /// itself after several months instead of forcing a one-unit jump every month.
+    pub(crate) regional_price_carry: BTreeMap<(RegionId, GoodId), i64>,
     pub(crate) regional_public_services: BTreeMap<RegionId, crate::RegionalPublicServices>,
     pub(crate) regional_social_pressure: BTreeMap<RegionId, crate::RegionalSocialPressure>,
     pub(crate) regional_interests: BTreeMap<RegionId, crate::RegionalInterest>,
@@ -870,6 +876,7 @@ impl World {
             route_operating_costs: BTreeMap::new(),
             consumption_profiles: BTreeMap::new(),
             regional_prices: BTreeMap::new(),
+            regional_price_carry: BTreeMap::new(),
             regional_public_services: BTreeMap::new(),
             regional_social_pressure: BTreeMap::new(),
             regional_interests: BTreeMap::new(),
@@ -1985,6 +1992,12 @@ impl World {
             hash.write_u32(region.get());
             hash.write_u32(good.get());
             hash.write_i64(price.minor_units());
+        }
+        hash.write_u64(self.regional_price_carry.len() as u64);
+        for ((region, good), carry) in &self.regional_price_carry {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_i64(*carry);
         }
         hash.write_u64(self.government_emergency_policies.len() as u64);
         for (country, policy) in &self.government_emergency_policies {

@@ -27,6 +27,7 @@ pub mod market;
 pub mod migration;
 pub mod observation;
 pub mod political_economy;
+pub mod pricing;
 pub mod procurement;
 pub mod production;
 pub mod public_reserve;
@@ -104,6 +105,7 @@ pub use market::{
 pub use migration::HouseholdMigration;
 pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
 pub use political_economy::RegionalSocialPressure;
+pub use pricing::{ObservedMarketPressure, RegionalPriceAdjustment};
 pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};
 pub use production::{
     Firm, ProductionAdjustmentProposal, ProductionInput, ProductionPlan, ProductionRecipe,
@@ -138,4 +140,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 96;
+pub const SIMULATION_VERSION: u32 = 97;

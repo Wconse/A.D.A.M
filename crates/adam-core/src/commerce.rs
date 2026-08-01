@@ -115,6 +115,7 @@ impl World {
         for firm in firms {
             next.capture_monthly_firm_observation(firm)?;
         }
+        next.execute_monthly_price_formation()?;
         next.reset_monthly_firm_accounts();
         next.last_commercial_cycle_date = Some(next.date);
         let production_batches = production_plans.iter().try_fold(0_u64, |sum, plan| {

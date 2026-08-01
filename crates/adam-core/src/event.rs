@@ -343,6 +343,18 @@ pub enum DomainEvent {
         liability: Money,
         paid: Money,
     },
+    RegionalPriceAdjusted {
+        region: RegionId,
+        good: GoodId,
+        previous: Money,
+        price: Money,
+        offered: QuantityMilli,
+        sold: QuantityMilli,
+        unsold: QuantityMilli,
+        unmet_demand: QuantityMilli,
+        cost_floor: Money,
+        floor_binding: bool,
+    },
     FirmProcurementTrade {
         buyer: FirmId,
         seller: FirmId,

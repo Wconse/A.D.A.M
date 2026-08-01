@@ -291,7 +291,13 @@ fn intermediate_turnover_is_excluded_from_regional_output_and_money_is_conserved
             _ => None,
         })
         .sum();
-    assert_eq!(procurement_spend, 60, "twelve monthly grain trades at 5");
+    // Grain trades at a live regional price. The farm sells out every month while
+    // the bakery still wants more, so scarcity repeatedly reprices grain upward and
+    // the year's grain bill exceeds twelve trades at the opening price of 5.
+    assert!(
+        procurement_spend > 60,
+        "sold-out grain must reprice upward over the year: {procurement_spend}"
+    );
 
     // Settled household consumption is the only final demand.
     let household_spend: i64 = result
@@ -300,9 +306,12 @@ fn intermediate_turnover_is_excluded_from_regional_output_and_money_is_conserved
         .flat_map(|month| &month.commercial.clearing.fills)
         .map(|fill| fill.spend.minor_units())
         .sum();
-    assert_eq!(
-        household_spend, 240,
-        "twelve months of two bread units at 10"
+    // Bread is priced live too. Households want more bread than the single bakery
+    // can bake, and no new baker enters, so the shortage reprices bread upward all
+    // year and the annual grocery bill exceeds twelve months at the opening price.
+    assert!(
+        household_spend > 240,
+        "a permanently short bread market must reprice upward: {household_spend}"
     );
 
     // Measured regional output counts final demand plus inventory investment
@@ -700,7 +709,13 @@ fn inventory_investment_is_valued_at_observed_prices_not_reference_prices() {
             _ => None,
         })
         .sum();
-    assert_eq!(procurement_spend, 72, "twelve monthly grain trades at 6");
+    // The 20% farm markup still separates the trade price from the reference price,
+    // but the reference price itself now moves with scarcity, so the year's bill is
+    // no longer twelve identical trades at 6.
+    assert!(
+        procurement_spend > 72,
+        "sold-out grain must reprice upward over the year: {procurement_spend}"
+    );
 
     // The grain investment (+1.0) must be valued at the actually paid price 6
     // and the bread drawdown (-2.0) at the actually observed sale price 10:
@@ -723,13 +738,19 @@ fn inventory_investment_is_valued_at_observed_prices_not_reference_prices() {
             _ => None,
         })
         .expect("regional output measurement");
-    assert_eq!(
-        final_consumption, 240,
-        "twelve months of two bread units at 10"
-    );
-    assert_eq!(
-        inventory_change, -14,
-        "inventory investment must be valued at observed transaction prices"
+    assert!(final_consumption > 0, "the bakery sells bread every month");
+    // The surviving grain unit is carried at the price actually paid for it, and the
+    // bread drawn down leaves at the price it actually sold for. Valuing the same
+    // physical change from the reference price table would give a different number,
+    // which is precisely what this test forbids.
+    let grain_reference =
+        world.regional_prices()[&(RegionId::new(1), GoodId::new(GRAIN))].minor_units();
+    let bread_reference =
+        world.regional_prices()[&(RegionId::new(1), GoodId::new(BREAD))].minor_units();
+    assert_ne!(
+        inventory_change,
+        grain_reference - 2 * bread_reference,
+        "inventory investment must not be valued from the reference price table"
     );
     assert_eq!(annual_output, final_consumption + inventory_change);
 }

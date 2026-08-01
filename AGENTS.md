@@ -25,6 +25,28 @@ Build Stage 0 first: a deterministic headless world whose fifty-year chronicle i
 - Institutional resistance must be represented by actual authority, approval, influence, enforcement, or execution systems. UI and AI may advise against a decision, but they must not silently veto an otherwise executable command.
 - Numeric bounds needed for deterministic arithmetic and persistence are valid technical invariants; they must not be disguised gameplay restrictions on agency.
 
+## No unowned constraints
+
+Every limit in the economy must name the party that pays for it. A constraint is
+admissible only when some modelled actor bears a concrete cost -- money, health,
+reputation, forgone profit, or a broken contract -- for the limit being observed.
+If nobody pays, the limit is magic and must be deleted rather than tuned.
+
+- Before adding a bound, answer in a comment: who is holding this line, and what
+  does it cost them? A bound whose comment cannot answer that does not ship.
+- A magic bound is worse than the instability it hides, because it conceals the
+  unfinished loop that produced the instability. A price ceiling hides a missing
+  supply response; a population growth cap hides births modelled as a rate rather
+  than a process. Fix the loop, do not clamp the symptom.
+- Reality is not the test of correctness. When output diverges from life, the
+  first hypothesis is an unfinished causal loop, not a wrong rule. Never restore
+  plausible-looking numbers by bounding a rule that is itself sound.
+- Legitimate exceptions are the domain of a type (a share cannot exceed one), the
+  discreteness of a unit (currency and people are integers), and a division guard.
+  These are arithmetic, not economics, and must be commented as such.
+- Elasticities and sensitivities are behaviour, not bounds. Tuning how strongly an
+  actor responds is allowed; forbidding the response from being large is not.
+
 ## Architecture boundaries
 
 - `crates/adam-core`: domain state, commands, systems, events, simulation time, deterministic RNG.
