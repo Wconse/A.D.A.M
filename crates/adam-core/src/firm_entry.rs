@@ -257,7 +257,7 @@ impl World {
     /// Splits capital spending across a region's cohorts by population with the
     /// largest-remainder method, so the paid total equals the spent total to the
     /// minor unit and no money is created or destroyed in the split.
-    fn plan_regional_capital_shares(
+    pub(crate) fn plan_regional_capital_shares(
         &self,
         region: RegionId,
         amount: Money,

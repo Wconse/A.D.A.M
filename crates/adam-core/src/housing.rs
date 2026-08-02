@@ -199,6 +199,15 @@ impl crate::World {
             if treasury.minor_units() < cost.minor_units() {
                 continue;
             }
+            // Dwellings are built by people, and those people are paid. Until
+            // now the treasury was debited and nobody was credited, so the money
+            // simply left the world - the same leak ADR 0170 closed for taxation
+            // and ADR 0172 closed for capital works. A region with no households
+            // has nobody to do the building, so no project starts there.
+            let shares = self.plan_regional_capital_shares(region, cost);
+            if shares.is_empty() {
+                continue;
+            }
             self.countries
                 .get_mut(&country)
                 .expect("housing country exists")
@@ -206,6 +215,21 @@ impl crate::World {
                 .set_treasury(Money::from_minor_units(
                     treasury.minor_units() - cost.minor_units(),
                 ));
+            for (cohort, share) in shares {
+                self.cohorts
+                    .get_mut(&cohort)
+                    .expect("regional cohort exists")
+                    .credit_wealth(share)
+                    .expect("building income fits in the cohort's wealth");
+                self.events.append(
+                    date,
+                    DomainEvent::HousingOutlayDistributed {
+                        region,
+                        cohort,
+                        amount: share,
+                    },
+                );
+            }
             self.regional_housing
                 .get_mut(&region)
                 .expect("housing market exists")
@@ -335,6 +359,34 @@ mod tests {
         assert_eq!(completed.dwelling_capacity(), 6);
         assert_eq!(completed.public_capital(), Money::from_minor_units(120));
         assert!(completed.construction().is_none());
+    }
+
+    #[test]
+    fn building_money_reaches_the_households_that_build() {
+        let mut world = pressured_world(1_000);
+        let opening_wealth = world.cohorts[&CohortId::new(1)].liquid_wealth();
+        let opening_treasury = world.countries[&CountryId::new(1)].indicators().treasury();
+        world.execute_annual_housing_investment(world.date());
+
+        let closing_wealth = world.cohorts[&CohortId::new(1)].liquid_wealth();
+        let closing_treasury = world.countries[&CountryId::new(1)].indicators().treasury();
+        let spent = opening_treasury.minor_units() - closing_treasury.minor_units();
+        assert_eq!(spent, 120, "the project was funded");
+        assert_eq!(
+            closing_wealth.minor_units() - opening_wealth.minor_units(),
+            spent,
+            "every unit the treasury spent on building was earned by a builder"
+        );
+        let paid: i64 = world
+            .events
+            .events()
+            .iter()
+            .filter_map(|envelope| match envelope.event() {
+                DomainEvent::HousingOutlayDistributed { amount, .. } => Some(amount.minor_units()),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(paid, spent, "the payment is reported, not silent");
     }
 
     #[test]

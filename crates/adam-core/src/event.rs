@@ -808,6 +808,11 @@ pub enum DomainEvent {
         service_advantage_basis_points: i16,
         destination_housing_pressure_basis_points: u16,
     },
+    HousingOutlayDistributed {
+        region: RegionId,
+        cohort: CohortId,
+        amount: Money,
+    },
     RegionalHousingConstructionStarted {
         region: RegionId,
         dwellings: u64,
