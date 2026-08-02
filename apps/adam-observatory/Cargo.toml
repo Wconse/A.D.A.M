@@ -32,10 +32,17 @@ features = [
 # Bevy's default features are disabled above, so `bevy_winit` ships without a
 # Linux windowing backend unless one is requested explicitly. Without this the
 # workspace fails to compile on Linux CI with `no PlatformIcon in platform_impl`.
+#
+# X11 only, deliberately. The game targets Windows; Linux is compiled solely
+# because CI runs on Ubuntu. Adding `wayland` pulls `wayland-protocols`, which
+# requires rustc 1.86 and would break the pinned 1.85.0 toolchain before CI ever
+# reaches our own code. Raising the toolchain for a windowing backend we do not
+# ship would be paying a real cost for nothing. Revisit if Linux becomes a
+# supported target.
 [target.'cfg(target_os = "linux")'.dependencies.bevy]
 version = "0.16.1"
 default-features = false
-features = ["x11", "wayland"]
+features = ["x11"]
 
 [lints]
 workspace = true
