@@ -221,6 +221,7 @@ impl World {
         let household_borrowing = next.execute_monthly_household_coping()?;
         let commercial = next.execute_monthly_commercial_cycle()?;
         let firm_entries = next.execute_observed_firm_entry()?;
+        next.execute_observed_labor_shedding()?;
         let labor_matches = next.execute_observed_labor_matching()?;
         let management_decisions = next.execute_observed_firm_management()?;
         let capacity_investments = next.execute_observed_capacity_investment()?;

@@ -321,10 +321,26 @@ fn treasury_and_debt_close_against_revenue_and_spending() {
     let closing = world.countries()[&CountryId::new(1)].indicators();
 
     let (revenue, spending) = fiscal_closure(&world);
+    // The annual closure is not the only claim on the treasury. Reserve
+    // purchases pay a firm out of the same purse, and housing construction is
+    // committed straight out of it. Leaving these out would not protect the
+    // circuit, it would only hide channels that already move money.
+    let side_channels: i64 = world
+        .events()
+        .events()
+        .iter()
+        .filter_map(|envelope| match envelope.event() {
+            DomainEvent::GovernmentReserveProcured { cost, .. } => Some(cost.minor_units()),
+            DomainEvent::RegionalHousingConstructionStarted { committed_cost, .. } => {
+                Some(committed_cost.minor_units())
+            }
+            _ => None,
+        })
+        .sum();
     assert_eq!(
         (closing.treasury().minor_units() - opening_treasury)
             - (closing.public_debt().minor_units() - opening_debt),
-        revenue - spending,
+        revenue - spending - side_channels,
         "the closure may borrow or save, but it may not invent money"
     );
 }

@@ -105,6 +105,16 @@ pub struct PayrollRecord {
     pub arrears: Money,
 }
 
+/// Employment ended because the agreed wage outran the value of the work.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UnprofitableEmploymentRelease {
+    pub firm: FirmId,
+    pub cohort: CohortId,
+    pub workers_released: u64,
+    pub wage: Money,
+    pub value_ceiling: Money,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EmploymentMatch {
     pub firm: FirmId,
@@ -1255,6 +1265,85 @@ impl World {
             .map(|(id, _)| *id)
     }
 
+    /// Ends employment whose agreed wage outruns the value of the work bought.
+    ///
+    /// Refusing a bad hire only closes the loop for hires yet to be made. A firm
+    /// already carrying such an agreement kept paying it until its cash was gone,
+    /// which is why the demo economy bled to a halt instead of correcting itself.
+    /// The arithmetic that governs a new hire now governs a standing one.
+    ///
+    /// The bound is owned on both sides: the firm pays in cash every month it
+    /// keeps the agreement, and the released worker pays by losing the income.
+    /// Wage arrears already owed survive the release.
+    ///
+    /// # Errors
+    /// Returns an error atomically for duplicate monthly execution or an invalid
+    /// worker change.
+    pub fn execute_observed_labor_shedding(
+        &mut self,
+    ) -> Result<Vec<UnprofitableEmploymentRelease>, WorldError> {
+        if self.last_labor_shedding_date == Some(self.date) {
+            return Err(WorldError::MonthlyStageAlreadyExecuted {
+                stage: "observed labor shedding",
+                date: self.date,
+            });
+        }
+        let mut planned = Vec::new();
+        for ((firm, cohort), agreement) in &self.employment_agreements {
+            if !agreement.active() || agreement.workers() == 0 {
+                continue;
+            }
+            let Some(ceiling) = self.labor_value_ceiling(*firm)? else {
+                continue;
+            };
+            if agreement.wage().minor_units() <= ceiling.minor_units() {
+                continue;
+            }
+            // Ending a standing agreement is not free the way declining a new
+            // hire is: the employer loses a worker it already trained and must
+            // court one again. So an employer that can still pay keeps paying,
+            // and it is the cash it burns doing so that carries the cost of
+            // waiting for the price to come back. Only once the wage has gone
+            // unpaid - once the worker is the one financing the loss - does the
+            // arithmetic settle the question.
+            if agreement.arrears().minor_units() == 0 {
+                continue;
+            }
+            planned.push((
+                *firm,
+                *cohort,
+                agreement.workers(),
+                agreement.wage(),
+                ceiling,
+            ));
+        }
+        let mut next = self.clone();
+        let mut releases = Vec::new();
+        for (firm, cohort, workers, wage, value_ceiling) in planned {
+            next.change_employment_workers(firm, cohort, 0)?;
+            next.events.append(
+                next.date,
+                crate::DomainEvent::EmploymentEndedAsUnprofitable {
+                    firm,
+                    cohort,
+                    workers_released: workers,
+                    wage,
+                    value_ceiling,
+                },
+            );
+            releases.push(UnprofitableEmploymentRelease {
+                firm,
+                cohort,
+                workers_released: workers,
+                wage,
+                value_ceiling,
+            });
+        }
+        next.last_labor_shedding_date = Some(next.date);
+        *self = next;
+        Ok(releases)
+    }
+
     /// The most a firm can pay a worker each month before the hire loses money.
     ///
     /// A worker is worth what the batches they staff can fetch, net of the
@@ -1660,6 +1749,141 @@ mod tests {
             world.firm_production_targets.insert(FirmId::new(id), 1);
         }
         world
+    }
+
+    #[test]
+    fn a_standing_agreement_ends_once_the_wage_outruns_the_work() {
+        let mut world = labor_market_world();
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(3_000),
+            )
+            .expect("observed price");
+        let matches = world
+            .execute_observed_labor_matching()
+            .expect("labor matching");
+        assert_eq!(matches.len(), 1, "the worker is hired while the work pays");
+        let hired = matches[0];
+        assert_eq!(
+            world.employment_agreements[&(hired.firm, hired.cohort)].workers(),
+            1
+        );
+
+        // The price of grain collapses; the same wage now buys work worth far less.
+        world
+            .set_regional_price(RegionId::new(1), GoodId::new(1), Money::from_minor_units(1))
+            .expect("observed price");
+        // A loss alone does not end the agreement: the employer pays out of its
+        // own till for as long as the till holds. Empty it, and the next payroll
+        // leaves the wage unpaid.
+        let till = world.firms[&hired.firm].cash();
+        world
+            .firms
+            .get_mut(&hired.firm)
+            .expect("hired firm")
+            .apply_cash_delta(Money::from_minor_units(-till.minor_units()))
+            .expect("drain the till");
+        world.execute_monthly_payroll().expect("payroll");
+        assert!(
+            world.employment_agreements[&(hired.firm, hired.cohort)]
+                .arrears()
+                .minor_units()
+                > 0,
+            "the worker is now the one financing the loss"
+        );
+        let releases = world
+            .execute_observed_labor_shedding()
+            .expect("labor shedding");
+        assert_eq!(
+            releases.len(),
+            1,
+            "a firm must not keep paying a wage the work cannot earn back"
+        );
+        assert_eq!(releases[0].workers_released, 1);
+        assert_eq!(releases[0].firm, hired.firm);
+        assert_eq!(
+            world.employment_agreements[&(hired.firm, hired.cohort)].workers(),
+            0,
+            "the agreement is stood down rather than left bleeding cash"
+        );
+        assert!(
+            world
+                .execute_observed_labor_shedding()
+                .is_err_and(|error| matches!(
+                    error,
+                    WorldError::MonthlyStageAlreadyExecuted { .. }
+                )),
+            "the stage runs once a month"
+        );
+    }
+
+    #[test]
+    fn a_loss_making_agreement_survives_while_the_employer_still_pays() {
+        let mut world = labor_market_world();
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(3_000),
+            )
+            .expect("observed price");
+        let matches = world
+            .execute_observed_labor_matching()
+            .expect("labor matching");
+        let hired = matches[0];
+
+        // The work is now worth far less than the wage, but the till is full and
+        // the employer meets payroll out of it. Waiting costs the employer real
+        // cash, and that cost is what buys the worker's job another month.
+        world
+            .set_regional_price(RegionId::new(1), GoodId::new(1), Money::from_minor_units(1))
+            .expect("observed price");
+        world.execute_monthly_payroll().expect("payroll");
+        assert_eq!(
+            world.employment_agreements[&(hired.firm, hired.cohort)].arrears(),
+            Money::default(),
+            "the wage was met in full"
+        );
+        let releases = world
+            .execute_observed_labor_shedding()
+            .expect("labor shedding");
+        assert!(
+            releases.is_empty(),
+            "an employer that can still pay is free to wait for the price to return"
+        );
+        assert_eq!(
+            world.employment_agreements[&(hired.firm, hired.cohort)].workers(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_paying_agreement_survives_the_shedding_stage() {
+        let mut world = labor_market_world();
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(3_000),
+            )
+            .expect("observed price");
+        let matches = world
+            .execute_observed_labor_matching()
+            .expect("labor matching");
+        let hired = matches[0];
+        let releases = world
+            .execute_observed_labor_shedding()
+            .expect("labor shedding");
+        assert!(
+            releases.is_empty(),
+            "work that covers its wage must not be shed"
+        );
+        assert_eq!(
+            world.employment_agreements[&(hired.firm, hired.cohort)].workers(),
+            1
+        );
     }
 
     #[test]

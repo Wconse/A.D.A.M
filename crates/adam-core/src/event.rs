@@ -666,6 +666,15 @@ pub enum DomainEvent {
         production_target: u64,
         cash_reserve: Money,
     },
+    /// Employment ended because the agreed wage outran the value of the work,
+    /// so the firm stopped paying for output it could not earn back.
+    EmploymentEndedAsUnprofitable {
+        firm: FirmId,
+        cohort: CohortId,
+        workers_released: u64,
+        wage: Money,
+        value_ceiling: Money,
+    },
     /// Authorized management reduced employment after owners could not finance persistent distress.
     FirmDownsizedForDistress {
         firm: FirmId,

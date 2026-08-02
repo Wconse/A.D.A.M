@@ -701,6 +701,7 @@ pub struct World {
     pub(crate) last_firm_entry_date: Option<SimDate>,
     pub(crate) last_capacity_investment_date: Option<SimDate>,
     pub(crate) last_labor_market_date: Option<SimDate>,
+    pub(crate) last_labor_shedding_date: Option<SimDate>,
     pub(crate) last_firm_credit_market_date: Option<SimDate>,
     pub(crate) last_government_reserve_procurement_date: Option<SimDate>,
     pub(crate) last_government_reserve_maintenance_date: Option<SimDate>,
@@ -812,6 +813,7 @@ pub struct World {
 impl World {
     /// Creates an empty world and records its founding event.
     #[must_use]
+    #[allow(clippy::too_many_lines, reason = "one flat literal of world state")]
     pub fn new(seed: WorldSeed, start_date: SimDate) -> Self {
         let mut events = EventLog::default();
         events.append(start_date, DomainEvent::WorldFounded { seed: seed.get() });
@@ -824,6 +826,7 @@ impl World {
             last_firm_entry_date: None,
             last_capacity_investment_date: None,
             last_labor_market_date: None,
+            last_labor_shedding_date: None,
             last_firm_credit_market_date: None,
             last_government_reserve_procurement_date: None,
             last_government_reserve_maintenance_date: None,
