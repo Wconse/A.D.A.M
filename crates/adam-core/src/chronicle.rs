@@ -204,6 +204,8 @@ struct YearSummary {
     firm_overdue_debt_attempts: u64,
     firm_distress_downsizings: u64,
     distress_workers_released: u64,
+    unprofitable_agreement_endings: u64,
+    unprofitable_workers_released: u64,
     firm_insolvencies: u64,
     insolvent_wage_claims_minor: i128,
     insolvent_inventory_milli: u128,
@@ -647,6 +649,15 @@ impl YearSummary {
             DomainEvent::FirmRecapitalized { amount, .. } => {
                 self.firm_recapitalizations = self.firm_recapitalizations.saturating_add(1);
                 self.firm_recapitalization_minor += i128::from(amount.minor_units());
+            }
+            DomainEvent::EmploymentEndedAsUnprofitable {
+                workers_released, ..
+            } => {
+                self.unprofitable_agreement_endings =
+                    self.unprofitable_agreement_endings.saturating_add(1);
+                self.unprofitable_workers_released = self
+                    .unprofitable_workers_released
+                    .saturating_add(*workers_released);
             }
             DomainEvent::FirmDownsizedForDistress {
                 previous_workers,
@@ -1928,6 +1939,12 @@ impl YearSummary {
             sentences.push(format!(
                 "Cashless firms released {} workers across {} distress downsizings while preserving unpaid wage claims.",
                 self.distress_workers_released, self.firm_distress_downsizings
+            ));
+        }
+        if self.unprofitable_agreement_endings > 0 {
+            sentences.push(format!(
+                "Employers ended {} standing agreements covering {} workers once the wage outran what the work was worth and the employer's own cash could no longer cover the gap.",
+                self.unprofitable_agreement_endings, self.unprofitable_workers_released
             ));
         }
         if self.firm_insolvencies > 0 {
