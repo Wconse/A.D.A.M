@@ -288,6 +288,15 @@ impl World {
             };
             let (wage, labor_market_adjustment_basis_points) =
                 self.competitive_labor_bid(firm, cohort)?;
+            // A firm walks away from a bid worth more than the work it buys.
+            // The vacancy stays open and the labor market keeps its pressure,
+            // because the firm, not the world, would pay for the bad hire.
+            if self
+                .labor_value_ceiling(firm)?
+                .is_some_and(|ceiling| wage.minor_units() > ceiling.minor_units())
+            {
+                continue;
+            }
             if definition.cash().minor_units() >= wage.minor_units() {
                 offers.push(EmploymentMatch {
                     firm,
@@ -1246,6 +1255,59 @@ impl World {
             .map(|(id, _)| *id)
     }
 
+    /// The most a firm can pay a worker each month before the hire loses money.
+    ///
+    /// A worker is worth what the batches they staff can fetch, net of the
+    /// materials those batches consume. This is the employer's side of the wage
+    /// bargain, and until now it was missing: the bid was built entirely from
+    /// what the worker used to earn and how urgently the firm wanted staff, so
+    /// nothing stopped a firm from hiring itself into permanent loss.
+    ///
+    /// Returns `None` when the good or an input has no observed local price, in
+    /// which case there is no evidence to judge the hire by.
+    fn labor_value_ceiling(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+        let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
+        let Some(recipe) = self.production_recipes.get(&definition.recipe()) else {
+            return Ok(None);
+        };
+        let region = definition.region();
+        let Some(price) = self
+            .regional_prices
+            .get(&(region, recipe.output_good()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let revenue =
+            crate::firm_entry::quantity_value(price, recipe.output_per_batch())?.minor_units();
+        let mut materials = 0_i64;
+        for input in recipe.inputs() {
+            let Some(input_price) = self.regional_prices.get(&(region, input.good())).copied()
+            else {
+                return Ok(None);
+            };
+            materials = materials
+                .checked_add(
+                    crate::firm_entry::quantity_value(input_price, input.quantity_per_batch())?
+                        .minor_units(),
+                )
+                .ok_or(WorldError::ArithmeticOverflow("labor value materials"))?;
+        }
+        let margin_per_batch = revenue.saturating_sub(materials);
+        if margin_per_batch <= 0 {
+            return Ok(Some(Money::default()));
+        }
+        let labor = recipe.labor_milli_worker_months().max(1);
+        let ceiling = i128::from(margin_per_batch)
+            .checked_mul(1_000)
+            .ok_or(WorldError::ArithmeticOverflow("labor value ceiling"))?
+            / i128::from(labor);
+        Ok(Some(Money::from_minor_units(
+            i64::try_from(ceiling)
+                .map_err(|_| WorldError::ArithmeticOverflow("labor value ceiling"))?,
+        )))
+    }
+
     fn competitive_labor_bid(
         &self,
         firm: FirmId,
@@ -1598,6 +1660,48 @@ mod tests {
             world.firm_production_targets.insert(FirmId::new(id), 1);
         }
         world
+    }
+
+    #[test]
+    fn a_firm_leaves_a_vacancy_open_when_the_bid_outruns_what_the_work_is_worth() {
+        let mut world = labor_market_world();
+        // A batch of grain fetches a single minor unit, while the going bid for
+        // a worker is built from a cohort earning 1,200 a year.
+        world
+            .set_regional_price(RegionId::new(1), GoodId::new(1), Money::from_minor_units(1))
+            .expect("observed price");
+        let matches = world
+            .execute_observed_labor_matching()
+            .expect("labor matching");
+        assert!(
+            matches.is_empty(),
+            "no firm should hire a worker who costs more than the work they produce"
+        );
+        assert_eq!(
+            world.cohorts[&CohortId::new(1)].employment(),
+            crate::EmploymentStatus::Unemployed,
+            "the worker stays unemployed rather than being hired into a loss"
+        );
+    }
+
+    #[test]
+    fn the_same_worker_is_hired_once_the_work_covers_the_wage() {
+        let mut world = labor_market_world();
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(3_000),
+            )
+            .expect("observed price");
+        let matches = world
+            .execute_observed_labor_matching()
+            .expect("labor matching");
+        assert_eq!(
+            matches.len(),
+            1,
+            "a worker worth more than the bid must still be hired"
+        );
     }
 
     #[test]
