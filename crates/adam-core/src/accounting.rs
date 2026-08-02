@@ -214,6 +214,7 @@ impl World {
         self.firm_monthly_accounts.clear();
         self.monthly_firm_market_outcomes.clear();
         self.monthly_firm_procurement_purchases.clear();
+        self.monthly_firm_input_shortfalls.clear();
     }
     /// Replaces the firm's explicit management forecast without changing physical or monetary state.
     /// # Errors

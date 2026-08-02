@@ -68,7 +68,23 @@ impl World {
                 date: self.date,
             });
         }
-        let unmet = self.current_regional_survival_shortages()?;
+        // Entry answers two kinds of hunger, not one. A household that cannot
+        // buy bread and a bakery that cannot buy grain are both a region
+        // asking for a good it does not make, and the second was invisible
+        // until now: an intermediate good is never anybody's survival need, so
+        // a permanently starved input channel could shout its price and its
+        // shortfall every month forever without a single farm being founded.
+        let mut unmet = self.current_regional_survival_shortages()?;
+        for (&(region, good), &quantity) in &self.monthly_firm_input_shortfalls {
+            if quantity.get() == 0 {
+                continue;
+            }
+            let row = unmet.entry((region, good)).or_default();
+            *row = QuantityMilli::new(row.get().checked_add(quantity.get()).ok_or(
+                WorldError::ArithmeticOverflow("regional entry shortage evidence"),
+            )?);
+        }
+        let unmet = unmet;
         let mut keys: BTreeSet<_> = self.firm_entry_pressure.keys().copied().collect();
         keys.extend(unmet.keys().copied());
         let mut next = self.clone();

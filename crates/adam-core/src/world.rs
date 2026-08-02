@@ -731,6 +731,12 @@ pub struct World {
         BTreeMap<(FirmId, crate::FirmCreditorPriority, ActorId), crate::FirmCreditOffer>,
     pub(crate) monthly_firm_procurement_purchases:
         BTreeMap<(FirmId, GoodId), (crate::QuantityMilli, Money)>,
+    /// What firms in each region asked for and could not get this month.
+    /// A shortage of an intermediate good never reaches a household need, so
+    /// without this record it is invisible to everything downstream: entry,
+    /// expansion, and the chronicle all read household demand only, and a
+    /// permanently starved input channel looks exactly like a healthy one.
+    pub(crate) monthly_firm_input_shortfalls: BTreeMap<(RegionId, GoodId), crate::QuantityMilli>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
     pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
@@ -855,6 +861,7 @@ impl World {
             firm_operating_history: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
             monthly_firm_procurement_purchases: BTreeMap::new(),
+            monthly_firm_input_shortfalls: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             regional_labor_market: BTreeMap::new(),
             regional_skill_labor_market: BTreeMap::new(),
@@ -1494,6 +1501,12 @@ impl World {
             hash.write_u32(good.get());
             hash.write_u64(quantity.get());
             hash.write_i64(spend.minor_units());
+        }
+        hash.write_u64(self.monthly_firm_input_shortfalls.len() as u64);
+        for ((region, good), quantity) in &self.monthly_firm_input_shortfalls {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
         }
         hash.write_u64(self.monthly_firm_market_outcomes.len() as u64);
         for (firm, outcomes) in &self.monthly_firm_market_outcomes {

@@ -443,6 +443,22 @@ impl World {
         }
         let recorded = self.record_procurement_fills(&settlement.fills)?;
         for (&(buyer, good), &quantity) in &settlement.unmet {
+            // Remember the shortage against the buyer's region, whatever its
+            // cause. A good nobody could deliver and a good nobody had are the
+            // same standing invitation to produce it here, and until now that
+            // invitation was thrown away the moment the event was journaled.
+            let buyer_region = self
+                .firms
+                .get(&buyer)
+                .ok_or(WorldError::UnknownFirm(buyer))?
+                .region();
+            let row = self
+                .monthly_firm_input_shortfalls
+                .entry((buyer_region, good))
+                .or_default();
+            *row = QuantityMilli::new(row.get().checked_add(quantity.get()).ok_or(
+                WorldError::ArithmeticOverflow("regional firm input shortfall"),
+            )?);
             let event = if settlement.capacity_limited.contains(&(buyer, good)) {
                 crate::DomainEvent::FirmProcurementRouteCapacityShortfall {
                     buyer,
