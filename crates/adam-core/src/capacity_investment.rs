@@ -95,10 +95,6 @@ impl World {
                 plan.capacity_batches,
             )?)
             .apply(&mut next)?;
-            // The builders are paid when the works are ordered: committed cash
-            // leaves the firm and arrives as local building income. Without
-            // this the money would sit outside every balance in the world.
-            next.distribute_capital_outlay(plan.firm, plan.region, plan.budget)?;
             decisions.push(CapacityInvestmentDecision {
                 actor: plan.actor,
                 firm: plan.firm,
@@ -122,11 +118,16 @@ impl World {
         Ok(decisions)
     }
 
-    /// Sizes one firm's expansion against observed unfilled demand and its own cash.
-    fn plan_capacity_expansion(
+    /// The expansion one firm's own trading evidence justifies, before asking
+    /// whether it can pay for it: how many batches of capacity it wants, and
+    /// what one batch of installed capacity costs to build.
+    ///
+    /// Separating the reason from the money is what lets a lender see the same
+    /// opportunity the firm sees.
+    pub(crate) fn observed_capacity_expansion_terms(
         &self,
         proposal: &ProductionAdjustmentProposal,
-    ) -> Result<Option<CapacityExpansionPlan>, WorldError> {
+    ) -> Result<Option<(u64, i64)>, WorldError> {
         let firm_id = proposal.firm;
         if self.is_firm_insolvent(firm_id) {
             return Ok(None);
@@ -188,8 +189,50 @@ impl World {
             .checked_mul(CAPACITY_VALUE_MULTIPLIER)
             .ok_or(WorldError::ArithmeticOverflow("capacity batch cost"))?
             .max(1);
-        // The only thing limiting the expansion is the firm's own money. It
-        // cannot order works it cannot pay the builders for.
+        Ok(Some((wanted, batch_cost)))
+    }
+
+    /// What one firm would have to pay to build the expansion its own trading
+    /// evidence justifies. A lender reads this the way it reads a payroll the
+    /// firm cannot meet: a real, dated obligation with a reason behind it.
+    pub(crate) fn observed_capacity_investment_need(
+        &self,
+        firm: FirmId,
+    ) -> Result<Money, WorldError> {
+        let Some(proposal) = self
+            .plan_observed_production_adjustments()?
+            .into_iter()
+            .find(|proposal| proposal.firm == firm)
+        else {
+            return Ok(Money::default());
+        };
+        let Some((wanted, batch_cost)) = self.observed_capacity_expansion_terms(&proposal)? else {
+            return Ok(Money::default());
+        };
+        let cost = i64::try_from(wanted)
+            .ok()
+            .and_then(|batches| batch_cost.checked_mul(batches))
+            .ok_or(WorldError::ArithmeticOverflow("capacity investment need"))?;
+        Ok(Money::from_minor_units(cost))
+    }
+
+    /// Sizes one firm's expansion against observed unfilled demand and the
+    /// money it can actually command.
+    fn plan_capacity_expansion(
+        &self,
+        proposal: &ProductionAdjustmentProposal,
+    ) -> Result<Option<CapacityExpansionPlan>, WorldError> {
+        let firm_id = proposal.firm;
+        let Some((wanted, batch_cost)) = self.observed_capacity_expansion_terms(proposal)? else {
+            return Ok(None);
+        };
+        let firm = self
+            .firms
+            .get(&firm_id)
+            .ok_or(WorldError::UnknownFirm(firm_id))?;
+        // The expansion is still limited by money the firm can pay builders
+        // with today - but that till now includes whatever it borrowed against
+        // this very opportunity.
         let affordable = u64::try_from(firm.cash().minor_units() / batch_cost).unwrap_or_default();
         let capacity_batches = wanted.min(affordable);
         if capacity_batches == 0 {
@@ -230,7 +273,7 @@ impl World {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::BTreeMap;
 
     use crate::{
@@ -247,7 +290,7 @@ mod tests {
 
     /// A single profitable bakery facing far more hunger than it can bake.
     #[allow(clippy::too_many_lines)]
-    fn hungry_market_world() -> World {
+    pub(crate) fn hungry_market_world() -> World {
         let mut world = World::new(WorldSeed::new(7), SimDate::new(2025, 1).expect("date"));
         world
             .register_country(Country::new(CountryId::new(1), "A").expect("country"))
@@ -338,8 +381,8 @@ mod tests {
             .register_ownership_stake(OwnershipStake::new(
                 FirmId::new(BAKERY),
                 ActorId::new(1),
-                BasisPoints::new(6_000).expect("rights"),
-                BasisPoints::new(6_000).expect("rights"),
+                BasisPoints::FULL,
+                BasisPoints::FULL,
             ))
             .expect("ownership");
         world
@@ -431,6 +474,64 @@ mod tests {
         assert!(
             building_income > 0,
             "the households that build the works must be paid for it"
+        );
+    }
+
+    #[test]
+    fn a_firm_with_no_trading_record_has_nothing_to_borrow_against() {
+        let world = hungry_market_world();
+        let need = world
+            .observed_capacity_investment_need(FirmId::new(BAKERY))
+            .expect("need");
+        assert_eq!(
+            need,
+            Money::default(),
+            "a firm that has never traded has shown no reason for anyone to fund works"
+        );
+    }
+
+    #[test]
+    fn a_thin_till_does_not_erase_the_reason_to_build() {
+        let mut world = hungry_market_world();
+        // A bakery that trades profitably but keeps almost nothing in the till:
+        // it can make payroll, never the builders.
+        world
+            .firms
+            .get_mut(&FirmId::new(BAKERY))
+            .expect("bakery")
+            .set_cash(Money::from_minor_units(150));
+        world.advance_economic_year().expect("economic year");
+
+        let till = world.firms()[&FirmId::new(BAKERY)].cash();
+        let need = world
+            .observed_capacity_investment_need(FirmId::new(BAKERY))
+            .expect("investment need");
+        let proposals = world
+            .plan_observed_production_adjustments()
+            .expect("proposals");
+        assert!(
+            need.minor_units() > 0,
+            "a firm whose market still goes unserved has a reason to build: {proposals:?}"
+        );
+        assert!(
+            need.minor_units() > till.minor_units(),
+            "the works it cannot pay for out of the till are exactly what it must borrow for: \
+             need={need:?} cash={till:?}"
+        );
+
+        // The reason is evidence about the market, not a reading of the till.
+        let rich = {
+            let mut copy = world.clone();
+            copy.firms
+                .get_mut(&FirmId::new(BAKERY))
+                .expect("bakery")
+                .set_cash(Money::from_minor_units(10_000_000));
+            copy.observed_capacity_investment_need(FirmId::new(BAKERY))
+                .expect("investment need with a full till")
+        };
+        assert_eq!(
+            need, rich,
+            "what the market justifies must not depend on what the till happens to hold"
         );
     }
 }

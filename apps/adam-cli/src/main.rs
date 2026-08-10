@@ -8,7 +8,7 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
-use adam_core::{DomainEvent, World, WorldError};
+use adam_core::{DomainEvent, FirmEntryObstacle, World, WorldError};
 
 struct Args {
     seed: u64,
@@ -110,6 +110,23 @@ struct YearStats {
     b2b_trades: u64,
     b2b_spend: i64,
     taxes_paid: i64,
+    firms_founded: u64,
+    projects_launched: u64,
+    projects_completed: u64,
+    dividends_paid: u64,
+    dividend_total: i64,
+    money_households: i64,
+    money_firms: i64,
+    money_owners: i64,
+    money_treasuries: i64,
+    money_total: i64,
+    entry_reviews: u64,
+    entry_feasible: u64,
+    entry_no_recipe: u64,
+    entry_no_worker: u64,
+    entry_raise_exceeds_value: u64,
+    entry_no_prices: u64,
+    entry_no_founder: u64,
     closure_lines: Vec<String>,
 }
 
@@ -135,7 +152,12 @@ fn render_chronicle(world: &World, args: &Args) -> String {
             );
         }
     }
-    let _ = writeln!(out, "\nfinal fingerprint: {:?}", world.stable_fingerprint());
+    let _ = writeln!(
+        out,
+        "\nmoney journal: {} settled transfers",
+        world.money_journal().len()
+    );
+    let _ = writeln!(out, "final fingerprint: {:?}", world.stable_fingerprint());
     out
 }
 
@@ -151,6 +173,46 @@ fn collect_event(out: &mut String, stats: &mut YearStats, event: &DomainEvent) {
             stats.b2b_spend += spend.minor_units();
         }
         DomainEvent::FirmSalesTaxPaid { paid, .. } => stats.taxes_paid += paid.minor_units(),
+        DomainEvent::FirmFoundedFromOpportunity { .. } => stats.firms_founded += 1,
+        DomainEvent::DividendPaid { amount, .. } => {
+            stats.dividends_paid += 1;
+            stats.dividend_total += amount.minor_units();
+        }
+        DomainEvent::MoneyStockMeasured {
+            households,
+            firms,
+            owners,
+            treasuries,
+            total,
+        } => {
+            stats.money_households = households.minor_units();
+            stats.money_firms = firms.minor_units();
+            stats.money_owners = owners.minor_units();
+            stats.money_treasuries = treasuries.minor_units();
+            stats.money_total = total.minor_units();
+        }
+        DomainEvent::FirmEntryOpportunityReviewed {
+            entry_feasible,
+            obstacle,
+            ..
+        } => {
+            stats.entry_reviews += 1;
+            if *entry_feasible {
+                stats.entry_feasible += 1;
+            }
+            match obstacle {
+                Some(FirmEntryObstacle::NoKnownRecipe) => stats.entry_no_recipe += 1,
+                Some(FirmEntryObstacle::NoWorkerToBeHad) => stats.entry_no_worker += 1,
+                Some(FirmEntryObstacle::RaiseExceedsWorkValue) => {
+                    stats.entry_raise_exceeds_value += 1;
+                }
+                Some(FirmEntryObstacle::NoLocalPrices) => stats.entry_no_prices += 1,
+                Some(FirmEntryObstacle::NoSolventFounder) => stats.entry_no_founder += 1,
+                None => {}
+            }
+        }
+        DomainEvent::InvestmentProjectLaunched { .. } => stats.projects_launched += 1,
+        DomainEvent::InvestmentProjectCompleted { .. } => stats.projects_completed += 1,
         DomainEvent::RegionalOutputMeasured {
             region,
             final_consumption,
@@ -220,6 +282,45 @@ fn flush_year(out: &mut String, stats: &mut YearStats, closed_year: i32) {
     );
     if stats.taxes_paid != 0 {
         let _ = writeln!(out, "  sales taxes paid: {}", stats.taxes_paid);
+    }
+    if stats.firms_founded != 0 || stats.projects_launched != 0 || stats.projects_completed != 0 {
+        let _ = writeln!(
+            out,
+            "  supply grew: {} firms founded, {} capacity projects launched, {} completed",
+            stats.firms_founded, stats.projects_launched, stats.projects_completed
+        );
+    }
+    if stats.dividends_paid != 0 {
+        let _ = writeln!(
+            out,
+            "  owners were paid: {} distributions worth {}",
+            stats.dividends_paid, stats.dividend_total
+        );
+    }
+    if stats.money_total != 0 {
+        let _ = writeln!(
+            out,
+            "  money sits: {} with households, {} in firm tills, {} with owners, {} in treasuries, {} in all",
+            stats.money_households,
+            stats.money_firms,
+            stats.money_owners,
+            stats.money_treasuries,
+            stats.money_total
+        );
+    }
+    if stats.entry_reviews != 0 {
+        let _ = writeln!(
+            out,
+            "  entry reviewed {} openings, {} feasible; blocked by: {} no recipe, {} no worker, \
+             {} raise exceeds work value, {} no local prices, {} no solvent founder",
+            stats.entry_reviews,
+            stats.entry_feasible,
+            stats.entry_no_recipe,
+            stats.entry_no_worker,
+            stats.entry_raise_exceeds_value,
+            stats.entry_no_prices,
+            stats.entry_no_founder
+        );
     }
     for line in &stats.closure_lines {
         let _ = writeln!(out, "{line}");

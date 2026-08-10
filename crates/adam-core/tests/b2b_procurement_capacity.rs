@@ -228,10 +228,15 @@ fn shared_route_world(route_capacity: u64) -> World {
         )
         .expect("bakery agreement");
     for (region, good, price) in [
+        // Bread has to be worth more than the grain it consumes plus freight,
+        // or the bakery is right to refuse the purchase and the shared-capacity
+        // question never arises. The grain price climbs to its wage-driven cost
+        // floor of 25 per unit within the first month, so bread is priced above
+        // that floor from the start.
         (FARMLAND, GRAIN, 4i64),
-        (FARMLAND, BREAD, 10),
+        (FARMLAND, BREAD, 60),
         (BAKERTON, GRAIN, 8),
-        (BAKERTON, BREAD, 10),
+        (BAKERTON, BREAD, 60),
     ] {
         world
             .set_regional_price(

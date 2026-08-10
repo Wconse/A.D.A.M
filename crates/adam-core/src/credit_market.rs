@@ -41,6 +41,52 @@ struct LenderAllocationCandidate {
     risk_adjusted_return_bps: i128,
 }
 
+/// What a firm's own trading record says it must cover before anything is
+/// left over: this month's wages, the wages it already owes, the inputs its
+/// production target needs, and the works its unmet demand justifies.
+///
+/// One expression serves both the lender deciding whether the firm is short
+/// and the owners deciding whether anything may be taken out. Two expressions
+/// would eventually disagree, and the disagreement would be a payout nobody
+/// could defend.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FirmObligationTerms {
+    payroll: i128,
+    wage_arrears: i128,
+    inputs: i128,
+    investment: i128,
+    monthly_sales: i128,
+    cash: i128,
+}
+
+impl FirmObligationTerms {
+    fn obligation(self) -> Result<i128, WorldError> {
+        self.payroll
+            .checked_add(self.wage_arrears)
+            .and_then(|value| value.checked_add(self.inputs))
+            .and_then(|value| value.checked_add(self.investment))
+            .ok_or(WorldError::ArithmeticOverflow("credit funding obligation"))
+    }
+
+    const fn observed_surplus(self) -> i128 {
+        self.monthly_sales
+            .saturating_sub(self.payroll)
+            .saturating_sub(self.inputs)
+    }
+
+    /// What simply running the business costs in an ordinary month: the wages
+    /// it pays and the inputs its production needs. Arrears and works are left
+    /// out - they are one-off claims, not the recurring cost of staying open.
+    pub(crate) const fn recurring_monthly_cost(self) -> i128 {
+        self.payroll.saturating_add(self.inputs)
+    }
+
+    /// What the till holds beyond everything the business itself has a claim on.
+    pub(crate) fn free_cash(self) -> Result<i128, WorldError> {
+        Ok(self.cash.saturating_sub(self.obligation()?))
+    }
+}
+
 /// Cumulative realized lending outcomes for one actor.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LenderCreditHistory {
@@ -359,7 +405,10 @@ impl World {
         )?))
     }
 
-    fn observed_firm_funding_gap(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+    pub(crate) fn observed_firm_obligation_terms(
+        &self,
+        firm: FirmId,
+    ) -> Result<FirmObligationTerms, WorldError> {
         let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
         let baseline = self
             .observed_operating_baseline(firm)?
@@ -411,15 +460,25 @@ impl World {
                 )
                 .ok_or(WorldError::ArithmeticOverflow("credit funding inputs"))?;
         }
-        let obligation = payroll
-            .checked_add(wage_arrears)
-            .and_then(|value| value.checked_add(inputs))
-            .ok_or(WorldError::ArithmeticOverflow("credit funding obligation"))?;
-        let observed_surplus = i128::from(baseline.monthly_sales.minor_units())
-            .saturating_sub(payroll)
-            .saturating_sub(inputs);
-        let gap = obligation.saturating_sub(i128::from(definition.cash().minor_units()));
-        if observed_surplus <= 0 || gap <= 0 {
+        // A firm does not only owe wages and inputs. If its own trading record
+        // justifies more capacity, the works it cannot pay for out of the till
+        // are an obligation too - otherwise credit could keep a firm alive but
+        // never let it grow, and only the already-rich could ever expand.
+        let investment = i128::from(self.observed_capacity_investment_need(firm)?.minor_units());
+        Ok(FirmObligationTerms {
+            payroll,
+            wage_arrears,
+            inputs,
+            investment,
+            monthly_sales: i128::from(baseline.monthly_sales.minor_units()),
+            cash: i128::from(definition.cash().minor_units()),
+        })
+    }
+
+    fn observed_firm_funding_gap(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+        let terms = self.observed_firm_obligation_terms(firm)?;
+        let gap = terms.obligation()?.saturating_sub(terms.cash);
+        if terms.observed_surplus() <= 0 || gap <= 0 {
             return Ok(None);
         }
         Ok(Some(Money::from_minor_units(i64::try_from(gap).map_err(

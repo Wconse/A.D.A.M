@@ -1,6 +1,7 @@
 #![doc = "Deterministic, engine-independent simulation core for A.D.A.M."]
 
 pub mod accounting;
+pub mod accumulator;
 pub mod board;
 pub mod business;
 pub mod capacity_investment;
@@ -12,6 +13,7 @@ pub mod coping;
 pub mod credit_market;
 pub mod demand;
 pub mod distress;
+pub mod economic_invariants;
 pub mod event;
 pub mod firm_entry;
 pub mod freight;
@@ -26,6 +28,7 @@ pub mod logistics;
 pub mod management;
 pub mod market;
 pub mod migration;
+pub mod money_ledger;
 pub mod observation;
 pub mod political_economy;
 pub mod pricing;
@@ -65,7 +68,13 @@ pub use demand::{
     ConsumptionProfile, ConsumptionTarget, DemandBasis, DemandIntent, Good, NeedTier,
 };
 pub use distress::{FirmDistressAction, FirmDistressDownsizing, FirmRecapitalization};
-pub use event::{DomainEvent, EventEnvelope, EventLog};
+pub use economic_invariants::{
+    EconomicClaimsSummary, EconomicCommitmentSummary, EconomicInvariantCode,
+    EconomicInvariantEntity, EconomicInvariantFinding, EconomicInvariantReport,
+    EconomicInvariantSeverity, GoodStockSummary, GoodTransitionReconciliation,
+    MoneyTransitionReconciliation, reconcile_goods_transition, reconcile_money_transition,
+};
+pub use event::{DomainEvent, EventEnvelope, EventLog, FirmEntryObstacle};
 pub use firm_entry::{FirmEntryDecision, FirmFoundingPlan};
 pub use freight::{
     ContractStatus, FreightCapacityLedger, FreightContract, FreightEconomics,
@@ -106,7 +115,11 @@ pub use market::{
     MarketOfferOutcome, MarketOrder, clear_local_market, clear_market_with_delivery,
 };
 pub use migration::HouseholdMigration;
-pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation};
+pub use money_ledger::{
+    MoneyAccountId, MoneyAccountOwner, MoneyJournalEntry, MoneyJournalEntryId, MoneyPosting,
+    MoneyPostingDirection, MoneyTransaction, MoneyTransactionKind, MoneyTransactionPurpose,
+};
+pub use observation::{FIRM_OBSERVATION_HISTORY_LIMIT, FirmOperatingObservation, MoneyStock};
 pub use political_economy::RegionalSocialPressure;
 pub use pricing::{ObservedMarketPressure, RegionalPriceAdjustment};
 pub use procurement::{FirmProcurementFill, FirmProcurementOrder, FirmProcurementResult};
@@ -143,4 +156,4 @@ pub use world::{
 pub use world_logistics::InventoryShipment;
 
 /// Version of the simulation rules that participate in determinism guarantees.
-pub const SIMULATION_VERSION: u32 = 103;
+pub const SIMULATION_VERSION: u32 = 121;

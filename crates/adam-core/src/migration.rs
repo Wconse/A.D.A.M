@@ -4,6 +4,12 @@ use crate::{
 
 const PRESSURE_GATE_MONTHS: u8 = 6;
 const MAX_SERVICE_DISADVANTAGE_BPS: i32 = 1_000;
+/// Below this share of the survival need actually met, a region is not merely
+/// poor: its households cannot feed themselves where they are.
+const HUNGER_FULFILLMENT_BPS: u32 = 5_000;
+/// A refuge must be materially better fed than the place being left, or the
+/// move is a lateral shuffle that costs a relocation fee and buys nothing.
+const HUNGER_RELIEF_MARGIN_BPS: u32 = 1_000;
 
 /// Auditable result of one household-scale internal migration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,99 +55,167 @@ impl World {
             .saturating_add(1);
 
         for source in source_regions {
-            let Some(opportunity) = self.best_migration_opportunity(source) else {
-                continue;
-            };
-            let Some(source_cohort) = self.select_mobile_cohort(source) else {
-                continue;
-            };
-            let migrant_id = CohortId::new(next_id);
-            next_id = next_id.saturating_add(1);
-            let source_snapshot = self.cohorts[&source_cohort].clone();
-            let migrant_people = source_snapshot
-                .people()
-                .people()
-                .div_ceil(source_snapshot.households());
-            let required_reserve = household_monthly_income_share(&source_snapshot, migrant_people);
-            let required_cash = required_reserve
-                .checked_add(opportunity.relocation_fee.minor_units())
-                .expect("migration cash requirement fits");
-            if source_snapshot.liquid_wealth().minor_units() < required_cash {
-                continue;
-            }
+            // Nothing in the world stops a second household from following the
+            // first in the same year. The limits on an exodus are real ones:
+            // dwellings at the destination, the cash each mover needs, and the
+            // fact that arrivals drag the refuge's own provisioning down until
+            // it is no longer better fed than the place being left.
+            loop {
+                // A vacancy elsewhere is one reason to move. Being unable to eat
+                // where you are is another, and it does not wait for somebody to
+                // be hiring. Requiring an open job before a household may leave is
+                // a limit nobody in the world pays for, and it made starvation
+                // survivable by nobody and escapable by no one: every demo cohort
+                // is employed, so the labour path could never fire, and people
+                // died in place beside a region that had food.
+                let labour = self
+                    .best_migration_opportunity(source)
+                    .and_then(|opportunity| {
+                        self.select_mobile_cohort(source)
+                            .map(|cohort| (opportunity, cohort, false))
+                    });
+                let Some((opportunity, source_cohort, hungry)) = labour.or_else(|| {
+                    self.best_famine_refuge(source).and_then(|opportunity| {
+                        self.select_hungry_cohort(source)
+                            .map(|cohort| (opportunity, cohort, true))
+                    })
+                }) else {
+                    break;
+                };
+                let migrant_id = CohortId::new(next_id);
+                next_id = next_id.saturating_add(1);
+                let source_snapshot = self.cohorts[&source_cohort].clone();
+                let migrant_people = source_snapshot
+                    .people()
+                    .people()
+                    .div_ceil(source_snapshot.households());
+                let required_reserve =
+                    household_monthly_income_share(&source_snapshot, migrant_people);
+                let required_cash = required_reserve
+                    .checked_add(opportunity.relocation_fee.minor_units())
+                    .expect("migration cash requirement fits");
+                if source_snapshot.liquid_wealth().minor_units() < required_cash {
+                    break;
+                }
+                // The jobs the household held are given up before it goes, so the
+                // employer it leaves behind actually loses the staff.
+                if hungry
+                    && self
+                        .release_migrating_workers(source_cohort, migrant_people)
+                        .is_err()
+                {
+                    break;
+                }
 
-            let mut migrant = self
-                .cohorts
-                .get_mut(&source_cohort)
-                .expect("selected migration cohort exists")
-                .split_migrating_household(migrant_id, opportunity.destination)
-                .expect("selected cohort supports one-household partition");
-            migrant
-                .debit_wealth(opportunity.relocation_fee)
-                .expect("selected migrant can fund relocation fee");
-            let row = HouseholdMigration {
-                source_cohort,
-                migrant_cohort: migrant_id,
-                from_region: source,
-                to_region: opportunity.destination,
-                people: migrant.people(),
-                households: migrant.households(),
-                liquid_wealth: migrant.liquid_wealth(),
-                debt: migrant.debt(),
-                relocation_fee: opportunity.relocation_fee,
-                destination_vacancy_months: opportunity.vacancy_months,
-                service_advantage_basis_points: opportunity.service_advantage,
-                destination_housing_pressure_basis_points: opportunity.housing_pressure,
-            };
-            self.copy_persistent_cohort_state(source_cohort, migrant_id);
-            self.cohorts.insert(migrant_id, migrant);
-            let moved = row.people.people();
-            let source_population = self.regions[&source].population().people() - moved;
-            let destination_population = self.regions[&opportunity.destination]
-                .population()
-                .people()
-                .checked_add(moved)
-                .expect("migration destination population fits");
-            self.regions
-                .get_mut(&source)
-                .expect("source region exists")
-                .set_population(Population::new(source_population));
-            self.regions
-                .get_mut(&opportunity.destination)
-                .expect("destination region exists")
-                .set_population(Population::new(destination_population));
-            let destination_country = self.regions[&opportunity.destination].country();
-            let indicators = self
-                .countries
-                .get_mut(&destination_country)
-                .expect("destination country exists")
-                .indicators_mut();
-            indicators.set_treasury(Money::from_minor_units(
-                indicators
-                    .treasury()
-                    .minor_units()
-                    .checked_add(row.relocation_fee.minor_units())
-                    .expect("relocation fee treasury credit fits"),
-            ));
-            self.events.append(
-                date,
-                DomainEvent::HouseholdMigrated {
-                    source_cohort: row.source_cohort,
-                    migrant_cohort: row.migrant_cohort,
-                    from_region: row.from_region,
-                    to_region: row.to_region,
-                    people: row.people,
-                    households: row.households,
-                    liquid_wealth: row.liquid_wealth,
-                    debt: row.debt,
-                    relocation_fee: row.relocation_fee,
-                    destination_vacancy_months: row.destination_vacancy_months,
-                    service_advantage_basis_points: row.service_advantage_basis_points,
-                    destination_housing_pressure_basis_points: row
-                        .destination_housing_pressure_basis_points,
-                },
-            );
-            migrations.push(row);
+                let mut migrant = self
+                    .cohorts
+                    .get_mut(&source_cohort)
+                    .expect("selected migration cohort exists")
+                    .split_migrating_household(migrant_id, opportunity.destination)
+                    .expect("selected cohort supports one-household partition");
+                if hungry {
+                    migrant.leave_employment();
+                }
+                migrant
+                    .debit_wealth(opportunity.relocation_fee)
+                    .expect("selected migrant can fund relocation fee");
+                let mut row = HouseholdMigration {
+                    source_cohort,
+                    migrant_cohort: migrant_id,
+                    from_region: source,
+                    to_region: opportunity.destination,
+                    people: migrant.people(),
+                    households: migrant.households(),
+                    liquid_wealth: migrant.liquid_wealth(),
+                    debt: migrant.debt(),
+                    relocation_fee: opportunity.relocation_fee,
+                    destination_vacancy_months: opportunity.vacancy_months,
+                    service_advantage_basis_points: opportunity.service_advantage,
+                    destination_housing_pressure_basis_points: opportunity.housing_pressure,
+                };
+                self.copy_persistent_cohort_state(source_cohort, migrant_id);
+                // Arrivals join a household group already living the same way
+                // at the destination. Without this, a long exodus leaves the
+                // world carrying a permanent one-household cohort for every
+                // family that ever moved, and every later month pays to walk
+                // past all of them.
+                let host = self
+                    .cohorts
+                    .values()
+                    .find(|resident| resident.lives_like(&migrant))
+                    .map(crate::HouseholdCohort::id);
+                if let Some(host) = host {
+                    let arrival_people = migrant.people().people();
+                    let arrival_health = self.cohort_health.get(&migrant_id).copied();
+                    let host_people = self.cohorts[&host].people().people();
+                    self.cohorts
+                        .get_mut(&host)
+                        .expect("host cohort exists")
+                        .absorb(&migrant)
+                        .expect("joining one household cannot overflow a cohort");
+                    if let Some(arrival_health) = arrival_health {
+                        let blended = self
+                            .cohort_health
+                            .get(&host)
+                            .copied()
+                            .unwrap_or_default()
+                            .blended_with(host_people, arrival_health, arrival_people);
+                        self.cohort_health.insert(host, blended);
+                    }
+                    self.cohort_health.remove(&migrant_id);
+                    self.cohort_experience.remove(&migrant_id);
+                    row.migrant_cohort = host;
+                } else {
+                    self.cohorts.insert(migrant_id, migrant);
+                }
+                let moved = row.people.people();
+                let source_population = self.regions[&source].population().people() - moved;
+                let destination_population = self.regions[&opportunity.destination]
+                    .population()
+                    .people()
+                    .checked_add(moved)
+                    .expect("migration destination population fits");
+                self.regions
+                    .get_mut(&source)
+                    .expect("source region exists")
+                    .set_population(Population::new(source_population));
+                self.regions
+                    .get_mut(&opportunity.destination)
+                    .expect("destination region exists")
+                    .set_population(Population::new(destination_population));
+                let destination_country = self.regions[&opportunity.destination].country();
+                let indicators = self
+                    .countries
+                    .get_mut(&destination_country)
+                    .expect("destination country exists")
+                    .indicators_mut();
+                indicators.set_treasury(Money::from_minor_units(
+                    indicators
+                        .treasury()
+                        .minor_units()
+                        .checked_add(row.relocation_fee.minor_units())
+                        .expect("relocation fee treasury credit fits"),
+                ));
+                self.events.append(
+                    date,
+                    DomainEvent::HouseholdMigrated {
+                        source_cohort: row.source_cohort,
+                        migrant_cohort: row.migrant_cohort,
+                        from_region: row.from_region,
+                        to_region: row.to_region,
+                        people: row.people,
+                        households: row.households,
+                        liquid_wealth: row.liquid_wealth,
+                        debt: row.debt,
+                        relocation_fee: row.relocation_fee,
+                        destination_vacancy_months: row.destination_vacancy_months,
+                        service_advantage_basis_points: row.service_advantage_basis_points,
+                        destination_housing_pressure_basis_points: row
+                            .destination_housing_pressure_basis_points,
+                    },
+                );
+                migrations.push(row);
+            }
         }
         if !migrations.is_empty() {
             debug_assert!(self.validate_population_accounting().is_ok());
@@ -212,6 +286,153 @@ impl World {
                     .cmp(&b.score)
                     .then_with(|| b.destination.cmp(&a.destination))
             })
+    }
+
+    /// How well a region's households are actually eating, as the
+    /// people-weighted survival fulfilment of the cohorts living there.
+    ///
+    /// This is an observed outcome, not a forecast: it is the same monthly
+    /// health record that decides whether people lose capacity and die.
+    fn regional_survival_fulfillment(&self, region: RegionId) -> Option<u32> {
+        let mut people_total: u64 = 0;
+        let mut weighted: u128 = 0;
+        for cohort in self.cohorts.values().filter(|c| c.region() == region) {
+            let people = cohort.people().people();
+            if people == 0 {
+                continue;
+            }
+            // A household nobody has measured yet is assumed to be fed.
+            let fulfillment = self
+                .cohort_health
+                .get(&cohort.id())
+                .map_or(10_000, |health| {
+                    u32::from(health.survival_fulfillment().get())
+                });
+            weighted = weighted.checked_add(u128::from(fulfillment) * u128::from(people))?;
+            people_total = people_total.checked_add(people)?;
+        }
+        if people_total == 0 {
+            return None;
+        }
+        u32::try_from(weighted / u128::from(people_total)).ok()
+    }
+
+    /// Finds the best-fed region a starving household could reach.
+    ///
+    /// Hunger opens the door that the labour market keeps shut, but it does
+    /// not open it onto nothing: the refuge must be materially better fed, it
+    /// must have a dwelling free, and the mover still pays the relocation fee.
+    fn best_famine_refuge(&self, source: RegionId) -> Option<Opportunity> {
+        let source_region = self.regions.get(&source)?;
+        let source_fulfillment = self.regional_survival_fulfillment(source)?;
+        if source_fulfillment >= HUNGER_FULFILLMENT_BPS {
+            return None;
+        }
+        let source_services = service_score(self.regional_public_services.get(&source));
+        let relief_floor = source_fulfillment.checked_add(HUNGER_RELIEF_MARGIN_BPS)?;
+        self.regions
+            .values()
+            .filter(|region| region.id() != source && region.country() == source_region.country())
+            .filter_map(|region| {
+                let fulfillment = self.regional_survival_fulfillment(region.id())?;
+                if fulfillment < relief_floor {
+                    return None;
+                }
+                let housing = self.regional_housing.get(&region.id())?;
+                let occupied: u64 = self
+                    .cohorts
+                    .values()
+                    .filter(|cohort| cohort.region() == region.id())
+                    .map(crate::HouseholdCohort::households)
+                    .sum();
+                let projected_occupancy = occupied.checked_add(1)?;
+                if projected_occupancy > housing.dwelling_capacity() {
+                    return None;
+                }
+                let housing_pressure = u16::try_from(
+                    (u128::from(projected_occupancy) * 10_000
+                        / u128::from(housing.dwelling_capacity()))
+                    .min(10_000),
+                )
+                .ok()?;
+                let relocation_fee = relocation_fee(*housing, housing_pressure);
+                let service_advantage =
+                    service_score(self.regional_public_services.get(&region.id()))
+                        - source_services;
+                let relief = i32::try_from(fulfillment - source_fulfillment).ok()?;
+                let score = relief - i32::from(housing_pressure) / 2;
+                Some(Opportunity {
+                    destination: region.id(),
+                    vacancy_months: 0,
+                    service_advantage: service_advantage
+                        .clamp(i32::from(i16::MIN), i32::from(i16::MAX))
+                        as i16,
+                    housing_pressure,
+                    relocation_fee,
+                    score,
+                })
+            })
+            .max_by(|a, b| {
+                a.score
+                    .cmp(&b.score)
+                    .then_with(|| b.destination.cmp(&a.destination))
+            })
+    }
+
+    /// Picks the household that both needs to leave and can afford to.
+    ///
+    /// Unlike the labour-market path this does not require the household to be
+    /// idle: a job that does not feed you is not a reason to stay. It does
+    /// require the means to move, which is why the best-provisioned hungry
+    /// household goes first and the destitute stay behind.
+    fn select_hungry_cohort(&self, source: RegionId) -> Option<CohortId> {
+        self.cohorts
+            .values()
+            .filter(|cohort| {
+                cohort.region() == source
+                    && matches!(cohort.age_band(), AgeBand::Adult | AgeBand::Mature)
+                    && cohort.people().people() > 1
+                    && cohort.households() > 1
+                    && !self.workforce_training.contains_key(&cohort.id())
+                    && self.cohort_health.get(&cohort.id()).is_some_and(|health| {
+                        u32::from(health.survival_fulfillment().get()) < HUNGER_FULFILLMENT_BPS
+                    })
+            })
+            .max_by(|a, b| {
+                liquidity_per_household(a)
+                    .cmp(&liquidity_per_household(b))
+                    .then_with(|| b.id().cmp(&a.id()))
+            })
+            .map(crate::HouseholdCohort::id)
+    }
+
+    /// Hands back the jobs a departing household held.
+    ///
+    /// The whole reduction is planned before any of it is applied, so a move
+    /// that cannot be unwound from an employer is abandoned rather than left
+    /// half-done.
+    fn release_migrating_workers(
+        &mut self,
+        cohort: CohortId,
+        workers: u64,
+    ) -> Result<(), crate::WorldError> {
+        let mut outstanding = workers;
+        let mut plan: Vec<(crate::FirmId, u64)> = Vec::new();
+        for ((firm, agreement_cohort), agreement) in &self.employment_agreements {
+            if outstanding == 0 {
+                break;
+            }
+            if *agreement_cohort != cohort || !agreement.active() {
+                continue;
+            }
+            let released = agreement.workers().min(outstanding);
+            outstanding -= released;
+            plan.push((*firm, agreement.workers() - released));
+        }
+        for (firm, remaining) in plan {
+            self.change_employment_workers(firm, cohort, remaining)?;
+        }
+        Ok(())
     }
 
     fn select_mobile_cohort(&self, source: RegionId) -> Option<CohortId> {
@@ -415,6 +636,84 @@ mod tests {
     }
 
     #[test]
+    fn hunger_moves_a_household_when_nobody_anywhere_is_hiring() {
+        let mut world = test_world();
+        // Close the labour-market door completely: no unemployment pressure to
+        // push, no vacancy pressure to pull. Under the old rule this region
+        // was sealed shut no matter how badly its people were starving.
+        world
+            .regional_labor_market
+            .get_mut(&RegionId::new(1))
+            .expect("source labour market")
+            .unemployment_pressure_months = 0;
+        world
+            .regional_labor_market
+            .get_mut(&RegionId::new(2))
+            .expect("destination labour market")
+            .vacancy_pressure_months = 0;
+        assert!(world.best_migration_opportunity(RegionId::new(1)).is_none());
+        // Oldtown is starving. Newport is fed.
+        world.cohort_health.insert(
+            CohortId::new(1),
+            crate::health::CohortHealth::observed_for_test(1_000),
+        );
+        world.cohort_health.insert(
+            CohortId::new(2),
+            crate::health::CohortHealth::observed_for_test(9_000),
+        );
+
+        let rows = world.execute_annual_internal_migration(world.date());
+
+        assert!(!rows.is_empty());
+        let row = rows[0];
+        assert!(rows
+            .iter()
+            .all(|row| row.from_region == RegionId::new(1)
+                && row.to_region == RegionId::new(2)));
+        assert_eq!(row.from_region, RegionId::new(1));
+        assert_eq!(row.to_region, RegionId::new(2));
+        // The move is not free: the household pays a relocation fee and
+        // arrives without the work it used to hold.
+        assert!(row.relocation_fee.minor_units() > 0);
+        assert_eq!(
+            world.household_cohorts()[&row.migrant_cohort].employment(),
+            EmploymentStatus::Unemployed
+        );
+        assert!(world.validate_population_accounting().is_ok());
+    }
+
+    #[test]
+    fn a_region_that_is_no_better_fed_is_no_refuge() {
+        let mut world = test_world();
+        world
+            .regional_labor_market
+            .get_mut(&RegionId::new(1))
+            .expect("source labour market")
+            .unemployment_pressure_months = 0;
+        world
+            .regional_labor_market
+            .get_mut(&RegionId::new(2))
+            .expect("destination labour market")
+            .vacancy_pressure_months = 0;
+        // Both regions are equally hungry, so leaving buys nothing and the
+        // relocation fee would be paid for no relief.
+        world.cohort_health.insert(
+            CohortId::new(1),
+            crate::health::CohortHealth::observed_for_test(1_000),
+        );
+        world.cohort_health.insert(
+            CohortId::new(2),
+            crate::health::CohortHealth::observed_for_test(1_000),
+        );
+
+        assert!(
+            world
+                .execute_annual_internal_migration(world.date())
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn one_household_moves_without_creating_people_money_or_debt() {
         let mut world = test_world();
         let before_people: u64 = world
@@ -437,17 +736,24 @@ mod tests {
             .map(|c| c.debt().minor_units())
             .sum();
         let rows = world.execute_annual_internal_migration(world.date());
-        assert_eq!(rows.len(), 1);
+        // The exodus is not rationed by a counter. It runs until a real limit
+        // binds, and here that limit is housing: Newport has twenty dwellings
+        // and ten are already lived in, so ten households can arrive.
+        assert_eq!(rows.len(), 10);
         assert_eq!(rows[0].people.people(), 2);
         assert_eq!(rows[0].households, 1);
         assert_eq!(rows[0].relocation_fee, Money::from_minor_units(10));
         assert_eq!(rows[0].destination_housing_pressure_basis_points, 5_500);
+        assert!(
+            rows[9].destination_housing_pressure_basis_points
+                > rows[0].destination_housing_pressure_basis_points
+        );
         assert_eq!(
             world.household_cohorts()[&rows[0].migrant_cohort].region(),
             RegionId::new(2)
         );
-        assert_eq!(world.regions()[&RegionId::new(1)].population().people(), 98);
-        assert_eq!(world.regions()[&RegionId::new(2)].population().people(), 22);
+        assert_eq!(world.regions()[&RegionId::new(1)].population().people(), 80);
+        assert_eq!(world.regions()[&RegionId::new(2)].population().people(), 40);
         assert_eq!(
             before_people,
             world

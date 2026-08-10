@@ -1,15 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::money_ledger::MoneyAccountBalances;
 use crate::{
-    BasisPoints, CohortId, CountryId, DomainEvent, FirmId, GoodId, Money, Population,
-    QuantityMilli, RatePpm, RegionId, World, WorldError,
+    BasisPoints, CohortId, CountryId, DomainEvent, EconomicInvariantReport, FirmId, GoodId, Money,
+    MoneyAccountId, MoneyTransaction, MoneyTransactionPurpose, Population, QuantityMilli, RatePpm,
+    RegionId, World, WorldError,
 };
 
 const DEMOGRAPHY_DOMAIN: u64 = 0x4445_4d4f_4752_4150;
 const ECONOMY_DOMAIN: u64 = 0x4543_4f4e_4f4d_5900;
 const POLITICS_DOMAIN: u64 = 0x504f_4c49_5449_4353;
 const RATE_SCALE: i128 = 1_000_000;
-const SALES_TAX_BPS: i128 = 2_000;
+pub(crate) const SALES_TAX_BPS: i128 = 2_000;
 const DEBT_BRAKE_RATIO_DIVISOR: i128 = 10;
 const DEBT_BRAKE_MAX_BPS: i128 = 600;
 const SPENDING_FLOOR_BPS: i128 = 1_200;
@@ -67,6 +69,7 @@ struct CountryUpdate {
 pub struct EconomicYearResult {
     pub closed_year: i32,
     pub months: Vec<crate::MonthlyEconomicCycleResult>,
+    pub invariants: EconomicInvariantReport,
 }
 
 impl World {
@@ -93,7 +96,6 @@ impl World {
         self.apply_year(
             simulated_year,
             close_date,
-            &[],
             &region_updates,
             &social_pressure,
             &country_updates,
@@ -132,6 +134,24 @@ impl World {
         for _ in 0..12 {
             months.push(next.execute_monthly_economic_cycle()?);
         }
+        // The year's trading is done, so what the firms did not need is the
+        // owners' before the books close on the year.
+        next.execute_observed_owner_distributions()?;
+        // With the year's earning, spending and paying out finished, count the
+        // money itself. A world can starve with its granaries full if the
+        // purse that buys bread is empty, and only this measurement can tell
+        // the two apart.
+        let money_stock = next.observed_money_stock()?;
+        next.events.append(
+            next.date,
+            crate::DomainEvent::MoneyStockMeasured {
+                households: money_stock.households,
+                firms: money_stock.firms,
+                owners: money_stock.owners,
+                treasuries: money_stock.treasuries,
+                total: money_stock.total()?,
+            },
+        );
         let region_updates =
             next.plan_material_regions(closed_year, &opening_inventories, &months)?;
         let tax_updates = next.plan_firm_sales_taxes()?;
@@ -143,10 +163,10 @@ impl World {
             &social_pressure,
         )?;
         let close_date = next.date;
+        next.settle_firm_sales_taxes(&tax_updates, close_date)?;
         next.apply_year(
             closed_year,
             close_date,
-            &tax_updates,
             &region_updates,
             &social_pressure,
             &country_updates,
@@ -158,9 +178,11 @@ impl World {
                 monthly_cycles: 12,
             },
         );
+        let invariants = next.economic_invariant_report()?;
         let result = EconomicYearResult {
             closed_year,
             months,
+            invariants,
         };
         *self = next;
         Ok(result)
@@ -574,22 +596,39 @@ impl World {
         );
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn apply_year(
+    fn settle_firm_sales_taxes(
         &mut self,
-        simulated_year: i32,
+        updates: &[FirmTaxUpdate],
         close_date: crate::SimDate,
-        tax_updates: &[FirmTaxUpdate],
-        region_updates: &[RegionUpdate],
-        social_pressure: &BTreeMap<RegionId, crate::RegionalSocialPressure>,
-        country_updates: &[CountryUpdate],
-    ) {
-        for update in tax_updates {
-            self.firms
-                .get_mut(&update.firm)
-                .expect("planned tax firm exists")
-                .debit_cash(update.paid)
-                .expect("planned tax payment is liquid");
+    ) -> Result<(), WorldError> {
+        let mut firms = self.firms.clone();
+        let mut countries = self.countries.clone();
+        let mut transactions = Vec::new();
+        for update in updates {
+            if update.paid.minor_units() <= 0 {
+                continue;
+            }
+            let transaction = MoneyTransaction::transfer(
+                MoneyTransactionPurpose::SalesTax {
+                    firm: update.firm,
+                    country: update.country,
+                },
+                MoneyAccountId::FirmOperating(update.firm),
+                MoneyAccountId::CountryTreasury(update.country),
+                update.paid,
+            )?;
+            MoneyAccountBalances::FirmsAndTreasuries {
+                firms: &mut firms,
+                countries: &mut countries,
+            }
+            .settle(&transaction)?;
+            transactions.push(transaction);
+        }
+        let journal_entries = self.prepare_money_journal_entries(&transactions)?;
+        self.firms = firms;
+        self.countries = countries;
+        self.append_money_journal_entries(journal_entries);
+        for update in updates {
             self.events.append(
                 close_date,
                 DomainEvent::FirmSalesTaxPaid {
@@ -601,6 +640,18 @@ impl World {
                 },
             );
         }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn apply_year(
+        &mut self,
+        simulated_year: i32,
+        close_date: crate::SimDate,
+        region_updates: &[RegionUpdate],
+        social_pressure: &BTreeMap<RegionId, crate::RegionalSocialPressure>,
+        country_updates: &[CountryUpdate],
+    ) {
         for update in region_updates {
             let region = self
                 .regions

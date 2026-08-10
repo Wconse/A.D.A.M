@@ -214,7 +214,11 @@ impl World {
         self.firm_monthly_accounts.clear();
         self.monthly_firm_market_outcomes.clear();
         self.monthly_firm_procurement_purchases.clear();
-        self.monthly_firm_input_shortfalls.clear();
+        // Input shortfalls are deliberately not cleared here. This reset runs
+        // at the end of the commercial cycle, and firm entry - the party that
+        // acts on a shortage - reviews the month afterwards. Wiping the
+        // evidence here left it recorded and never read. Procurement clears the
+        // map when it starts recording the next month's evidence instead.
     }
     /// Replaces the firm's explicit management forecast without changing physical or monetary state.
     /// # Errors

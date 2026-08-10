@@ -1,0 +1,75 @@
+schema_version = 1
+scope = "economy rebuild slice 0"
+policy = "Known defects are passing diagnostic assertions, never ignored tests."
+
+[[defect]]
+audit_id = "A-2"
+title = "Monthly income has no paying account"
+status = "detected_known_gap"
+report_code = "PayerlessHouseholdIncome"
+test = "economic_invariants::tests::retired_fallback_income_is_named_as_payerless"
+assertion = "A retired cohort receives 10 unexplained minor units in one monthly cashflow."
+
+[[defect]]
+audit_id = "A-3"
+title = "Household debt service destroys money"
+status = "detected_known_gap"
+report_code = "HouseholdDebtHasNoCreditor"
+test = "economic_invariants::tests::household_debt_service_is_an_allowlisted_money_sink"
+assertion = "One minor unit of debt service produces an unexplained liquid-money change of -1."
+
+[[defect]]
+audit_id = "AD-1"
+title = "Population rescaling can leave ghost households"
+status = "detected_hard_violation"
+report_code = "InvalidHouseholdCount"
+test = "economic_invariants::tests::report_detects_population_and_ghost_household_corruption"
+assertion = "A zero-person cohort retaining households is reported without mutation."
+
+[[defect]]
+audit_id = "AD-2"
+title = "Retirement converts wages into payerless fallback income"
+status = "detected_known_gap"
+report_code = "PayerlessHouseholdIncome"
+test = "economic_invariants::tests::retired_fallback_income_is_named_as_payerless"
+assertion = "Retired status does not provide a payer, so fallback income remains an explicit gap."
+
+[[defect]]
+audit_id = "Z-1"
+title = "Formal freight operating costs destroy money"
+status = "detected_known_gap"
+report_code = "MoneyTransitionReconciliation"
+test = "economic_invariants::tests::formal_freight_operating_cost_is_an_allowlisted_money_sink"
+assertion = "A shipment charging 10 and crediting margin 2 produces an unexplained liquid-money change of -8."
+
+[[defect]]
+audit_id = "AB-7"
+title = "Cancelling a program strands carryover"
+status = "detected_known_gap"
+report_code = "ProgramCarryoverHasNoRestrictedAccount"
+test = "government_program::tests::zero_funding_and_cancellation_are_explicit_replayable_choices"
+assertion = "A cancelled debt-funded program retains 300 of carryover with no restricted account."
+
+[[defect]]
+audit_id = "Z-5"
+title = "Freight contracts can overbook a route in aggregate"
+status = "detected_hard_violation"
+report_code = "FreightContractCapacityExceeded"
+test = "economic_invariants::tests::report_detects_contracts_that_overpromise_one_route"
+assertion = "Two active reservations of 700 exceed route capacity 1000."
+
+[[defect]]
+audit_id = "J-7"
+title = "Labor commitments can exceed cohort population"
+status = "detected_hard_violation"
+report_code = "LaborOvercommitment"
+test = "economic_invariants::tests::report_detects_labor_overcommitment_without_mutating_the_agreement"
+assertion = "Three active workers against two people are reported without repair."
+
+[[defect]]
+audit_id = "goods-transition"
+title = "Unexplained inventory creation"
+status = "detected_hard_reconciliation_failure"
+report_code = "GoodTransitionReconciliation"
+test = "economic_invariants::tests::goods_transition_detects_and_reconciles_duplicated_inventory"
+assertion = "Duplicating 100 quantity-milli is unexplained unless the same net production is authorized."

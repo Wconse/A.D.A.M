@@ -1,5 +1,7 @@
+use crate::money_ledger::MoneyAccountBalances;
 use crate::{
-    ActorId, CorporateAction, DomainEvent, FirmId, Money, ProjectId, RegionId, World, WorldError,
+    ActorId, CorporateAction, DomainEvent, FirmId, Money, MoneyAccountId, MoneyPosting,
+    MoneyTransaction, MoneyTransactionPurpose, ProjectId, RegionId, World, WorldError,
 };
 use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -164,9 +166,38 @@ impl World {
         if committed < budget {
             return Err(WorldError::InsufficientCommittedInvestment(project.firm()));
         }
-        self.committed_investments
-            .insert(project.firm(), Money::from_minor_units(committed - budget));
+        let shares = self.plan_regional_capital_shares(project.region(), project.budget());
+        if shares.is_empty() {
+            return Err(WorldError::InvalidProduction(
+                "capital spending needs local households to build the works",
+            ));
+        }
+        let mut postings = vec![MoneyPosting::decrease(
+            MoneyAccountId::FirmInvestmentEscrow(project.firm()),
+            project.budget(),
+        )];
+        for &(cohort, share) in &shares {
+            postings.push(MoneyPosting::increase(
+                MoneyAccountId::HouseholdLiquid(cohort),
+                share,
+            ));
+        }
+        let transaction = MoneyTransaction::new(
+            MoneyTransactionPurpose::InvestmentOutlay {
+                firm: project.firm(),
+                project: project.id(),
+                region: project.region(),
+            },
+            postings,
+        )?;
+        let journal_entries = self.prepare_money_journal_entries(&[transaction.clone()])?;
+        MoneyAccountBalances::InvestmentEscrowAndHouseholds {
+            committed_investments: &mut self.committed_investments,
+            cohorts: &mut self.cohorts,
+        }
+        .settle(&transaction)?;
         project.status = InvestmentStatus::Building;
+        self.append_money_journal_entries(journal_entries);
         self.events.append(
             self.date,
             DomainEvent::InvestmentProjectLaunched {
@@ -175,6 +206,16 @@ impl World {
                 budget: project.budget(),
             },
         );
+        for (cohort, amount) in shares {
+            self.events.append(
+                self.date,
+                DomainEvent::CapitalOutlayDistributed {
+                    firm: project.firm(),
+                    cohort,
+                    amount,
+                },
+            );
+        }
         self.investment_projects.insert(project.id(), project);
         Ok(())
     }
@@ -218,6 +259,127 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn investment_escrow_reserves_then_pays_builders_without_moving_total_money() {
+        let mut world = crate::capacity_investment::tests::hungry_market_world();
+        let actor = ActorId::new(1);
+        let firm = FirmId::new(1);
+        let amount = Money::from_minor_units(100);
+        let opening_stock = world.observed_money_stock().expect("opening stock");
+        let opening_cash = world.firms()[&firm].cash();
+
+        world
+            .commit_firm_investment(actor, firm, amount)
+            .expect("reserve investment");
+
+        assert_eq!(
+            world.firms()[&firm].cash(),
+            Money::from_minor_units(opening_cash.minor_units() - amount.minor_units())
+        );
+        assert_eq!(world.committed_investments()[&firm], amount);
+        assert_eq!(
+            world
+                .observed_money_stock()
+                .expect("reserved stock")
+                .total()
+                .expect("reserved total"),
+            opening_stock.total().expect("opening total")
+        );
+        assert!(matches!(
+            world.money_journal().last().map(crate::MoneyJournalEntry::purpose),
+            Some(MoneyTransactionPurpose::InvestmentReservation { firm: reserved })
+                if reserved == firm
+        ));
+
+        let household_before = world
+            .observed_money_stock()
+            .expect("stock before launch")
+            .households;
+        world
+            .launch_investment_project(
+                InvestmentProject::new(ProjectId::new(999), firm, RegionId::new(1), amount, 3, 1)
+                    .expect("project"),
+            )
+            .expect("launch project");
+
+        assert_eq!(
+            world.committed_investments()[&firm],
+            Money::default(),
+            "launch spends the reserved balance rather than deleting a promise"
+        );
+        assert_eq!(
+            world
+                .observed_money_stock()
+                .expect("stock after launch")
+                .households
+                .minor_units()
+                - household_before.minor_units(),
+            amount.minor_units()
+        );
+        assert_eq!(
+            world
+                .observed_money_stock()
+                .expect("closing stock")
+                .total()
+                .expect("closing total"),
+            opening_stock.total().expect("opening total")
+        );
+        let outlay = world.money_journal().last().expect("outlay entry");
+        assert!(matches!(
+            outlay.purpose(),
+            MoneyTransactionPurpose::InvestmentOutlay {
+                firm: paid_firm,
+                project,
+                region,
+            } if paid_firm == firm
+                && project == ProjectId::new(999)
+                && region == RegionId::new(1)
+        ));
+        assert!(outlay.postings().iter().any(|posting| {
+            posting.account() == MoneyAccountId::FirmInvestmentEscrow(firm)
+                && posting.direction() == crate::MoneyPostingDirection::Decrease
+                && posting.amount() == amount
+        }));
+    }
+
+    #[test]
+    fn rejected_investment_reservation_or_release_is_atomic() {
+        let mut world = crate::capacity_investment::tests::hungry_market_world();
+        let actor = ActorId::new(1);
+        let firm = FirmId::new(1);
+        let cash = world.firms()[&firm].cash();
+        let before_reservation = world.clone();
+
+        let error = world
+            .commit_firm_investment(actor, firm, Money::from_minor_units(cash.minor_units() + 1))
+            .expect_err("an overdrawn reservation must fail");
+        assert!(matches!(error, WorldError::InsufficientFirmCash(failed) if failed == firm));
+        assert_eq!(world, before_reservation);
+
+        world
+            .commit_firm_investment(actor, firm, Money::from_minor_units(100))
+            .expect("reserve investment");
+        let before_release = world.clone();
+        let error = world
+            .launch_investment_project(
+                InvestmentProject::new(
+                    ProjectId::new(999),
+                    firm,
+                    RegionId::new(1),
+                    Money::from_minor_units(101),
+                    3,
+                    1,
+                )
+                .expect("project"),
+            )
+            .expect_err("a project cannot spend more than its escrow");
+        assert!(matches!(
+            error,
+            WorldError::InsufficientCommittedInvestment(failed) if failed == firm
+        ));
+        assert_eq!(world, before_release);
+    }
+
     #[test]
     fn project_spending_finishes_exactly() {
         let mut p = InvestmentProject::new(

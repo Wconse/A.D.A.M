@@ -1507,6 +1507,90 @@ The demo economy collapses to zero output by 2047 with survival consumption pinn
 - **Built (ADR 0176): the shortage is now remembered and entry can see it.** `World` keeps `monthly_firm_input_shortfalls` beside the other monthly firm accounts, procurement accumulates every unfilled order against the buyer's region as it journals the shortfall, and `execute_observed_firm_entry` accrues pressure from that map exactly as it does from an unfed household. Intermediate goods stopped being second-class. First-year excess deaths fall from 73 to 58 and the yearly toll decays faster; fingerprint `8238339567197527992`, simulation version 103.
 - **What that exposed, and the next slice.** The demo still starves, and no farm is founded, for one stated reason: `select_entry_worker_cohort` skips every cohort that is not `Unemployed`, and every demo cohort is employed. An entrant here waits for somebody to be idle; in life a new employer takes staff from an existing one by offering more than the work is currently paid. The value ceiling from ADR 0173 already says what a founder could defend bidding, and the labour market already knows how to move a worker between employers. Until entry can outbid an incumbent for staff, the pressure ADR 0176 creates has nowhere to go, and the price signals of the spike branch have nobody to answer them.
 
+### Step B7 (built): a founder can outbid an incumbent, the evidence now survives long enough to be read, and every refusal names itself
+
+- **Done (ADR 0177): entry no longer waits for unemployment.** A founder who finds nobody idle scans standing agreements in the region for a qualified worker with at least three months of tenure whose employer is solvent, and offers the incumbent wage improved by the same ten percent margin the labour market already uses, rounded up. The offer may not exceed the ADR 0173 value ceiling, which was extracted into `recipe_labor_value_ceiling` so a founder and an incumbent are judged by identical arithmetic. Both sides pay: the founder carries three months of the higher wage as working capital, the incumbent loses a worker and answers through the ordinary retention pass next month. Gated in both directions.
+- **Honest result: it founded nothing.** The fifty-year run still showed zero firms. The fingerprint had moved only because `SIMULATION_VERSION` is hashed, not because anything behaved differently. That was recorded as the measurement rather than explained away.
+- **Diagnosis: the ADR 0176 channel was dead in every real month.** `reset_monthly_firm_accounts` runs at the end of the commercial cycle and clears the shortfall map; `execute_observed_firm_entry` runs after it. Every shortage the demo recorded was wiped before entry could read one. The unit tests drove the stages by hand and never crossed the reset, so the channel was alive in tests and dead in the world - the same class of fault as an unowned constraint.
+- **Done (ADR 0178): evidence lives from the month that writes it to the month that reads it.** The reset no longer clears the map; procurement clears it when it starts recording the next month. Pinned by `shortage_evidence_outlives_the_monthly_accounts_reset` rather than by stage ordering. Entry now reviews grain in all three regions - Eastport 240 times over twenty years, where before it reviewed it never.
+- **Done (ADR 0178): a refusal names its cause.** `plan_firm_entry` used to return one silent `None` for four unrelated situations. `FirmEntryObstacle` now distinguishes `NoKnownRecipe`, `NoWorkerToBeHad`, `RaiseExceedsWorkValue`, `NoLocalPrices`, and `NoSolventFounder`, published on `FirmEntryOpportunityReviewed`. Events are not hashed, so this costs no determinism.
+- **Measurement.** Fingerprint `6457675414769505211`, simulation version 104, 139.4 ms per simulated year, full workspace suite green, Clippy clean. Twenty-year refusal census: Eastport bread `NoWorkerToBeHad` 86 and `RaiseExceedsWorkValue` 149 at a peak pressure of 237 months; Eastport grain `RaiseExceedsWorkValue` 75; Northreach grain `RaiseExceedsWorkValue` 18; Northreach bread and both Southvale goods `NoSolventFounder` 177.
+- **Next in this step.** The demo is now blocked by two stated economic facts instead of one silence. Either the raise needed to move a worker exceeds what the work earns at local prices, or nobody in the region holds enough cash to fund the works and three months of wages. Neither may be tuned. The first points at judging a venture by the delivered price it would displace, since a region that imports a good has no local output price that reflects what the good is actually worth there; the second points at where founding capital comes from at all, which is the credit market the entry path does not use. Capacity investment (ADR 0172) also still hires only the idle and should get the same poaching channel.
+
+### Step B8 (built): hunger is a reason to move, and an exodus stops only at a real limit
+
+Internal migration was already wired into the annual stages, but it could only fire for an unemployed household leaving six months of regional unemployment for six months of vacancies elsewhere. Every demo cohort is employed and no region advertises vacancies once firms are staffed, so in fifty years nobody ever moved and Eastport starved to zero output beside two regions that still had food. "You may leave only once somebody elsewhere is hiring" is a limit nobody pays for, so it was deleted rather than tuned.
+
+A household may now leave because it cannot eat where it is, judged by the same people-weighted survival fulfilment record that already decides who loses capacity and who dies. The refuge must be materially better fed and must have a dwelling free. Both sides pay: the mover pays the relocation fee and gives up its job - the standing agreement is reduced at the employer it abandons, so the arrival is genuinely unemployed with no income - and the refuge pays in housing pressure and in more mouths against the same food, arrivals entering the destination's own provisioning average and closing the gap that drew them. The one-household-per-region-per-year cap was deleted for the same reason; an exodus now ends when the dwellings run out, when the households left cannot fund the fee, or when the refuge is no longer better fed.
+
+Arrivals join a destination cohort that lives the same way instead of founding a permanent one-household cohort each, with health records blended by the people behind each. Without this the world carried hundreds of cohorts forever after one exodus and a simulated year slowed from 139 ms to 870 ms.
+
+Measured on the fifty-year demo: 247 households containing 733 people leave Northreach for Southvale between 2040 and 2043 and stop when housing pressure reaches the top of the scale; excess deaths fall from 3179 to 3151; fingerprint 15330073222654020652 at 140.3 ms per year. It is not a rescue, and it was not meant to be one: migration can redistribute people across regions that are all failing, but it cannot make any of them produce. The demand side is still the binding defect - one consumption profile, bread only, no substitution, and no household able to produce anything for itself.
+
+See ADR 0179.
+
+### Step B9 (built): a need is a share of itself, and a substitute is what you eat when the good you wanted is gone
+
+Two faults on the demand side were hiding each other. `price_targets` asked the offer book what could actually be bought and then billed the *uncovered* remainder at the regional reference price anyway - a statistic about last month's trades standing in for a seller who does not exist. A cohort in an empty market still reserved money against a full ration and only discovered the emptiness at clearing. Meanwhile `ConsumptionTarget::need_group` and `preference` existed, were validated, and were hashed into the fingerprint, but nothing read them, and `survival_fulfillment_bps` divided consumed kilograms by demanded kilograms - arithmetic under which a food a person needs *more* of scores as the more nourishing one.
+
+Needs are now measured as shares of themselves. Each target states the quantity of that good which closes the whole need alone, so a worse food asks for more of itself. `price_targets` walks each need through its substitutes in preference order, takes from the preferred good only what the book can actually deliver, and passes the still-open share to the next preference, which quotes its own larger ration at its own price. A closed need asks nobody else. `household_target_cost` became `household_target_purchase` and returns what can be had beside what it costs; `DemandIntent` separates what the household set out to buy from what it can pay for, so hunger stays fully visible as unmet demand and as a price signal while the money stops being reserved against an absence. `survival_fulfillment_bps` reads the cohort's profile, sums each substitute's fraction of a full ration, caps a share at one, and averages across needs - so half a bread ration plus half a grain ration feed a cohort exactly once, and the weight of a full bread ration in raw grain feeds 55.55% of the month. Content schema v9 states the substitution: bread at 1.0 per person, raw grain at 1.8, one need group.
+
+**The measured run got worse, and the reason is worth keeping.** Fingerprint `15507271165589345173`, simulation version 106, 148.5 ms per year, full workspace suite green, Clippy clean. Households that cannot buy bread now buy grain, and grain is the bakery's input: from 2040 the chronicle names it - *Northreach Bakery could not procure 2 762 000 milli-units of Grain*, Southvale Bakery the year after - and output reaches zero by 2045. The demo economy is eating its own supply chain. Before this slice the same defect was simply invisible, padded by money reserved against bread that was not there.
+
+**Next in this step: a converter must be able to defend its input.** A baker who turns one sack into two loaves can outbid a hungry family for that sack, because the sack is worth more to the baker. Firms procure before households shop, but on last month's cash, so when households take the bakery's customers the bakery loses exactly the revenue it needed to keep bidding. The fix is not a reserved quota for firms - that would be an unowned limit - but a bid judged by what the input is worth inside the recipe, on the same value-ceiling arithmetic ADR 0173 already applies to labour, with the firm losing honestly when a household will pay more. Two related gaps: no household can produce any food for itself, so a market failure is still a death sentence; and eating the harvest costs only this year's meals, because grain carries no seed cost into next year's planting.
+
+**Measured after the run: the demo world cannot feed itself, and now it admits it.** Grain capacity is 125 batches per month in Northreach and 125 in Southvale plus two single-batch credit cases, at 4000 milli per batch - about 1 008 000 milli of grain a month. The three bakeries hold 1500 batches of capacity between them and would consume 1 500 000 milli of grain to run full, so even with every grain baked the world produces at most ~2 016 000 milli of bread against a survival need of 3 000 000. The demo has been a two-thirds ration scenario from the first month, which is why *Survival consumption fell as low as 0.00%* and Eastport's livelihood stress sat pinned at 7497 for a decade before this slice touched anything. Eaten raw the same harvest closes 19% of the need. The recipe arithmetic says the shortfall is not a law of this world: one worker-month yields 4000 grain or 2000 bread, so feeding 3000 people takes 1500 bakers and 375 farmers out of a population of 3000, and the scenario staffs 1500 bakers against 250 farmers. The missing farms are affordable and the labour exists.
+
+So the primary defect is not the converter's bid after all - that reading came from the shortfall events alone, and the balance sheet corrects it. The defect is that **a decade of unfed households never became a farm.** ADR 0176 already says a shortage of an input is a reason to produce it, and ADR 0172 says supply answers the price signal, yet across fifty years the grain deficit never pulled a new grain firm into existence or expanded an existing one. Reading `firm_entry.rs` finds where the answer dies, and it is not the evidence: `current_regional_entry_evidence` does merge firm input shortfalls with household survival shortages exactly as ADR 0176 promised, and the founder search does find solvent actors. The break is the **size of the answer**. `STARTUP_CAPACITY_BATCHES = 1` and `STARTUP_WORKERS = 1`, so the most a fifty-year grain famine can call into existence is a one-worker farm producing 4000 milli a month; and founding discharges the pressure to zero, while `ENTRY_SIGNAL_BPS` requires three further months of full-strength evidence before the region may answer again. Against a gap near 1 000 000 milli a month the economy is allowed to build roughly 16 000 milli of annual capacity - four hundredths of what it needs - and, at the time this was written, no incumbent farm ever widened either. The reason given here first - that nothing in the world expands an existing firm's `capacity_batches` - was wrong, and step B10 corrects it: `capacity_investment.rs` does let a sold-out firm buy capacity out of its own cash. What was missing was the evidence, not the mechanism. Supply could be born, and it could grow, but only for a seller whose queue was made of households.
+
+That is the magic constraint: the cap on how fast productive capacity may appear is owned by nobody. A real founder builds to the size of the demand they can see and can finance, and a real farm with a queue at the gate adds a field. The next slice must let both happen on evidence and money that somebody pays - entry sized against the observed shortfall and the founder's purse rather than a constant, and an incumbent able to buy capacity out of earnings when the good it sells keeps selling out - with the same value-ceiling arithmetic that already governs a wage. Correcting the demo's farmer count instead would hide exactly the mechanism we are hunting.
+
+Secondary, still open: a converter cannot defend its input with a bid built from the value of the input inside its recipe (the same value-ceiling arithmetic ADR 0173 applies to labour); no household can grow any food of its own, so a market failure remains a death sentence; and grain carries no seed cost into next year's planting.
+
+See ADR 0180.
+
+### Step B10 (built): a queue at the gate is evidence for the supplier too
+
+The B9 diagnosis above was half wrong, and the correction is the whole of this step. `capacity_investment.rs` does expand an existing firm: a sold-out firm plans an expansion from its own trading month, commits its own cash, launches a project that takes `CONSTRUCTION_MONTHS` to build, and pays the budget out to the households that build the works. The mechanism was always there. What the farms never got was the evidence.
+
+Expansion is decided from `stockout_observations` and `average_unmet_market_demand`, which come from `MarketOfferOutcome::sold_out_while_demand_remained` - the seller emptied its shelf and somebody still wanted the good. Household clearing in `market.rs` fills that in honestly. Firm-to-firm procurement wrote the seller a blank row: `unsold: 0, unmet_market_demand: 0`. So a grain farm with a queue of bakeries at the gate read its month as "sold everything, nobody left wanting", scored zero stockouts, and was thrown out of `plan_capacity_expansion` on its first test.
+
+That is the magic restriction, and it is an ugly one: **whether an industry was allowed to grow depended on who its customer happened to be.** Sell to households and a sold-out month is a reason to build. Sell to firms and the same sold-out month is silence. The entire upstream of the economy - every intermediate good - was structurally forbidden from answering its own shortage, which is precisely why bakeries spent a decade unable to procure grain while the farms that were selling out every month never planted more.
+
+Procurement now records the same signal households have always given, under two rules. The unserved remainder of an order is accumulated into `unmet_by_market` keyed by `(region, good)` - the buyer's own market, the same key the household clearing uses. And only sellers in `exhausted_sellers`, whose entire offer was taken that month, may read it; a seller still holding stock turned nobody away and reads zero. The second rule is what keeps this from being a free growth coupon handed to every seller in a tight market. No constant was added and no threshold was tuned.
+
+Measured, seed 1, fifty years, `SIMULATION_VERSION` 107, fingerprint `11683835997810038817`, 146.6 ms per year. The chronicle now reports supply growth per year, and the honest result is that the run still dies: **two** capacity projects across fifty years, one in 2027 and one in 2033, and **zero** firms founded. Output still falls to nothing. This step removed a restriction, it did not rescue the economy, and it was not meant to.
+
+The queue is visible to the farms now, so the refusal has moved further down `plan_capacity_expansion`, and the next candidate is plain: **a firm may only grow out of its own till.** The purchase is capped at `affordable = firm.cash() / batch_cost`, and a firm that sells out every month is exactly the firm whose cash is thin and whose prospects are good. It cannot borrow one unit against those prospects, even though this world has financiers and a credit market. Nobody owns that bound either.
+
+See ADR 0181.
+
+### Step B11 (built): demand is not measured by the seller's ability to meet it
+
+The hunt for magic ceilings in the economy found the largest one yet, and it
+was hiding inside a name. `market_demand_ceiling_batches` claimed to measure
+what a market wanted, but it was clamped by `physical[firm_id]` - what the firm
+could make that month. Because physical feasibility never exceeds installed
+capacity, the expansion rule `ceiling >= capacity` could only fire in the exact
+instant a firm ran flat out with nothing binding it. One missing input or one
+thin month, and the market appeared to lose its appetite. A bakery with 9000
+milli-units of unserved demand reported a ceiling of zero.
+
+The ceiling now measures the market and nothing else; the physical clamp moved
+to the monthly production advisory, where it is true. Separately, the reason to
+expand was pulled apart from the money to do it: a firm's justified works now
+enter the credit funding gap beside payroll and inputs, so a firm may borrow to
+grow and not only to survive, judged by the credit rules that already existed.
+No new constants.
+
+Result over fifty years: capacity projects rose from 2 to 11, and output roughly
+doubled its ceiling, reaching 521671 in 2040 while annual excess deaths fell from
+188 to 15. The circuit is still not closed - after 2040 the growth reverses into
+a collapse that empties the economy by 2046, and fifty-year excess deaths are
+unchanged at 3153. Permanent stagnation has become a boom and a bust, which is a
+sharper question: something now consumes the larger economy instead of merely
+forbidding it. See ADR 0182.
+
 ### Authoritative hourly observatory clock and visual correction
 
 - Fixed the stale upper-left date by making the header react to every authoritative snapshot refresh. It now shows day, month, year, hour, pause state, and speed.
@@ -1537,3 +1621,370 @@ The demo economy collapses to zero output by 2047 with survival consumption pinn
 - Added visible Russian buttons for political, confidence, population, and production map modes, together with pause and 1/4/12/24/72-hour speed controls. Active, hover, and inactive states now have distinct strategic-command treatments.
 - Added a selected-country color flag and authoritative inspector bars for confidence, relative population, and relative production. Selection and snapshot changes rebuild these indicators without creating client-owned simulation values.
 - Real executable smoke launch remained stable for five seconds after the new Bevy interaction systems were installed. ADR 0166 records the boundary.
+
+### Step B12 - profit returns to the people who own the firm
+
+- Made firm entry observable: the CLI now reports how many openings were reviewed, how many were feasible, and which obstacle blocked the rest. Fifty years of runs showed openings rising from 21 to 72 with none ever feasible.
+- Found that owner income did not exist. `policy.dividend()` was read only by the fingerprint hash, so firms hoarded profit forever and `actor_cash` was never replenished; nobody could ever afford to found a firm.
+- Added an annual owner distribution: after twelve monthly cycles a solvent firm with an operating record pays its policy share of free cash - the till less payroll, wage arrears, input and investment commitments - through the existing dividend path. Obligations were factored into one `FirmObligationTerms` type shared by the lender and the boardroom. No new constants.
+- Corrected a silent scenario defect: economic and voting rights were passed to `OwnershipStake::new` in the wrong order, so no firm ever held whole economic ownership and every dividend was refused. A content test now pins the two apart.
+
+Result over fifty years: 32 years carry payouts, 2840491 minor units reach owners, and 152 firms are founded where there had never been one. `no solvent founder` vanishes as an obstacle, and excess deaths ease from 3153 to 3085. The collapse, though, moves earlier - output is nothing from 2038 and every region empties - because faster entry spends the same finite labour force sooner. The remaining entry obstacle is that a new firm can hire only by poaching at 110% of another employer's wage. See ADR 0183.
+
+### Step B13 - money has a place to sit
+
+- Added `observed_money_stock`: every minor unit in the world counted into household wealth, firm tills, owner purses and treasuries, emitted once a year as `MoneyStockMeasured` and rendered by the CLI. Nothing in the simulation reads it - it exists so that an empty purse cannot be mistaken for an empty granary.
+- Pinned the invariant that a payout moves money between hands and never makes any.
+
+Result: the total money stock is steady at about 3.52 million, so nothing leaks out of the world - but inside it the money walks one way. Firm tills fall from 2332482 to 4666 while owner purses take and hold about 68% of all the money there is; households never command more than a third. An owner has exactly one way to spend - founding a firm - and founding is barred once there is nobody left to hire. The bust is not a shortage of goods but a shortage of buyers holding money. See ADR 0184.
+
+### Step B14 - prudence comes before profit
+
+- Named the standing cost of running a firm for another month, `payroll + inputs`, apart from one-off claims like wage arrears and building commitments.
+- Added `observed_prudence_reserve`: the worst shortfall a firm can actually remember, taken as the largest gap between that monthly cost and the month's sales across its twelve-month operating memory. A firm that has never known a bad month keeps nothing back; an old scar heals as it falls out of memory. The board now distributes its share of free cash less that reserve. No new constant was introduced - the reserve is sized entirely by the firm's own record.
+- Pinned the behaviour: a month without sales is kept back from the owners.
+
+Result over fifty years (version 112, fingerprint 5898783262672582167, 228 tests): the mechanism holds but barely moves the world. Owner purses end at 2382218 instead of 2387768 and the collapse still arrives in 2038. The measurement explains why: owners were paid 979072 minor units in the first year alone - essentially the whole opening capital of every firm - because the world cannot tell a founder's capital from earned profit. `accounting.rs` records only the current month, so there is no paid-in capital and no retained earnings to distribute from. Meanwhile the credit market, the only channel that could send owner money back into production, moves 6 to 39 minor units a year. The next slice is that a firm may distribute what it has earned and never the capital it was founded with. See ADR 0185.
+
+### Step B15 - a firm distributes what it earned, never its capital
+
+- Gave every firm a memory of what it has earned: `firm_retained_earnings` accrues `sales_revenue - wages_paid - input_spend` at the moment the month is closed, and records a loss as readily as a profit. Money put into a firm - its founding endowment, an owner's injection against arrears, a lender's principal - raises the till without raising earnings, because none of it was earned.
+- The board now distributes its policy share of `min(free cash less the prudence reserve, retained earnings)` and strikes what it pays off the ledger, so the same profit cannot be handed over twice. No new constant: the bound is the firm's own trading record.
+- Two long-standing tests had to be rewritten. A diagnostic showed the boardroom world's bakery selling 100 minor units across a whole year, earning -20 and losing 4432 from its till - while the old rule paid a dividend every year. Those tests had been asserting that a loss-making firm must be liquidated into its owner's purse.
+
+Result over fifty years (version 113, fingerprint 5952391117261998594, 229 tests): the first-year liquidation is gone. Owners end year one with 3193 instead of 979093, and firm tills hold 3312078 instead of 2336178. Tills are no longer emptied at all - they end at 1156973 rather than 4666. Owners are paid in all 50 years rather than 32, but out of earnings: 1457940 in total against 2840491. The collapse is delayed by six years, from 2038 to 2044, and 2041 records 413437 of output where the old economy never passed 274000. It is a delay, not a cure: output still reaches nothing, so capital staying inside firms buys years without closing the circuit. See ADR 0186.
+
+### Step B16 - a works opens at the size of the hunger it answers
+
+The hunger in the run turned out not to be a money problem. Payroll pays
+`min(till, owed)` and credits households correctly; survival fulfilment measures
+food actually eaten against the requirement written in the cohort's own profile,
+so zero means nothing arrived. Only Eastport starved, and the reason was in the
+content: two grain farms supply a million milli-units a month while three
+bakeries need one and a half million, and Eastport - the only region of the
+second country - has no grain of its own and one month of opening stock.
+
+The world tried to answer and could not, for a purely mechanical reason. Every
+new firm opened with exactly one batch of capacity and one worker, four thousand
+milli-units against a deficit of five hundred thousand: a hundred and twenty-five
+times too small. A fixed startup size is a magic constraint - nothing measures it
+and nothing can argue with it.
+
+Entry size is now derived from three real quantities: the unmet demand that
+called the firm into being, the hands the region can spare (converted into
+batches at one worker-month per thousand milli-units of recipe labour), and the
+cash the founder can commit. The founder is chosen before the size, because how
+large a works can open is partly the question of whose wallet stands behind it.
+Cost scales in full - a month of materials per batch, three months of wages per
+worker - so a firm never opens already unable to buy what it must convert. A crew
+poached from an incumbent is removed in the same number it is hired in; the
+fifty-year run caught the mismatch at once with `InvalidEmployment`.
+
+Result over fifty years (version 114, fingerprint 5960198914824426029, 231
+tests): the supply side finally answers what it is shown. Output peaks at 1769829
+in 2039 against 413437 before - more than four times higher - while 2038 alone
+reaches 813618 where the old economy never passed 274000. Fewer firms are founded
+(21 supply-growth reports against 38) but each is built to a size that matters.
+Households end with 1238463 rather than 979344; owners take 933131 over 45 years
+instead of 1457940 over 50, because capital goes into capacity rather than purses.
+The circuit is still not closed: output collapses to nothing by 2043 after the
+boom, and Eastport still starves. The failure changed shape - from a world unable
+to respond to a world that responds hugely and then falls over. See ADR 0187.
+
+### Step B17 - a shortage moves a price only when it is a shortage of goods
+
+Four facts were entering the price that were not facts about goods. Intermediate
+demand was invisible to the market, so an input never learned that industry
+wanted it. A buyer who judged an input dearer than the output it would become,
+and walked away, left an `unmet` record that lifted the very price it had
+refused - a ratchet in which unaffordability fed itself. A buyer with an empty
+till did the same. And a foreign supplier was blamed for both, so two countries
+could drift into hostility because a domestic bakery was broke.
+
+Intermediate demand is now shown to the market: `observed_market_pressure` reads
+seller books, firm purchases and firm input shortfalls. `input_value_ceiling`
+prices one batch of the output, subtracts the other materials, and refuses any
+input dearer than that. The settlement separates `unmet` from
+`effective_unmet_by_market`, and only the second may move a price - a shortfall
+counts only when the route was not exhausted, the buyer did not refuse on price,
+and the buyer had cash. Grievance skips all three cases. The grievance fixture,
+which had been built on a cashless bakery, was rebuilt on a funded buyer against
+a farm that grows one batch where two are needed.
+
+Result over fifty years (version 115, fingerprint 9829297342219149187, 233
+tests): the price signal no longer feeds itself. Total money grows by 118227
+(3460015 to 3578242) where version 114 grew by 410363 - the ratchet had been
+manufacturing nominal value out of unaffordability. The boom is smaller and
+honest, peaking at 1230331 against 1769829, because part of the old peak was
+priced on demand nobody could pay. Deaths flat at 3126 against 3132.
+
+The collapse survives: output dies after the peak and stays dead for thirty
+years, nine "could not procure" reports remain, entry is still refused twelve
+times for `RaiseExceedsWorkValue` and twelve for `NoSolventFounder`. Removing the
+false signal uncovered what was underneath - the wage-derived variable cost floor
+lifts an input above the worth of the good it becomes within a single month, and
+the worker paid that wage cannot buy the output it priced. That is the next
+slice. See ADR 0188.
+
+### Step B18 - costs remove supply, they do not move a price
+
+The floor uncovered by B17 had no owner. `revised_price` refused to let a
+reference price sit below the variable cost of the cheapest local producer -
+jumping to cost in one month from below, refusing any cut at cost - and this
+limit lived inside a measurement. No firm chose it, no firm funded it, nobody
+could stop paying for it. Meanwhile the seller, the only party with standing to
+refuse a price, had no say at all: it offered its goods at the reference price
+times its markup whatever they cost to make. A cost was moving a price, which
+nobody can do, and was not removing supply, which is all a cost does.
+
+Now `firm_variable_unit_cost` prices one whole unit of a firm's own output from
+the inputs it must replace at local prices and the wage it has agreed to pay,
+and `plan_firm_market_offers` will not ask less than that. The limit has an owner
+and a bill: the firm holds the line and pays with unsold stock, forgone revenue
+and a payroll owed from the same till, so it can hold only while its cash lasts.
+In exchange, costs left price formation entirely - no floor, no `cost_floor` or
+`floor_binding` on the adjustment or the event, and `local_variable_cost_floor`
+deleted rather than kept as decoration.
+
+Six fixtures failed at once, all built on firms that lost money on every unit
+and never noticed: a farm paying 50 a month to grow grain priced at 5, ten times
+the value of the work by the model's own reckoning. Repricing the goods was not
+enough - at bread 60 the two wages in that world could not buy back the bread
+they baked - so bread sits at 50, where two loaves cover the grain and the
+baker's month and the wages buy back exactly what is baked. The circuit closes
+at zero profit. Two tests whose premises were themselves the magic were rewritten
+to earn their losses, and one recorded a new finding: a 20% markup cannot be
+realised at all where wages are the only income.
+
+Result over fifty years (version 116, fingerprint 2108872914777405248, 234 core
+tests): money nearly stops being manufactured, growing by 37140 against 118227 in
+version 115 and 410363 in version 114 - the floor had been a nominal-value press.
+`RaiseExceedsWorkValue` falls from twelve blocked openings to none, and
+`NoSolventFounder` from twelve to none; what blocks entry now is that there is no
+worker to be had, 48 times, which is a real constraint with a real owner. Deaths
+3068 against 3126.
+
+The collapse got worse, and says why. Output dies by 2034 rather than 2043 and
+stays dead for forty years, because a reference price now learns only from
+pressure and never from the prices at which trades were actually paid or asked.
+It drifts toward 1 while sellers ask their real costs, no offer is accepted,
+supply withdraws, and everything that reads the reference - `input_value_ceiling`,
+the valuation of entry, procurement - reads a number no trade supports. The floor
+was a wrong answer to a real question. Making a price learn from what was
+actually paid and actually asked is the next slice. See ADR 0189.
+
+### Economy rebuild Slice 0 - canonical economic invariant report
+
+The source audit and rebuild plan now have an executable observation boundary.
+`World::economic_invariant_report` is a deterministic, read-only projection of
+liquid money, named and unnamed claims, unfunded commitments, physical goods
+stocks and invariant findings. Findings carry a stable typed code, severity,
+entity, measured and allowed values, audit references and a fixed explanation;
+they are sorted canonically and reporting never repairs or mutates the world.
+
+The first hard gate covers regional population against cohort population,
+cohort people against households, active labor commitments against available
+people, negative liquid balances, route/freight/terminal capacity, and checked
+aggregate arithmetic. Known but not yet representable counterparties remain
+visible as non-fatal model gaps: household debt, public debt, unrestricted
+investment commitments, unrestricted program carryover and disagreement between
+firm workforce and employment agreements. Goods are split into firm inventory,
+public reserve and in-transit stock rather than collapsed into one opaque total.
+
+`reconcile_money_transition` compares two reports with an explicit authorized
+net issuance. It does not infer issuance from debt or from balance changes:
+`closing - opening - authorized net issuance` must be exactly zero. A deliberate
+cash sink therefore fails while an equal authorized retirement reconciles.
+
+Eleven focused causal tests cover a valid world, population/household corruption,
+labor overcommitment without mutation, unexplained money loss and authorized
+retirement, payerless household/public debt and retired fallback income,
+duplicated inventory, formal-freight operating-cost loss, aggregate
+freight-contract overbooking, and deterministic cloned/replayed reports. The
+monthly and annual cycle results now carry their closing report, and
+`docs/design/economy-defect-test-matrix.toml` maps audit findings to explicit,
+non-ignored assertions. The full workspace gate passes: formatting, all-target
+checks, strict Clippy, 245 core unit tests plus all integration/content/observatory
+tests (one pre-existing ignored liveness target), and workspace documentation. The release seed-1 fifty-year run remains version
+116 with fingerprint `2108872914777405248`; the observational slice changed no
+simulation rule, event, state serialization or fingerprint input.
+
+The next gate is Slice 1 from `docs/economy-rebuild-plan.md`: introduce the
+minimal balanced-posting kernel and migrate one narrow real transfer through it,
+without allowing duplicate direct mutation or inventing an anonymous
+counterparty.
+
+### Economy rebuild Slice 1A - balanced postings for the first real transfers
+
+ADR 0190 now has an executable vertical slice. `MoneyAccountId` names household
+liquid wealth, firm operating cash, country treasuries and actor liquidity;
+`MoneyTransaction` accepts only positive canonical postings whose total decreases
+exactly equal total increases. Settlement preflights every closing balance before
+writing any of them. Successful settlements append a monotonic, dated,
+canonically ordered `MoneyJournalEntry`; the journal is serialized, exposed for
+inspection and included in the stable world fingerprint.
+
+Paid payroll now moves firm operating cash to household liquidity through one
+balanced transaction per paid agreement. Household market settlement moves the
+buyer's complete spend to seller goods revenue and optional carrier freight
+revenue, including canonical aggregation when seller and carrier are the same
+firm. Direct emergency relief moves a named country's treasury balance to a named
+cohort. The three migrated paths no longer pair independent debit/credit calls
+with the journal, so a failed preflight cannot leave one side changed or append a
+false history entry.
+
+The release gate found one boundary that focused tests had missed: a positive
+unit price multiplied by a sub-unit physical fill may round to zero whole minor
+units. That fill still moves goods, but it is not a money transaction. Market
+settlement now accepts it only when goods and freight monetary components are
+also exactly zero, moves no balance, and writes no fake zero-valued journal entry.
+A dedicated regression test covers the distinction.
+
+Result over fifty years: simulation version 117, fingerprint
+`5540401480800370794`, and 2017 settled transfers in the journal (40.3 per
+simulated year). The measured release run took 18.131 seconds, or 362.6 ms/year,
+against 17.727 seconds and 354.5 ms/year for version 116: an 8.1 ms/year (2.3%)
+measured cost for retained causal accounting history. The full gate passes:
+formatting, workspace all-target checks, strict Clippy, 250 core unit tests plus
+all integration/content/observatory tests, workspace documentation, and the
+seed-1 fifty-year release run. One pre-existing liveness target remains ignored.
+
+This is the accepted first vertical gate, not the whole of Slice 1. Firm
+procurement, taxes and dividends still need the same posting path; restricted
+accounts, explicit currency issue/retire authority and the shared claim registry
+remain later Slice 1 deliverables. The next accounting sub-slice is firm
+procurement, followed by taxes and owner distributions, before Slice 2 changes
+labor or household-income semantics.
+
+### Economy rebuild Slice 1B - firm procurement joins the journal
+
+Firm-to-firm input settlement now uses the same account kernel as payroll and
+household purchases. Each paid fill decreases the buyer's operating account and
+credits seller goods revenue plus optional carrier freight revenue. The
+transaction purpose names buyer, seller, good and carrier; same-firm seller and
+carrier postings aggregate canonically. Firm inventory still moves on the
+staged cloned ledger, and journal entries are prepared before that ledger is
+committed.
+
+The same rounding boundary applies as in the household market: a positive-priced
+sub-unit input fill may round to zero minor units. It may move physical inventory
+only when both goods and freight monetary components are also zero; it cannot
+create an empty or zero-valued transaction. The first-month production-chain gate
+now asserts the exact `FirmPurchase` journal identity in addition to cash,
+inventory and money conservation, while the existing direct/command annual replay
+compares the expanded journal as part of the world.
+
+Result over fifty years: simulation version 118, fingerprint
+`1921886831440795849`, and 2700 journal entries (54.0 per simulated year). The
+release run took 18.257 seconds, or 365.1 ms/year: 2.5 ms/year (0.7%) above the
+three-flow version 117 and 10.6 ms/year (3.0%) above version 116 without a
+journal. Formatting, all-target workspace checks, strict Clippy, 250 core tests
+plus every integration/content/observatory test, and the release run pass. Taxes
+and owner distributions are the next conserved transfers; claim creation and
+currency authority remain deliberately separate work.
+
+### Economy rebuild Slice 1C - taxes and owner distributions join the journal
+
+Annual sales-tax collection and owner distributions now cross the same balanced
+posting boundary as trade and payroll. A paid tax decreases the firm's operating
+account and increases the named country's treasury through `SalesTax`; one owner
+distribution decreases the firm once and credits every owner with a positive
+rounded share through a single `OwnerDistribution` transaction. Canonical
+ownership order still receives the indivisible remainder, while zero-rounded
+shares create no fake posting.
+
+Tax settlement is staged on cloned firm and country maps, journal entries are
+prepared before state commitment, and the existing `FirmSalesTaxPaid` events are
+emitted only after settlement succeeds. Annual country planning remains the owner
+of the wider fiscal close: its already-planned treasury replaces the temporary tax
+credit after recording revenue and spending, while the journal preserves the
+causal transfer that produced the revenue. Dividend settlement likewise prepares
+the journal before changing firm and actor balances. Rejected ownership totals
+leave balances and the journal unchanged.
+
+The fiscal-circuit gate now proves that journaled firm decreases equal both paid
+tax events and recorded country revenue. Board tests prove deterministic
+multi-owner remainder allocation, omission of zero-valued credits, monetary
+conservation, and failure atomicity. Direct/replay equality continues to compare
+the serialized journal as part of `World`.
+
+Result over fifty years: simulation version 119, fingerprint
+`18361472839204730196`, and 2863 journal entries (57.3 per simulated year). The
+release run took 18.181 seconds, or 363.6 ms/year. That is 1.5 ms/year faster than
+the version-118 sample and remains within benchmark noise; it is 1.0 ms/year
+(0.3%) above version 117 and 9.1 ms/year (2.6%) above version 116 without a
+journal. Formatting, documentation, all-target workspace checks, strict Clippy,
+252 core tests plus every integration/content/observatory test, diff validation,
+and the release run pass. Restricted/escrow accounts, explicit issue/retire
+authority, and the shared claim registry remain before Slice 1 is complete.
+
+### Economy rebuild Slice 1D - firm investment escrow becomes real money
+
+A firm investment commitment is no longer a promise field outside the money
+stock. `FirmInvestmentEscrow` is a typed firm-owned restricted account.
+`InvestmentReservation` transfers operating cash into that account without
+changing total firm wealth, while making the reserved money unavailable to
+payroll, procurement, dividends or another project.
+
+Launching a project now owns the complete financial settlement. One
+`InvestmentOutlay` transaction decreases the project's escrow and credits every
+local household cohort that builds the works using the existing deterministic
+largest-remainder allocation. The capacity-investment caller no longer performs a
+second raw household credit, and a project launched directly through the shared
+command path cannot silently consume the commitment without paying builders.
+Project construction time and capacity behavior are unchanged.
+
+Restricted balances are included in observed firm money, so reservation does not
+look like currency destruction. The AB-5 known-model-gap finding for investment
+commitments has been removed; government-program carryover remains the next
+restricted-account gap. Tests prove reservation and release conservation,
+purpose/account identity, exact builder receipt, insufficient-cash and
+insufficient-escrow atomicity, and the existing observed-capacity path.
+
+Result over fifty years: simulation version 120, fingerprint
+`15155816647335977890`, and 2965 journal entries (59.3 per simulated year). The
+release run took 18.011 seconds, or 360.2 ms/year. That sample is 3.4 ms/year
+faster than version 119 and remains benchmark noise; it is 5.7 ms/year (1.6%)
+above version 116 without a journal. Formatting, documentation, diff validation,
+all-target workspace checks, strict Clippy, 254 core tests plus every
+integration/content/observatory test, and the release run pass. Program escrow,
+explicit issue/retire authority, and the shared claim registry remain before
+Slice 1 is complete.
+
+### Economy rebuild Slice 1E acceptance contract - program escrow and explicit debt issuance
+
+This gate closes the remaining restricted-account defect without pretending that
+public borrowing is an ordinary transfer. The existing program
+`carryover_funding` field becomes the backing balance of typed
+`GovernmentProgramEscrow`. Treasury appropriation transfers existing
+`CountryTreasury` money into that account. Debt appropriation uses an explicit
+journal `Issue` operation, increases public debt by exactly the issued amount and
+credits escrow directly; it must not route through or inflate uncommitted
+treasury cash.
+
+Execution spends only from escrow. Every positive regional delivery credits one
+canonical local household counterparty, preferring the existing temporary-worker
+recipient when labor is required and otherwise representing the local public
+service workers and contractors who delivered the service. One multi-credit
+`GovernmentProgramOutlay` entry must equal the exact delivered total. A zero
+appropriation or zero delivery remains an explicit political choice but creates
+no fake zero-valued posting.
+
+Acceptance requires:
+
+- transaction identity distinguishes balanced `Transfer`, monetary `Issue` and
+  monetary `Retire`; existing transfers remain balanced and unchanged;
+- appropriation and execution preflight on staged state before any world mutation;
+- program escrow is included in observed public money, while public debt remains
+  a claim rather than another cash balance;
+- insufficient treasury, debt-headroom failure, missing regional recipients and
+  escrow overdraft are atomic and append neither events nor journal entries;
+- declaration, scheduling, regional shares, institutional/material/labor
+  absorption, service improvement, political effects and cancellation semantics
+  remain unchanged;
+- direct command and replay equality include the money journal;
+- the `ProgramCarryoverHasNoRestrictedAccount` model-gap finding is removed only
+  after both appropriation sources and execution use the authoritative account;
+- formatting, all-target checks, strict Clippy, full workspace tests,
+  documentation, diff validation and the seed-1 fifty-year release gate pass
+  before simulation version 121 is accepted.

@@ -558,8 +558,7 @@ impl World {
                 .get()
                 .checked_add(evidence.average_unmet.get())
                 .ok_or(WorldError::ArithmeticOverflow("market demand ceiling"))?
-                .div_ceil(output_per_batch)
-                .min(physical[firm_id]);
+                .div_ceil(output_per_batch);
             let average_produced = history.iter().try_fold(0_u128, |sum, observation| {
                 sum.checked_add(u128::from(observation.produced_batches()))
                     .ok_or(WorldError::ArithmeticOverflow(
@@ -573,7 +572,10 @@ impl World {
             let advisory = if evidence.stockouts > evidence.unsold_observations
                 && margin.is_some_and(|value| value.minor_units() > 0)
             {
-                demand_ceiling
+                // What the market wants is one question; what this month's
+                // workers, inputs and till allow is another. Only the plan for
+                // the month is bound by the second.
+                demand_ceiling.min(physical[firm_id])
             } else if evidence.unsold_observations > evidence.stockouts
                 || margin.is_some_and(|value| value.minor_units() <= 0)
             {

@@ -390,6 +390,7 @@ pub enum WorldError {
     InvalidPrice,
     InvalidActorCash,
     InvalidMarketClearing(&'static str),
+    InvalidMoneyTransaction(&'static str),
     CommercialCycleAlreadyExecuted(SimDate),
     MonthlyStageAlreadyExecuted {
         stage: &'static str,
@@ -548,6 +549,9 @@ impl fmt::Display for WorldError {
             Self::InvalidActorCash => formatter.write_str("actor initial cash cannot be negative"),
             Self::InvalidMarketClearing(reason) => {
                 write!(formatter, "invalid market clearing: {reason}")
+            }
+            Self::InvalidMoneyTransaction(reason) => {
+                write!(formatter, "invalid money transaction: {reason}")
             }
             Self::CommercialCycleAlreadyExecuted(date) => {
                 write!(formatter, "commercial cycle already executed for {date}")
@@ -719,7 +723,11 @@ pub struct World {
     pub(crate) recipe_required_skill: BTreeMap<RecipeId, crate::SkillId>,
     pub(crate) cohort_skills: BTreeMap<(CohortId, crate::SkillId), u8>,
     pub(crate) firms: BTreeMap<FirmId, Firm>,
-    pub(crate) firm_entry_pressure: BTreeMap<(RegionId, GoodId), u8>,
+    /// Accumulated evidence that a region wants a good it does not make.
+    /// Severity over time, not a tally of months: a month that went half
+    /// unsupplied counts half as much as a month with nothing on the shelf,
+    /// and evidence fades rather than being wiped by one eased month.
+    pub(crate) firm_entry_pressure: BTreeMap<(RegionId, GoodId), crate::accumulator::LeakyPressure>,
     pub(crate) firm_production_targets: BTreeMap<FirmId, u64>,
     pub(crate) firm_monthly_accounts: BTreeMap<FirmId, crate::FirmMonthlyAccounts>,
     pub(crate) firm_expectations: BTreeMap<FirmId, crate::FirmExpectations>,
@@ -737,7 +745,23 @@ pub struct World {
     /// expansion, and the chronicle all read household demand only, and a
     /// permanently starved input channel looks exactly like a healthy one.
     pub(crate) monthly_firm_input_shortfalls: BTreeMap<(RegionId, GoodId), crate::QuantityMilli>,
+    /// The part of that shortfall which was effective demand: the buyer held
+    /// the money, the price was one the input could still earn back, and no
+    /// seller within reach had the good. Price formation may read only this.
+    /// A queue of buyers who could not pay, would not pay above what the good
+    /// is worth to them, or could not be reached at all is not scarcity, and
+    /// letting it bid a price up builds a ratchet: the price climbs on demand
+    /// that never becomes a trade, and nothing it does can ever bring it back.
+    pub(crate) monthly_firm_effective_input_shortfalls:
+        BTreeMap<(RegionId, GoodId), crate::QuantityMilli>,
     pub(crate) firm_operating_history: BTreeMap<FirmId, Vec<crate::FirmOperatingObservation>>,
+    /// What each firm has earned by trading, less what it has already handed to
+    /// its owners. Money put into a firm - the capital it was founded with, an
+    /// owner's injection against wage arrears, a loan - never appears here,
+    /// because none of it was earned. Without this distinction a firm's opening
+    /// endowment is indistinguishable from profit the day after it is founded,
+    /// and the first payout is a liquidation wearing the clothes of a dividend.
+    pub(crate) firm_retained_earnings: BTreeMap<FirmId, Money>,
     pub(crate) monthly_firm_market_outcomes: BTreeMap<FirmId, Vec<crate::MarketOfferOutcome>>,
     pub(crate) employment_agreements: BTreeMap<(FirmId, CohortId), crate::EmploymentAgreement>,
     pub(crate) regional_labor_market: BTreeMap<RegionId, crate::RegionalLaborMarketObservation>,
@@ -751,6 +775,8 @@ pub struct World {
     pub(crate) firm_appointments: BTreeMap<(FirmId, ActorId, CorporateRole), FirmAppointment>,
     pub(crate) board_resolutions: BTreeMap<ResolutionId, BoardResolution>,
     pub(crate) actor_cash: BTreeMap<ActorId, Money>,
+    #[serde(default)]
+    pub(crate) money_journal: Vec<crate::MoneyJournalEntry>,
     pub(crate) lender_credit_history: BTreeMap<ActorId, crate::LenderCreditHistory>,
     pub(crate) borrower_credit_history: BTreeMap<FirmId, crate::BorrowerCreditHistory>,
     pub(crate) committed_investments: BTreeMap<FirmId, Money>,
@@ -859,9 +885,11 @@ impl World {
             firm_creditor_claims: BTreeMap::new(),
             firm_credit_offers: BTreeMap::new(),
             firm_operating_history: BTreeMap::new(),
+            firm_retained_earnings: BTreeMap::new(),
             monthly_firm_market_outcomes: BTreeMap::new(),
             monthly_firm_procurement_purchases: BTreeMap::new(),
             monthly_firm_input_shortfalls: BTreeMap::new(),
+            monthly_firm_effective_input_shortfalls: BTreeMap::new(),
             employment_agreements: BTreeMap::new(),
             regional_labor_market: BTreeMap::new(),
             regional_skill_labor_market: BTreeMap::new(),
@@ -872,6 +900,7 @@ impl World {
             firm_appointments: BTreeMap::new(),
             board_resolutions: BTreeMap::new(),
             actor_cash: BTreeMap::new(),
+            money_journal: Vec::new(),
             lender_credit_history: BTreeMap::new(),
             borrower_credit_history: BTreeMap::new(),
             committed_investments: BTreeMap::new(),
@@ -1434,6 +1463,33 @@ impl World {
         hash.write_u64(outcome.unmet_market_demand.get());
     }
 
+    /// What firms bought this month, what they went without, and how much of
+    /// that shortfall was demand a seller could actually have satisfied. The
+    /// last of the three is kept apart from the first two on purpose: a
+    /// shortage and a shortage that could have been sold into are different
+    /// facts, and only the second may move a price.
+    fn write_procurement_evidence_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.monthly_firm_procurement_purchases.len() as u64);
+        for ((firm, good), (quantity, spend)) in &self.monthly_firm_procurement_purchases {
+            hash.write_u32(firm.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
+            hash.write_i64(spend.minor_units());
+        }
+        hash.write_u64(self.monthly_firm_input_shortfalls.len() as u64);
+        for ((region, good), quantity) in &self.monthly_firm_input_shortfalls {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
+        }
+        hash.write_u64(self.monthly_firm_effective_input_shortfalls.len() as u64);
+        for ((region, good), quantity) in &self.monthly_firm_effective_input_shortfalls {
+            hash.write_u32(region.get());
+            hash.write_u32(good.get());
+            hash.write_u64(quantity.get());
+        }
+    }
+
     fn write_accounting_fingerprint(&self, hash: &mut StableHasher) {
         for date in [
             self.last_commercial_cycle_date,
@@ -1495,19 +1551,12 @@ impl World {
                 }
             }
         }
-        hash.write_u64(self.monthly_firm_procurement_purchases.len() as u64);
-        for ((firm, good), (quantity, spend)) in &self.monthly_firm_procurement_purchases {
+        hash.write_u64(self.firm_retained_earnings.len() as u64);
+        for (firm, earnings) in &self.firm_retained_earnings {
             hash.write_u32(firm.get());
-            hash.write_u32(good.get());
-            hash.write_u64(quantity.get());
-            hash.write_i64(spend.minor_units());
+            hash.write_i64(earnings.minor_units());
         }
-        hash.write_u64(self.monthly_firm_input_shortfalls.len() as u64);
-        for ((region, good), quantity) in &self.monthly_firm_input_shortfalls {
-            hash.write_u32(region.get());
-            hash.write_u32(good.get());
-            hash.write_u64(quantity.get());
-        }
+        self.write_procurement_evidence_fingerprint(hash);
         hash.write_u64(self.monthly_firm_market_outcomes.len() as u64);
         for (firm, outcomes) in &self.monthly_firm_market_outcomes {
             hash.write_u32(firm.get());
@@ -1853,10 +1902,10 @@ impl World {
             hash.write_u8(*months);
         }
         hash.write_u64(self.firm_entry_pressure.len() as u64);
-        for ((region, good), months) in &self.firm_entry_pressure {
+        for ((region, good), pressure) in &self.firm_entry_pressure {
             hash.write_u32(region.get());
             hash.write_u32(good.get());
-            hash.write_u8(*months);
+            hash.write_u32(pressure.bps());
         }
         hash.write_u64(self.firm_production_targets.len() as u64);
         for (firm, batches) in &self.firm_production_targets {
@@ -1940,6 +1989,144 @@ impl World {
         }
     }
 
+    fn write_optional_firm_fingerprint(hash: &mut StableHasher, firm: Option<FirmId>) {
+        match firm {
+            None => hash.write_u8(0),
+            Some(firm) => {
+                hash.write_u8(1);
+                hash.write_u32(firm.get());
+            }
+        }
+    }
+
+    fn write_money_purpose_fingerprint(
+        hash: &mut StableHasher,
+        purpose: crate::MoneyTransactionPurpose,
+    ) {
+        match purpose {
+            crate::MoneyTransactionPurpose::Payroll { firm, cohort } => {
+                hash.write_u8(1);
+                hash.write_u32(firm.get());
+                hash.write_u32(cohort.get());
+            }
+            crate::MoneyTransactionPurpose::HouseholdPurchase {
+                buyer,
+                seller,
+                good,
+                carrier,
+            } => {
+                hash.write_u8(2);
+                hash.write_u32(buyer.get());
+                hash.write_u32(seller.get());
+                hash.write_u32(good.get());
+                Self::write_optional_firm_fingerprint(hash, carrier);
+            }
+            crate::MoneyTransactionPurpose::EmergencyRelief { country, cohort } => {
+                hash.write_u8(3);
+                hash.write_u32(country.get());
+                hash.write_u32(cohort.get());
+            }
+            crate::MoneyTransactionPurpose::FirmPurchase {
+                buyer,
+                seller,
+                good,
+                carrier,
+            } => {
+                hash.write_u8(4);
+                hash.write_u32(buyer.get());
+                hash.write_u32(seller.get());
+                hash.write_u32(good.get());
+                Self::write_optional_firm_fingerprint(hash, carrier);
+            }
+            crate::MoneyTransactionPurpose::SalesTax { firm, country } => {
+                hash.write_u8(5);
+                hash.write_u32(firm.get());
+                hash.write_u32(country.get());
+            }
+            crate::MoneyTransactionPurpose::OwnerDistribution { firm } => {
+                hash.write_u8(6);
+                hash.write_u32(firm.get());
+            }
+            crate::MoneyTransactionPurpose::InvestmentReservation { firm } => {
+                hash.write_u8(7);
+                hash.write_u32(firm.get());
+            }
+            crate::MoneyTransactionPurpose::InvestmentOutlay {
+                firm,
+                project,
+                region,
+            } => {
+                hash.write_u8(8);
+                hash.write_u32(firm.get());
+                hash.write_u32(project.get());
+                hash.write_u32(region.get());
+            }
+            crate::MoneyTransactionPurpose::GovernmentProgramAppropriation { program, country } => {
+                hash.write_u8(9);
+                hash.write_u32(program.get());
+                hash.write_u32(country.get());
+            }
+            crate::MoneyTransactionPurpose::GovernmentProgramOutlay { program, country } => {
+                hash.write_u8(10);
+                hash.write_u32(program.get());
+                hash.write_u32(country.get());
+            }
+        }
+    }
+
+    fn write_money_account_fingerprint(hash: &mut StableHasher, account: crate::MoneyAccountId) {
+        match account {
+            crate::MoneyAccountId::HouseholdLiquid(cohort) => {
+                hash.write_u8(1);
+                hash.write_u32(cohort.get());
+            }
+            crate::MoneyAccountId::FirmOperating(firm) => {
+                hash.write_u8(2);
+                hash.write_u32(firm.get());
+            }
+            crate::MoneyAccountId::CountryTreasury(country) => {
+                hash.write_u8(3);
+                hash.write_u32(country.get());
+            }
+            crate::MoneyAccountId::ActorLiquid(actor) => {
+                hash.write_u8(4);
+                hash.write_u32(actor.get());
+            }
+            crate::MoneyAccountId::FirmInvestmentEscrow(firm) => {
+                hash.write_u8(5);
+                hash.write_u32(firm.get());
+            }
+            crate::MoneyAccountId::GovernmentProgramEscrow(program) => {
+                hash.write_u8(6);
+                hash.write_u32(program.get());
+            }
+        }
+    }
+
+    fn write_money_journal_fingerprint(&self, hash: &mut StableHasher) {
+        hash.write_u64(self.money_journal.len() as u64);
+        for entry in &self.money_journal {
+            hash.write_u64(entry.id().get());
+            hash.write_i32(entry.date().year());
+            hash.write_u16(entry.date().day_of_year());
+            hash.write_u8(match entry.kind() {
+                crate::MoneyTransactionKind::Transfer => 1,
+                crate::MoneyTransactionKind::Issue => 2,
+                crate::MoneyTransactionKind::Retire => 3,
+            });
+            Self::write_money_purpose_fingerprint(hash, entry.purpose());
+            hash.write_u64(entry.postings().len() as u64);
+            for posting in entry.postings() {
+                Self::write_money_account_fingerprint(hash, posting.account());
+                hash.write_u8(match posting.direction() {
+                    crate::MoneyPostingDirection::Decrease => 1,
+                    crate::MoneyPostingDirection::Increase => 2,
+                });
+                hash.write_i64(posting.amount().minor_units());
+            }
+        }
+    }
+
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn stable_fingerprint(&self) -> u64 {
@@ -1963,6 +2150,7 @@ impl World {
         self.write_terminal_fingerprint(&mut hash);
         self.write_employment_fingerprint(&mut hash);
         self.write_accounting_fingerprint(&mut hash);
+        self.write_money_journal_fingerprint(&mut hash);
         self.write_market_fingerprint(&mut hash);
         hash.write_u64(self.actor_cash.len() as u64);
         for (actor, cash) in &self.actor_cash {
@@ -2003,6 +2191,8 @@ impl World {
                 hash.write_u8(target.tier().fingerprint_tag());
                 hash.write_u8(target.basis().fingerprint_tag());
                 hash.write_u64(target.monthly_quantity().get());
+                hash.write_u8(target.need_group());
+                hash.write_u8(target.preference());
             }
         }
         hash.write_u64(self.regional_prices.len() as u64);

@@ -1,6 +1,6 @@
 //! Versioned content loading and validation for A.D.A.M.
 //!
-//! Content schema v8: a scenario is a TOML document (see `assets/demo.toml`)
+//! Content schema v9: a scenario is a TOML document (see `assets/demo.toml`)
 //! loaded into a [`World`] through [`world_from_toml_str`]. The embedded
 //! Stage 0 demo scenario keeps telling two contrasting stories under the 20%
 //! final-sales tax, the only monetary sink of the closed economy:
@@ -25,9 +25,9 @@ use adam_core::{
 };
 
 /// Content schema version understood by this crate.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
-/// The embedded Stage 0 demo scenario in content schema v8.
+/// The embedded Stage 0 demo scenario in content schema v9.
 pub const DEMO_SCENARIO_TOML: &str = include_str!("../assets/demo.toml");
 
 /// Errors raised while loading scenario content.
@@ -108,7 +108,16 @@ struct TargetSpec {
     good: u32,
     tier: String,
     basis: String,
+    /// The amount of *this* good that closes the whole need on its own. A
+    /// worse food asks for more of itself for the same share of the need.
     quantity_milli: u64,
+    /// Targets sharing a non-zero group within a tier meet one and the same
+    /// need; zero means the good stands alone and nothing can replace it.
+    #[serde(default)]
+    need_group: u8,
+    /// Order in which the household works through the substitutes of a need.
+    #[serde(default)]
+    preference: u8,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -330,7 +339,7 @@ pub fn observatory_world(seed: u64) -> Result<World, WorldError> {
     Ok(world)
 }
 
-/// Builds a [`World`] from a content schema v8 TOML scenario document.
+/// Builds a [`World`] from a content schema v9 TOML scenario document.
 ///
 /// # Errors
 /// Returns [`ContentError`] when the document cannot be parsed, violates the
@@ -386,12 +395,17 @@ fn register_catalog(world: &mut World, spec: &ScenarioSpec) -> Result<(), Conten
     for profile in &spec.consumption_profiles {
         let mut targets = Vec::new();
         for target in &profile.targets {
-            targets.push(ConsumptionTarget::new(
+            let base = ConsumptionTarget::new(
                 GoodId::new(target.good),
                 parse_need_tier(&target.tier)?,
                 parse_demand_basis(&target.basis)?,
                 QuantityMilli::new(target.quantity_milli),
-            ));
+            );
+            targets.push(if target.need_group == 0 {
+                base
+            } else {
+                base.in_need_group(target.need_group, target.preference)
+            });
         }
         world.register_consumption_profile(
             ConsumptionProfile::new(NeedProfileId::new(profile.id), &profile.name, targets)
@@ -531,8 +545,8 @@ fn register_firm_governance(
     world.register_ownership_stake(OwnershipStake::new(
         firm,
         owner,
-        parse_basis_points(spec.governance.owner_voting_bp)?,
         parse_basis_points(spec.governance.owner_economic_bp)?,
+        parse_basis_points(spec.governance.owner_voting_bp)?,
     ))?;
     world.register_firm_appointment(FirmAppointment::new(
         firm,
@@ -572,7 +586,7 @@ fn parse_basis_points(value: u16) -> Result<BasisPoints, ContentError> {
 }
 
 fn unsupported(kind: &str, value: &str) -> ContentError {
-    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v8"))
+    ContentError::Schema(format!("unsupported {kind} `{value}` in schema v9"))
 }
 
 fn parse_need_tier(value: &str) -> Result<NeedTier, ContentError> {
@@ -642,6 +656,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_owner_holds_the_economic_share_the_scenario_declares() {
+        let world = demo_world(1).expect("demo world");
+        let stake = world
+            .ownership_stakes()
+            .values()
+            .find(|stake| stake.firm() == FirmId::new(11))
+            .copied()
+            .expect("stake");
+        assert_eq!(
+            stake.economic_rights().get(),
+            10_000,
+            "the scenario's economic share must not arrive as the voting share, \
+             or every payout to owners is judged against the wrong holding"
+        );
+        assert_eq!(
+            stake.voting_rights().get(),
+            6_000,
+            "and the voting share must not arrive as the economic one"
+        );
+    }
+
+    #[test]
     fn demo_world_builds_and_advances_one_economic_year() {
         let mut world = demo_world(1).expect("demo world");
         world.advance_economic_year().expect("first economic year");
@@ -667,7 +703,7 @@ mod tests {
 
     #[test]
     fn wrong_schema_version_is_rejected() {
-        let document = DEMO_SCENARIO_TOML.replace("schema_version = 8", "schema_version = 4");
+        let document = DEMO_SCENARIO_TOML.replace("schema_version = 9", "schema_version = 4");
         assert!(matches!(
             world_from_toml_str(1, &document),
             Err(ContentError::Schema(_))

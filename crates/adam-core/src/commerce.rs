@@ -1,10 +1,10 @@
 use crate::{
-    AutonomousFirmCreditDecision, DemandIntent, EmergencyReliefPayment, EmploymentMatch,
-    FirmDebtServicePayment, FirmEntryDecision, FirmManagementDecision, FirmMarketOfferPlan,
-    FirmProcurementResult, GovernmentReserveDistribution, GovernmentReserveMaintenance,
-    GovernmentReservePolicyReview, GovernmentReserveProcurement, HouseholdCashflow,
-    HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord, ProductionPlan,
-    RouteCapacityExpansion, SimDate, SurvivalRationingOutcome, World, WorldError,
+    AutonomousFirmCreditDecision, DemandIntent, EconomicInvariantReport, EmergencyReliefPayment,
+    EmploymentMatch, FirmDebtServicePayment, FirmEntryDecision, FirmManagementDecision,
+    FirmMarketOfferPlan, FirmProcurementResult, GovernmentReserveDistribution,
+    GovernmentReserveMaintenance, GovernmentReservePolicyReview, GovernmentReserveProcurement,
+    HouseholdCashflow, HouseholdSurvivalBorrowing, MarketClearing, MarketOrder, PayrollRecord,
+    ProductionPlan, RouteCapacityExpansion, SimDate, SurvivalRationingOutcome, World, WorldError,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,6 +37,7 @@ pub struct MonthlyEconomicCycleResult {
     pub capacity_investments: Vec<crate::CapacityInvestmentDecision>,
     pub credit_decisions: Vec<AutonomousFirmCreditDecision>,
     pub emergency_relief: Vec<EmergencyReliefPayment>,
+    pub invariants: EconomicInvariantReport,
 }
 
 impl World {
@@ -105,13 +106,7 @@ impl World {
             .collect();
         let route_expansions = next.respond_to_route_capacity_pressure(&constrained_routes)?;
         let residual_household_unmet = next.unmet_demand.clone();
-        next.update_bilateral_grievances(
-            &procurement.unmet,
-            &procurement.capacity_limited,
-            &procurement.pristine_offers,
-            &residual_household_unmet,
-            &offers,
-        )?;
+        next.update_bilateral_grievances(&procurement, &residual_household_unmet, &offers)?;
         let firms: Vec<_> = next.firms.keys().copied().collect();
         for firm in firms {
             next.capture_monthly_firm_observation(firm)?;
@@ -242,6 +237,7 @@ impl World {
                     .map_err(|_| WorldError::ArithmeticOverflow("monthly market fills"))?,
             },
         );
+        let invariants = next.economic_invariant_report()?;
         if advance_calendar {
             next.advance_month()?;
         }
@@ -260,6 +256,7 @@ impl World {
             capacity_investments,
             credit_decisions,
             emergency_relief,
+            invariants,
         };
         *self = next;
         Ok(result)
@@ -584,7 +581,21 @@ mod tests {
             .filter(|intent| intent.tier() == NeedTier::Survival)
             .collect();
         assert_eq!(survival.len(), 1);
-        assert_eq!(survival[0].reserved_spend(), Money::from_minor_units(9));
+        assert_eq!(
+            survival[0].desired(),
+            QuantityMilli::new(1_000),
+            "the household still wants the whole ration"
+        );
+        assert_eq!(
+            survival[0].budgeted(),
+            QuantityMilli::new(600),
+            "but only the road-limited import is actually on sale"
+        );
+        assert_eq!(
+            survival[0].reserved_spend(),
+            Money::from_minor_units(5),
+            "money is held back only for food a seller can deliver"
+        );
         assert_eq!(result.commercial.clearing.fills.len(), 1);
         let fill = result.commercial.clearing.fills[0];
         assert_eq!(fill.seller, FirmId::new(2));
@@ -781,9 +792,14 @@ mod tests {
         );
         assert_eq!(survival[1].cohort(), CohortId::new(2));
         assert_eq!(
+            survival[1].desired(),
+            QuantityMilli::new(1_000),
+            "the second buyer wants exactly as much as the first"
+        );
+        assert_eq!(
             survival[1].reserved_spend(),
-            Money::from_minor_units(10),
-            "second buyer falls back to the regional reference price"
+            Money::default(),
+            "the book is empty behind the first buyer, and a reference price with no seller behind it funds nothing"
         );
         assert_eq!(result.commercial.clearing.fills.len(), 1);
         let fill = result.commercial.clearing.fills[0];
@@ -854,6 +870,7 @@ mod tests {
         assert_eq!(result.next_date, SimDate::new(2025, 32).expect("date"));
         assert_eq!(result.household_cashflows.len(), 1);
         assert_eq!(result.commercial.clearing.fills.len(), 1);
+        assert_eq!(result.invariants.date, result.completed_date);
         assert_eq!(direct.date(), SimDate::new(2025, 32).expect("date"));
         assert_eq!(direct, replayed);
         assert_eq!(direct.stable_fingerprint(), replayed.stable_fingerprint());
@@ -870,6 +887,17 @@ mod tests {
 
         assert_eq!(result.closed_year, 2025);
         assert_eq!(result.months.len(), 12);
+        assert!(
+            result
+                .months
+                .iter()
+                .all(|month| month.invariants.date == month.completed_date)
+        );
+        assert_eq!(result.invariants.date, direct.date());
+        assert_eq!(
+            result.invariants,
+            direct.economic_invariant_report().expect("closing report")
+        );
         let realized_output = result
             .months
             .iter()
@@ -1089,6 +1117,56 @@ mod tests {
                 .expect("zero target");
         }
         world
+    }
+
+    #[test]
+    fn direct_relief_is_balanced_journaled_and_atomic_on_failure() {
+        let mut world = relief_world(true);
+        let opening = world
+            .observed_money_stock()
+            .expect("opening money")
+            .total()
+            .expect("total");
+        world
+            .fund_emergency_relief(
+                ActorId::new(1),
+                CohortId::new(1),
+                Money::from_minor_units(10),
+            )
+            .expect("relief");
+        let closing = world
+            .observed_money_stock()
+            .expect("closing money")
+            .total()
+            .expect("total");
+        assert_eq!(opening, closing);
+        assert_eq!(
+            world.countries()[&CountryId::new(1)]
+                .indicators()
+                .treasury(),
+            Money::from_minor_units(90)
+        );
+        assert_eq!(
+            world.household_cohorts()[&CohortId::new(1)].liquid_wealth(),
+            Money::from_minor_units(10)
+        );
+        assert_eq!(world.money_journal().len(), 1);
+        assert!(matches!(
+            world.money_journal()[0].purpose(),
+            crate::MoneyTransactionPurpose::EmergencyRelief { country, cohort }
+                if country == CountryId::new(1) && cohort == CohortId::new(1)
+        ));
+
+        let unchanged = world.clone();
+        assert!(matches!(
+            world.fund_emergency_relief(
+                ActorId::new(1),
+                CohortId::new(1),
+                Money::from_minor_units(100),
+            ),
+            Err(WorldError::InsufficientTreasury(country)) if country == CountryId::new(1)
+        ));
+        assert_eq!(world, unchanged);
     }
 
     #[test]

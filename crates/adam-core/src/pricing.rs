@@ -37,18 +37,17 @@ pub struct RegionalPriceAdjustment {
     pub sold: QuantityMilli,
     pub unsold: QuantityMilli,
     pub unmet_demand: QuantityMilli,
-    pub cost_floor: Money,
-    pub floor_binding: bool,
 }
 
 impl World {
     /// Revises regional reference prices from the settled month's fills and unsold offers.
     ///
-    /// A market that sold out while demand remained unfilled raises its price, a market
-    /// that left goods unsold cuts its price even when needs went unmet beside them, and
-    /// no market settles below the variable cost per unit of its cheapest solvent local
-    /// producer. Every move is bounded per month, and the fraction of a minor unit that a
-    /// bounded move cannot express is carried into the following months, so a price is a
+    /// A market that sold out while demand remained unfilled raises its price, and a
+    /// market that left goods unsold cuts its price even when needs went unmet beside
+    /// them. Nothing here consults anybody's costs: a producer that cannot cover its
+    /// variable cost stops offering the good rather than pricing under it, so its costs
+    /// reach this reading as supply that never arrived. The fraction of a minor unit
+    /// that a move cannot express is carried into the following months, so a price is a
     /// slow-moving observable rather than an instantaneous market-clearing solution.
     ///
     /// # Errors
@@ -66,15 +65,14 @@ impl World {
             if previous.minor_units() <= 0 {
                 continue;
             }
-            let cost_floor = self.local_variable_cost_floor(region, good)?;
             let carry = self
                 .regional_price_carry
                 .get(&(region, good))
                 .copied()
                 .unwrap_or_default();
-            let (revision, next_carry) = revised_price(previous, cost_floor, *pressure, carry)?;
+            let (revision, next_carry) = revised_price(previous, *pressure, carry)?;
             carries.push(((region, good), next_carry));
-            let Some((price, floor_binding)) = revision else {
+            let Some(price) = revision else {
                 continue;
             };
             planned.push(RegionalPriceAdjustment {
@@ -86,8 +84,6 @@ impl World {
                 sold: QuantityMilli::new(pressure.sold),
                 unsold: QuantityMilli::new(pressure.unsold),
                 unmet_demand: QuantityMilli::new(pressure.unmet),
-                cost_floor,
-                floor_binding,
             });
         }
         for (key, carry) in carries {
@@ -112,15 +108,22 @@ impl World {
                     sold: adjustment.sold,
                     unsold: adjustment.unsold,
                     unmet_demand: adjustment.unmet_demand,
-                    cost_floor: adjustment.cost_floor,
-                    floor_binding: adjustment.floor_binding,
                 },
             );
         }
         Ok(planned)
     }
 
-    /// Aggregates the settled month's seller books into one pressure reading per market.
+    /// Aggregates the settled month's trade into one pressure reading per market.
+    ///
+    /// Both kinds of buyer are counted. Household sellers report their own
+    /// books, and the wholesale round that ran earlier in the same month
+    /// contributes what firms bought and what they queued for and did not get.
+    /// An intermediate good is never anybody's survival need, so while only the
+    /// shop counter was observed a permanently starved input channel could go
+    /// unfilled every month without its price ever moving - and a price that
+    /// cannot rise is a wage its producers cannot justify paying, which is why
+    /// no farm was ever worth founding beside a bakery that outbid it.
     #[must_use]
     pub fn observed_market_pressure(&self) -> BTreeMap<(RegionId, GoodId), ObservedMarketPressure> {
         let mut pressures: BTreeMap<(RegionId, GoodId), ObservedMarketPressure> = BTreeMap::new();
@@ -131,72 +134,142 @@ impl World {
             entry.unsold = entry.unsold.saturating_add(outcome.unsold.get());
             entry.unmet = entry.unmet.max(outcome.unmet_market_demand.get());
         }
+        // Firms buy too, and their custom was invisible to price until now. A
+        // mill that bought nine tenths of the grain it needed is part of what
+        // this market traded, and belongs in the denominator beside household
+        // sales; otherwise a small wholesale queue beside a large one would
+        // read as the same scarcity.
+        for (&(buyer, good), &(quantity, _)) in &self.monthly_firm_procurement_purchases {
+            let Some(firm) = self.firms.get(&buyer) else {
+                continue;
+            };
+            let entry = pressures.entry((firm.region(), good)).or_default();
+            entry.sold = entry.sold.saturating_add(quantity.get());
+        }
+        // An input nobody could deliver is a queue at this market's counter,
+        // exactly like a household leaving empty-handed. Wholesale shortfalls
+        // are summed rather than maximised because each buyer queued for its
+        // own tonnage, whereas a household market-wide figure is repeated by
+        // every seller reporting it.
+        for (&(region, good), &quantity) in &self.monthly_firm_effective_input_shortfalls {
+            let entry = pressures.entry((region, good)).or_default();
+            entry.unmet = entry.unmet.saturating_add(quantity.get());
+        }
         pressures
     }
 
-    /// Reports the lowest variable cost per whole unit among solvent local producers.
+    /// Reports what one whole unit of its own output costs this firm to make,
+    /// counting the inputs it must replace at local prices and the wage it has
+    /// actually agreed to pay.
     ///
-    /// Returns zero when the region has no solvent producer of the good whose inputs
-    /// are all priced, which leaves the price unconstrained from below.
+    /// Returns `None` when an input has no local price, because a cost nobody
+    /// can price is a cost nobody can defend a refusal to sell with.
     ///
     /// # Errors
     /// Returns [`WorldError::ArithmeticOverflow`] when a cost computation overflows.
-    pub fn local_variable_cost_floor(
-        &self,
-        region: RegionId,
-        good: GoodId,
-    ) -> Result<Money, WorldError> {
-        let mut floor: Option<i128> = None;
-        for firm in self.firms.values() {
-            if firm.region() != region || self.is_firm_insolvent(firm.id()) {
-                continue;
-            }
-            let Some(recipe) = self.production_recipes.get(&firm.recipe()) else {
-                continue;
-            };
-            if recipe.output_good() != good {
-                continue;
-            }
-            let output_per_batch = i128::from(recipe.output_per_batch().get());
-            if output_per_batch <= 0 {
-                continue;
-            }
-            let mut batch_cost = 0_i128;
-            let mut fully_priced = true;
-            for input in recipe.inputs() {
-                let Some(price) = self.regional_prices.get(&(region, input.good())).copied() else {
-                    fully_priced = false;
-                    break;
-                };
-                let cost = i128::from(price.minor_units())
-                    .checked_mul(i128::from(input.quantity_per_batch().get()))
-                    .ok_or(WorldError::ArithmeticOverflow("variable input cost"))?
-                    / i128::from(QuantityMilli::SCALE);
-                batch_cost = batch_cost
-                    .checked_add(cost)
-                    .ok_or(WorldError::ArithmeticOverflow("variable input cost"))?;
-            }
-            if !fully_priced {
-                continue;
-            }
-            let labor_cost = self
-                .observed_firm_wage(firm.id())
-                .checked_mul(i128::from(recipe.labor_milli_worker_months()))
-                .ok_or(WorldError::ArithmeticOverflow("variable labor cost"))?
-                / LABOR_MILLI_SCALE;
-            batch_cost = batch_cost
-                .checked_add(labor_cost)
-                .ok_or(WorldError::ArithmeticOverflow("variable labor cost"))?;
-            let unit_cost = batch_cost
-                .checked_mul(i128::from(QuantityMilli::SCALE))
-                .ok_or(WorldError::ArithmeticOverflow("variable cost floor"))?
-                / output_per_batch;
-            floor = Some(floor.map_or(unit_cost, |current| current.min(unit_cost)));
+    pub fn firm_variable_unit_cost(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+        let Some(definition) = self.firms.get(&firm) else {
+            return Ok(None);
+        };
+        let Some(recipe) = self.production_recipes.get(&definition.recipe()) else {
+            return Ok(None);
+        };
+        let output_per_batch = i128::from(recipe.output_per_batch().get());
+        if output_per_batch <= 0 {
+            return Ok(None);
         }
-        let floor = floor.unwrap_or_default();
-        Ok(Money::from_minor_units(i64::try_from(floor).map_err(
-            |_| WorldError::ArithmeticOverflow("variable cost floor"),
-        )?))
+        let mut batch_cost = 0_i128;
+        for input in recipe.inputs() {
+            let Some(price) = self
+                .regional_prices
+                .get(&(definition.region(), input.good()))
+                .copied()
+            else {
+                return Ok(None);
+            };
+            let cost = i128::from(price.minor_units())
+                .checked_mul(i128::from(input.quantity_per_batch().get()))
+                .ok_or(WorldError::ArithmeticOverflow("variable input cost"))?
+                / i128::from(QuantityMilli::SCALE);
+            batch_cost = batch_cost
+                .checked_add(cost)
+                .ok_or(WorldError::ArithmeticOverflow("variable input cost"))?;
+        }
+        let labor_cost = self
+            .observed_firm_wage(firm)
+            .checked_mul(i128::from(recipe.labor_milli_worker_months()))
+            .ok_or(WorldError::ArithmeticOverflow("variable labor cost"))?
+            / LABOR_MILLI_SCALE;
+        batch_cost = batch_cost
+            .checked_add(labor_cost)
+            .ok_or(WorldError::ArithmeticOverflow("variable labor cost"))?;
+        let unit_cost = batch_cost
+            .checked_mul(i128::from(QuantityMilli::SCALE))
+            .ok_or(WorldError::ArithmeticOverflow("variable cost floor"))?
+            / output_per_batch;
+        Ok(Some(Money::from_minor_units(
+            i64::try_from(unit_cost)
+                .map_err(|_| WorldError::ArithmeticOverflow("variable cost floor"))?,
+        )))
+    }
+
+    /// Reports the lowest price at which a unit still leaves this firm whole once
+    /// it has handed the state the sales tax that unit attracts.
+    ///
+    /// A wage is not the whole of what a sale must earn back. The tax is levied on
+    /// final household sales only, so a firm trading into wholesale owes nothing on
+    /// that turnover and has nothing to add to its price, while a shop that ignores
+    /// the levy pays it out of capital and empties its till at a steady rate no
+    /// amount of selling can arrest. The taxed share is read from what this firm
+    /// actually sold. A firm that has yet to sell anything adds nothing, because a
+    /// seller guessing the other way would charge a wholesale buyer a tax nobody
+    /// will ever collect and pocket the difference as invented revenue. The price
+    /// of learning is real and the seller pays it: the first month of retail trade
+    /// is taxed out of the till before the ask rises to cover the levy.
+    ///
+    /// # Errors
+    /// Returns [`WorldError::ArithmeticOverflow`] when a cost computation overflows.
+    pub fn firm_break_even_unit_price(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
+        let Some(cost) = self.firm_variable_unit_cost(firm)? else {
+            return Ok(None);
+        };
+        let levy_bps = crate::simulation::SALES_TAX_BPS
+            .checked_mul(self.observed_taxed_sales_share_bps(firm))
+            .ok_or(WorldError::ArithmeticOverflow("observed sales tax levy"))?
+            / 10_000;
+        let retained_bps = 10_000 - levy_bps;
+        if retained_bps <= 0 {
+            return Ok(Some(cost));
+        }
+        let gross = i128::from(cost.minor_units())
+            .checked_mul(10_000)
+            .ok_or(WorldError::ArithmeticOverflow("break-even unit price"))?;
+        // Rounded up: a price that recovers all but one minor unit of the levy is
+        // still a price that shrinks the till every month it is charged.
+        let price = (gross + retained_bps - 1) / retained_bps;
+        Ok(Some(Money::from_minor_units(
+            i64::try_from(price)
+                .map_err(|_| WorldError::ArithmeticOverflow("break-even unit price"))?,
+        )))
+    }
+
+    /// Reports the share of this firm's observed turnover that carried sales tax.
+    fn observed_taxed_sales_share_bps(&self, firm: FirmId) -> i128 {
+        let Some(history) = self.firm_operating_history.get(&firm) else {
+            return 0;
+        };
+        let mut turnover = 0_i128;
+        let mut taxed = 0_i128;
+        for observation in history {
+            turnover =
+                turnover.saturating_add(i128::from(observation.sales_revenue().minor_units()));
+            taxed =
+                taxed.saturating_add(i128::from(observation.final_sales_revenue().minor_units()));
+        }
+        if turnover <= 0 {
+            return 0;
+        }
+        (taxed.saturating_mul(10_000) / turnover).clamp(0, 10_000)
     }
 
     /// Reports the worker-weighted monthly wage the firm has actually agreed to pay.
@@ -221,17 +294,15 @@ impl World {
     }
 }
 
-/// Computes the revised price, whether the variable-cost floor bound it, and the
-/// fractional pressure carried into the next month.
+/// Computes the revised price and the fractional pressure carried into the next month.
 ///
 /// Returns `None` for the revision when the admissible move does not yet amount to a
 /// whole minor unit, which is the normal case for a cheap good under mild pressure.
 fn revised_price(
     previous: Money,
-    cost_floor: Money,
     pressure: ObservedMarketPressure,
     carry: i64,
-) -> Result<(Option<(Money, bool)>, i64), WorldError> {
+) -> Result<(Option<Money>, i64), WorldError> {
     let previous_units = i128::from(previous.minor_units());
     let traded = pressure.sold.saturating_add(pressure.unmet);
     // Unfilled demand raises a price only when the market actually sold out.
@@ -259,41 +330,27 @@ fn revised_price(
         0
     };
 
-    let mut floor_binding = false;
-    let floor_units = i128::from(cost_floor.minor_units());
-    let mut desired = milli_move(previous_units, delta_bps)?;
-    // A price below the variable cost of its cheapest producer climbs toward that
-    // cost, still no faster than the monthly cap allows.
-    if floor_units > previous_units {
-        let gap = floor_units
-            .checked_sub(previous_units)
-            .and_then(|gap| gap.checked_mul(CARRY_SCALE))
-            .ok_or(WorldError::ArithmeticOverflow("variable cost gap"))?;
-        // Selling below variable cost is a loss taken on every unit, so the price
-        // goes to cost immediately rather than creeping toward it.
-        if gap > desired {
-            desired = gap;
-            floor_binding = true;
-        }
-    }
+    // Costs do not enter this reading at all. A seller that cannot cover its variable
+    // cost withdraws its offer instead of pricing under it, and it pays for that
+    // refusal with unsold stock and a payroll drawn from the same till. What arrives
+    // here is the consequence: goods that were never offered. A floor written into the
+    // observation itself would be a limit nobody holds and nobody funds.
+    let desired = milli_move(previous_units, delta_bps)?;
 
     let accumulated = i128::from(carry)
         .checked_add(desired)
         .ok_or(WorldError::ArithmeticOverflow("carried price pressure"))?;
     // Truncating division keeps the carry signed: pressure accumulates until it is
     // worth a whole minor unit instead of rounding a cheap good every month.
-    let mut price = previous_units.saturating_add(accumulated / CARRY_SCALE);
-    if floor_units > 0 && price < floor_units && previous_units >= floor_units {
-        price = floor_units;
-        floor_binding = true;
-    }
-    price = price.max(1);
+    let price = previous_units
+        .saturating_add(accumulated / CARRY_SCALE)
+        .max(1);
 
     let applied = price
         .checked_sub(previous_units)
         .and_then(|applied| applied.checked_mul(CARRY_SCALE))
         .ok_or(WorldError::ArithmeticOverflow("applied price move"))?;
-    // Pressure that a binding floor or the minimum price refused to express is not
+    // Pressure that the minimum price of one minor unit refused to express is not
     // banked forever, otherwise a market would jump the moment the bound lifts.
     let remainder = (accumulated - applied).clamp(-(CARRY_SCALE - 1), CARRY_SCALE - 1);
     let next_carry =
@@ -304,10 +361,7 @@ fn revised_price(
     }
     let price = i64::try_from(price)
         .map_err(|_| WorldError::ArithmeticOverflow("revised reference price"))?;
-    Ok((
-        Some((Money::from_minor_units(price), floor_binding)),
-        next_carry,
-    ))
+    Ok((Some(Money::from_minor_units(price)), next_carry))
 }
 
 /// Expresses a part of a whole as basis points, saturating at the whole.
@@ -341,23 +395,13 @@ mod tests {
     }
 
     /// Settles the same market pressure for several months and reports the price.
-    fn settle(
-        previous: i64,
-        cost_floor: i64,
-        pressure: ObservedMarketPressure,
-        months: u32,
-    ) -> i64 {
+    fn settle(previous: i64, pressure: ObservedMarketPressure, months: u32) -> i64 {
         let mut price = previous;
         let mut carry = 0_i64;
         for _ in 0..months {
-            let (revision, next_carry) = revised_price(
-                Money::from_minor_units(price),
-                Money::from_minor_units(cost_floor),
-                pressure,
-                carry,
-            )
-            .expect("revision");
-            if let Some((revised, _)) = revision {
+            let (revision, next_carry) =
+                revised_price(Money::from_minor_units(price), pressure, carry).expect("revision");
+            if let Some(revised) = revision {
                 price = revised.minor_units();
             }
             carry = next_carry;
@@ -369,57 +413,165 @@ mod tests {
     fn a_sold_out_market_reprices_at_once_by_the_observed_scarcity() {
         // Half of the demand walked away empty, so the price moves by half the
         // scarcity elasticity in the very first month. Nothing holds it back.
-        assert_eq!(settle(10, 0, pressure(1_000, 1_000, 0, 1_000), 1), 11);
+        assert_eq!(settle(10, pressure(1_000, 1_000, 0, 1_000), 1), 11);
     }
 
     #[test]
     fn a_severe_shortage_produces_a_severe_price_shock() {
         // Nine tenths of demand went unfilled. A jump of that size is what the
         // scarcity implies, and nobody in this model is paying to prevent it.
-        assert_eq!(settle(100, 0, pressure(1_000, 1_000, 0, 9_000), 1), 122);
+        assert_eq!(settle(100, pressure(1_000, 1_000, 0, 9_000), 1), 122);
     }
 
     #[test]
     fn a_fractional_move_of_a_cheap_price_is_carried_rather_than_rounded() {
         // Currency is discrete: a move worth a fraction of a minor unit waits
         // instead of being rounded up into a large jump.
-        assert_eq!(settle(10, 0, pressure(1_000, 1_000, 0, 100), 1), 10);
-        assert_eq!(settle(10, 0, pressure(1_000, 1_000, 0, 100), 6), 11);
+        assert_eq!(settle(10, pressure(1_000, 1_000, 0, 100), 1), 10);
+        assert_eq!(settle(10, pressure(1_000, 1_000, 0, 100), 6), 11);
     }
 
     #[test]
     fn sustained_unsold_offers_cut_the_price() {
-        assert_eq!(settle(10, 0, pressure(1_000, 0, 1_000, 0), 2), 9);
+        assert_eq!(settle(10, pressure(1_000, 0, 1_000, 0), 2), 9);
     }
 
     #[test]
     fn unpaid_need_beside_unsold_stock_cuts_the_price_instead_of_raising_it() {
-        assert_eq!(settle(10, 0, pressure(1_000, 0, 1_000, 1_000), 2), 9);
+        assert_eq!(settle(10, pressure(1_000, 0, 1_000, 1_000), 2), 9);
     }
 
+    /// A reference price is a reading of the counter, not a promise to anybody. Goods
+    /// left unsold keep cutting it, however far the cut goes past what the good costs
+    /// to make: the seller answers a price it cannot live with by withdrawing the
+    /// offer, and it pays for that refusal with its own unsold stock and payroll.
+    /// Holding the reading up instead would be a floor nobody funds.
     #[test]
-    fn a_price_at_variable_cost_is_never_cut_below_it() {
-        // The one bound that survives, because somebody concretely eats the loss:
-        // selling under variable cost loses money on every unit sold.
-        assert_eq!(settle(10, 10, pressure(1_000, 0, 1_000, 0), 12), 10);
-    }
-
-    #[test]
-    fn a_price_below_variable_cost_goes_to_cost_at_once() {
-        let (revision, _) = revised_price(
-            Money::from_minor_units(10),
-            Money::from_minor_units(100),
-            pressure(1_000, 500, 500, 0),
-            0,
-        )
-        .expect("revision");
-        let (price, floor_binding) = revision.expect("the price moves");
-        assert_eq!(price, Money::from_minor_units(100));
-        assert!(floor_binding);
+    fn unsold_stock_keeps_cutting_a_price_with_no_regard_for_costs() {
+        let after_two = settle(10, pressure(1_000, 0, 1_000, 0), 2);
+        let after_a_year = settle(10, pressure(1_000, 0, 1_000, 0), 12);
+        assert!(after_two < 10, "a glut cuts at once: {after_two}");
+        assert!(
+            after_a_year < after_two,
+            "a year of unsold stock keeps cutting: {after_a_year} vs {after_two}"
+        );
     }
 
     #[test]
     fn a_market_that_cleared_exactly_leaves_the_price_alone() {
-        assert_eq!(settle(10, 0, pressure(1_000, 1_000, 0, 0), 12), 10);
+        assert_eq!(settle(10, pressure(1_000, 1_000, 0, 0), 12), 10);
+    }
+
+    /// A region with a priced good, one farm that could produce it, and no
+    /// household trade at all. Every price move here comes from wholesale
+    /// evidence, so nothing else can be credited for it.
+    fn grain_market_world() -> World {
+        let mut world = World::new(
+            crate::WorldSeed::new(4_242),
+            crate::SimDate::new(2025, 1).expect("date"),
+        );
+        world
+            .register_country(crate::Country::new(crate::CountryId::new(1), "A").expect("country"))
+            .expect("register country");
+        world
+            .register_good(crate::Good::new(GoodId::new(1), "Grain").expect("good"))
+            .expect("register grain");
+        world
+            .register_region(
+                crate::Region::new(
+                    RegionId::new(1),
+                    crate::CountryId::new(1),
+                    "R",
+                    crate::Population::new(2),
+                    Money::from_minor_units(1),
+                )
+                .expect("region"),
+            )
+            .expect("register region");
+        world
+            .register_production_recipe(
+                crate::ProductionRecipe::new(
+                    crate::RecipeId::new(1),
+                    "Grain recipe",
+                    GoodId::new(1),
+                    QuantityMilli::new(1_000),
+                    1_000,
+                    vec![],
+                )
+                .expect("recipe"),
+            )
+            .expect("register recipe");
+        world
+            .register_firm(
+                crate::Firm::new(
+                    FirmId::new(1),
+                    "Farm",
+                    RegionId::new(1),
+                    crate::RecipeId::new(1),
+                    1,
+                    1,
+                    Money::default(),
+                    BTreeMap::new(),
+                )
+                .expect("firm"),
+            )
+            .expect("register firm");
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(100),
+            )
+            .expect("grain price");
+        world
+    }
+
+    #[test]
+    fn a_queue_of_firms_at_the_counter_lifts_the_price_they_queued_for() {
+        // Nobody delivered a single unit of the grain the mills asked for. That
+        // is a market that sold out with demand still standing there, and an
+        // intermediate good has no household need to speak for it, so if this
+        // queue does not move the price then nothing ever will.
+        let mut world = grain_market_world();
+        world.monthly_firm_effective_input_shortfalls.insert(
+            (RegionId::new(1), GoodId::new(1)),
+            QuantityMilli::new(1_000),
+        );
+
+        world
+            .execute_monthly_price_formation()
+            .expect("price formation");
+
+        assert_eq!(
+            world.regional_prices[&(RegionId::new(1), GoodId::new(1))],
+            Money::from_minor_units(125),
+            "an input nobody could deliver must become dearer, or its producers can never justify the wage that would grow it"
+        );
+    }
+
+    #[test]
+    fn a_channel_that_almost_filled_moves_its_price_far_less() {
+        // The same thousand missing units, this time beside nine thousand that
+        // arrived. A mill that got nine tenths of its grain is short, but it is
+        // not the same kind of short as one that got none.
+        let mut world = grain_market_world();
+        world.monthly_firm_procurement_purchases.insert(
+            (FirmId::new(1), GoodId::new(1)),
+            (QuantityMilli::new(9_000), Money::from_minor_units(900)),
+        );
+        world.monthly_firm_effective_input_shortfalls.insert(
+            (RegionId::new(1), GoodId::new(1)),
+            QuantityMilli::new(1_000),
+        );
+
+        world
+            .execute_monthly_price_formation()
+            .expect("price formation");
+
+        assert_eq!(
+            world.regional_prices[&(RegionId::new(1), GoodId::new(1))],
+            Money::from_minor_units(102),
+            "what the buyers did manage to purchase belongs in the denominator, otherwise every trickle of a shortfall reads as an emptied market"
+        );
     }
 }

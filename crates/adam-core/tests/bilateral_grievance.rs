@@ -15,7 +15,10 @@
 //!
 //! World: a governed grain Farm in Farmland (country 1) and an ungoverned
 //! Bakery in Bakerton (country 2), optionally connected by a road route. The
-//! bakery's starting cash decides whether imports settle or stay unmet.
+//! bakery is funded throughout; what decides whether imports settle is how
+//! much grain exists against how many batches the bakery is built to bake.
+//! Grievance must rest on goods that were not there, never on a till that
+//! was empty or a price the buyer declined to pay.
 
 use std::collections::BTreeMap;
 
@@ -39,7 +42,7 @@ const BREAD_RECIPE: u32 = 2;
 /// grain; the bakery is ungoverned, so observed management never adjusts its
 /// default capacity target and its import order repeats every month.
 #[allow(clippy::too_many_lines)]
-fn grievance_world(bakery_cash_minor: i64, with_route: bool) -> World {
+fn grievance_world(bakery_cash_minor: i64, with_route: bool, bakery_capacity: u64) -> World {
     let mut world = World::new(WorldSeed::new(4_040), SimDate::new(2025, 1).expect("date"));
     world
         .register_country(Country::new(CountryId::new(1), "A").expect("country"))
@@ -124,8 +127,8 @@ fn grievance_world(bakery_cash_minor: i64, with_route: bool) -> World {
                 "Bakery",
                 RegionId::new(BAKERTON),
                 RecipeId::new(BREAD_RECIPE),
-                1,
-                1,
+                bakery_capacity,
+                bakery_capacity,
                 Money::from_minor_units(bakery_cash_minor),
                 BTreeMap::new(),
             )
@@ -165,10 +168,14 @@ fn grievance_world(bakery_cash_minor: i64, with_route: bool) -> World {
         .set_firm_production_target(ActorId::new(1), FirmId::new(FARM), 1)
         .expect("farm target");
     for (region, good, price) in [
+        // Bread is dear enough that grain stays worth buying however far the
+        // shortage pushes its price. A buyer that walks away on price has a
+        // grievance against nobody, so a test about withheld supply must not
+        // accidentally become a test about an unaffordable input.
         (FARMLAND, GRAIN, 5),
-        (FARMLAND, BREAD, 10),
+        (FARMLAND, BREAD, 10_000),
         (BAKERTON, GRAIN, 7),
-        (BAKERTON, BREAD, 10),
+        (BAKERTON, BREAD, 10_000),
     ] {
         world
             .set_regional_price(
@@ -217,7 +224,7 @@ fn grievance_level(world: &World) -> Option<u16> {
 
 #[test]
 fn unmet_import_demand_with_reachable_foreign_supply_accrues_grievance() {
-    let mut world = grievance_world(0, true);
+    let mut world = grievance_world(1_000_000, true, 2);
     let mut replayed = world.clone();
     let result = world
         .execute_monthly_economic_cycle()
@@ -226,8 +233,11 @@ fn unmet_import_demand_with_reachable_foreign_supply_accrues_grievance() {
         .apply(&mut replayed)
         .expect("replayed economic month");
 
-    // The cashless bakery could not buy the grain the foreign farm offered
-    // over the open road: that is material evidence, not an injected flag.
+    // The bakery has money and a price it is glad to pay; what it cannot get
+    // is grain, because the foreign farm grows one batch where two are
+    // needed. That is material evidence, not an injected flag. An empty till
+    // would prove nothing here: a buyer who cannot pay has been denied
+    // nothing by anyone abroad.
     assert_eq!(
         result.commercial.procurement.unmet[&(FirmId::new(BAKERY), GoodId::new(GRAIN))],
         QuantityMilli::new(1_000)
@@ -251,16 +261,18 @@ fn unmet_import_demand_with_reachable_foreign_supply_accrues_grievance() {
 
 #[test]
 fn missing_route_shortage_creates_no_grievance() {
-    let mut world = grievance_world(0, false);
+    let mut world = grievance_world(1_000_000, false, 2);
     let result = world
         .execute_monthly_economic_cycle()
         .expect("economic month");
 
     // The same shortage without a connecting route blames nobody: the
     // foreign offer was never deliverable, so no material grievance exists.
+    // A funded buyer needing two batches goes wholly unserved here, where the
+    // reachable world above left one batch of the two unmet.
     assert_eq!(
         result.commercial.procurement.unmet[&(FirmId::new(BAKERY), GoodId::new(GRAIN))],
-        QuantityMilli::new(1_000)
+        QuantityMilli::new(2_000)
     );
     assert!(world.bilateral_grievances().is_empty());
     assert!(!world.events().events().iter().any(|envelope| matches!(
@@ -271,7 +283,7 @@ fn missing_route_shortage_creates_no_grievance() {
 
 #[test]
 fn restored_imports_decay_grievance_to_zero() {
-    let mut world = grievance_world(1_000, true);
+    let mut world = grievance_world(1_000, true, 1);
     let mut replayed = world.clone();
 
     // Month 1: funded imports settle, so no grievance exists.
@@ -327,7 +339,7 @@ fn restored_imports_decay_grievance_to_zero() {
 
 #[test]
 fn sustained_material_shortage_escalates_to_hostility_and_stays_bounded() {
-    let mut world = grievance_world(0, true);
+    let mut world = grievance_world(1_000_000, true, 2);
     let mut replayed = world.clone();
 
     // Fifteen months of unmet import demand against available foreign supply

@@ -259,7 +259,7 @@ fn two_region_world(
                 FirmId::new(FARM),
                 CohortId::new(1),
                 1,
-                Money::from_minor_units(50),
+                Money::from_minor_units(5),
             )
             .expect("farm agreement"),
         )
@@ -270,7 +270,7 @@ fn two_region_world(
                 FirmId::new(BAKERY),
                 CohortId::new(2),
                 1,
-                Money::from_minor_units(50),
+                Money::from_minor_units(5),
             )
             .expect("bakery agreement"),
         )
@@ -282,7 +282,7 @@ fn two_region_world(
                     FirmId::new(LOCAL_FARM),
                     CohortId::new(2),
                     1,
-                    Money::from_minor_units(50),
+                    Money::from_minor_units(5),
                 )
                 .expect("local farm agreement"),
             )
@@ -371,11 +371,11 @@ fn imports_settle_at_delivered_price_when_no_local_supply() {
     );
 
     // The delivered payment is split rather than gifted to the supplier:
-    // farm 1000 - 50 payroll + 5 grain sale = 955
+    // farm 1000 - 5 payroll + 5 grain sale = 1000
     // carrier 1000 + 2 freight tariff = 1002
-    // bakery 1000 - 50 payroll - 7 grain import + 20 bread sales = 963
-    assert_eq!(farm.cash(), Money::from_minor_units(955));
-    assert_eq!(bakery.cash(), Money::from_minor_units(963));
+    // bakery 1000 - 5 payroll - 7 grain import + 20 bread sales = 1008
+    assert_eq!(farm.cash(), Money::from_minor_units(1_000));
+    assert_eq!(bakery.cash(), Money::from_minor_units(1_008));
     assert_eq!(
         world.firms()[&FirmId::new(CARRIER)].cash(),
         Money::from_minor_units(1_002)

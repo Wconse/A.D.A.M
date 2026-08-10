@@ -303,6 +303,69 @@ impl HouseholdCohort {
         self.debt = Money::from_minor_units(self.debt.minor_units() - debt.minor_units());
         Ok(training)
     }
+    /// Takes in a household that has arrived from somewhere else.
+    ///
+    /// Arrivals join a group already living the same way instead of founding a
+    /// permanent new cohort for every family that moves. People, dwellings,
+    /// money and debts are all carried across: nothing is created and nothing
+    /// is lost in the joining.
+    pub(crate) fn absorb(&mut self, arrival: &Self) -> Result<(), WorldError> {
+        let people = self
+            .people
+            .people()
+            .checked_add(arrival.people.people())
+            .ok_or(WorldError::ArithmeticOverflow("cohort absorption people"))?;
+        let households = self.households.checked_add(arrival.households).ok_or(
+            WorldError::ArithmeticOverflow("cohort absorption households"),
+        )?;
+        let add = |left: Money, right: Money, label: &'static str| -> Result<Money, WorldError> {
+            left.minor_units()
+                .checked_add(right.minor_units())
+                .map(Money::from_minor_units)
+                .ok_or(WorldError::ArithmeticOverflow(label))
+        };
+        let annual_income = add(
+            self.annual_income,
+            arrival.annual_income,
+            "cohort absorption income",
+        )?;
+        let liquid_wealth = add(
+            self.liquid_wealth,
+            arrival.liquid_wealth,
+            "cohort absorption wealth",
+        )?;
+        let debt = add(self.debt, arrival.debt, "cohort absorption debt")?;
+        self.people = Population::new(people);
+        self.households = households;
+        self.annual_income = annual_income;
+        self.liquid_wealth = liquid_wealth;
+        self.debt = debt;
+        Ok(())
+    }
+
+    /// Whether an arriving household lives closely enough like this one to be
+    /// counted together with it.
+    pub(crate) fn lives_like(&self, other: &Self) -> bool {
+        self.region == other.region
+            && self.need_profile == other.need_profile
+            && self.age_band == other.age_band
+            && self.years_in_age_band == other.years_in_age_band
+            && self.household_type == other.household_type
+            && self.education == other.education
+            && self.employment == other.employment
+    }
+
+    /// Gives up the household's standing work.
+    ///
+    /// A household that leaves the region it worked in leaves the job behind:
+    /// it arrives unemployed and without the income it used to earn. This is
+    /// the price the mover pays for moving, and it is what stops relocation
+    /// from being a free improvement in circumstances.
+    pub(crate) fn leave_employment(&mut self) {
+        self.employment = EmploymentStatus::Unemployed;
+        self.annual_income = Money::from_minor_units(0);
+    }
+
     #[must_use]
     pub const fn employment(&self) -> EmploymentStatus {
         self.employment
@@ -314,6 +377,10 @@ impl HouseholdCohort {
     #[must_use]
     pub const fn liquid_wealth(&self) -> Money {
         self.liquid_wealth
+    }
+    pub(crate) fn set_liquid_wealth(&mut self, value: Money) {
+        debug_assert!(value.minor_units() >= 0);
+        self.liquid_wealth = value;
     }
     #[must_use]
     pub const fn debt(&self) -> Money {
@@ -556,7 +623,7 @@ impl World {
     }
 }
 
-fn uncontracted_monthly_income(
+pub(crate) fn uncontracted_monthly_income(
     annual_income: Money,
     people: Population,
     contracted_workers: u64,

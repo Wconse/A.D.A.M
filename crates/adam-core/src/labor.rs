@@ -1,5 +1,18 @@
-use crate::{CohortId, FirmId, Money, World, WorldError};
+use crate::money_ledger::MoneyAccountBalances;
+use crate::{
+    CohortId, FirmId, Money, MoneyAccountId, MoneyTransaction, MoneyTransactionPurpose, World,
+    WorldError,
+};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A competing offer only moves a worker when it beats the standing wage by a
+/// material margin. A penny more is not a reason to change employer; the margin
+/// is what the poacher pays for somebody else's staff, and what the worker is
+/// paid for the disruption of moving. One definition serves every channel that
+/// takes a worker away from an existing employer - switching, retention, and
+/// firm entry - because two margins would eventually disagree and the
+/// disagreement would be an unowned bound on who may hire whom.
+pub(crate) const MATERIAL_OFFER_IMPROVEMENT_PERCENT: i128 = 110;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EmploymentAgreement {
     firm: FirmId,
@@ -253,7 +266,11 @@ impl World {
         Ok(())
     }
 
-    fn cohort_has_recipe_skill(&self, cohort: CohortId, recipe: crate::RecipeId) -> bool {
+    pub(crate) fn cohort_has_recipe_skill(
+        &self,
+        cohort: CohortId,
+        recipe: crate::RecipeId,
+    ) -> bool {
         self.recipe_required_skill.get(&recipe).is_none_or(|skill| {
             self.cohort_skills
                 .get(&(cohort, *skill))
@@ -911,7 +928,8 @@ impl World {
                     self.competitive_labor_bid(to_firm, agreement.cohort())?;
                 if target.cash().minor_units() < offered_wage.minor_units()
                     || i128::from(offered_wage.minor_units()) * 100
-                        < i128::from(agreement.wage().minor_units()) * 110
+                        < i128::from(agreement.wage().minor_units())
+                            * MATERIAL_OFFER_IMPROVEMENT_PERCENT
                 {
                     continue;
                 }
@@ -1078,7 +1096,8 @@ impl World {
             || retained.retained_wage != expected_wage
             || retained.labor_market_adjustment_basis_points != expected_adjustment
             || i128::from(retained.retained_wage.minor_units()) * 100
-                < i128::from(retained.previous_wage.minor_units()) * 110
+                < i128::from(retained.previous_wage.minor_units())
+                    * MATERIAL_OFFER_IMPROVEMENT_PERCENT
             || !self.retention_is_forecast_solvent(
                 retained.firm,
                 retained.cohort,
@@ -1165,7 +1184,8 @@ impl World {
             || switched.labor_market_adjustment_basis_points != expected_adjustment
             || target.cash().minor_units() < switched.offered_wage.minor_units()
             || i128::from(switched.offered_wage.minor_units()) * 100
-                < i128::from(switched.previous_wage.minor_units()) * 110
+                < i128::from(switched.previous_wage.minor_units())
+                    * MATERIAL_OFFER_IMPROVEMENT_PERCENT
         {
             return Err(WorldError::InvalidEmployment(
                 "employment switch requires a qualified worker and a current 10% better funded bid",
@@ -1356,10 +1376,25 @@ impl World {
     /// which case there is no evidence to judge the hire by.
     fn labor_value_ceiling(&self, firm: FirmId) -> Result<Option<Money>, WorldError> {
         let definition = self.firms.get(&firm).ok_or(WorldError::UnknownFirm(firm))?;
-        let Some(recipe) = self.production_recipes.get(&definition.recipe()) else {
+        self.recipe_labor_value_ceiling(definition.region(), definition.recipe())
+    }
+
+    /// The same arithmetic for a recipe nobody runs here yet.
+    ///
+    /// A founder deciding whether to outbid an incumbent employer has no payroll
+    /// of its own to reason from, but the work is worth exactly what it would be
+    /// worth to any firm running that recipe at local prices. Sharing the
+    /// expression rather than copying it keeps the entrant and the incumbent
+    /// judged by one rule; two rules would eventually disagree, and the
+    /// disagreement would be a wage nobody could defend.
+    pub(crate) fn recipe_labor_value_ceiling(
+        &self,
+        region: crate::RegionId,
+        recipe: crate::RecipeId,
+    ) -> Result<Option<Money>, WorldError> {
+        let Some(recipe) = self.production_recipes.get(&recipe) else {
             return Ok(None);
         };
-        let region = definition.region();
         let Some(price) = self
             .regional_prices
             .get(&(region, recipe.output_good()))
@@ -1573,6 +1608,7 @@ impl World {
         let mut cohorts = self.cohorts.clone();
         let mut agreements = self.employment_agreements.clone();
         let mut records = Vec::new();
+        let mut transactions = Vec::new();
         for agreement in agreements
             .values_mut()
             .filter(|agreement| agreement.active || agreement.arrears().minor_units() > 0)
@@ -1584,15 +1620,29 @@ impl World {
             let owed = current
                 .checked_add(agreement.arrears().minor_units())
                 .ok_or(WorldError::ArithmeticOverflow("payroll arrears"))?;
-            let firm = firms
-                .get_mut(&agreement.firm())
-                .ok_or(WorldError::UnknownFirm(agreement.firm()))?;
-            let paid = firm.cash().minor_units().min(owed);
-            firm.debit_cash(Money::from_minor_units(paid))?;
-            cohorts
-                .get_mut(&agreement.cohort())
-                .ok_or(WorldError::UnknownCohort(agreement.cohort()))?
-                .credit_wealth(Money::from_minor_units(paid))?;
+            let paid = firms
+                .get(&agreement.firm())
+                .ok_or(WorldError::UnknownFirm(agreement.firm()))?
+                .cash()
+                .minor_units()
+                .min(owed);
+            if paid > 0 {
+                let transaction = MoneyTransaction::transfer(
+                    MoneyTransactionPurpose::Payroll {
+                        firm: agreement.firm(),
+                        cohort: agreement.cohort(),
+                    },
+                    MoneyAccountId::FirmOperating(agreement.firm()),
+                    MoneyAccountId::HouseholdLiquid(agreement.cohort()),
+                    Money::from_minor_units(paid),
+                )?;
+                MoneyAccountBalances::FirmsAndHouseholds {
+                    firms: &mut firms,
+                    cohorts: &mut cohorts,
+                }
+                .settle(&transaction)?;
+                transactions.push(transaction);
+            }
             agreement.arrears = Money::from_minor_units(owed - paid);
             records.push(PayrollRecord {
                 firm: agreement.firm(),
@@ -1602,9 +1652,11 @@ impl World {
                 arrears: agreement.arrears(),
             });
         }
+        let journal_entries = self.prepare_money_journal_entries(&transactions)?;
         self.firms = firms;
         self.cohorts = cohorts;
         self.employment_agreements = agreements;
+        self.append_money_journal_entries(journal_entries);
         for row in &records {
             self.record_firm_payroll(row.firm, row.owed, row.paid, row.arrears)?;
         }
@@ -1841,6 +1893,12 @@ mod tests {
             .set_regional_price(RegionId::new(1), GoodId::new(1), Money::from_minor_units(1))
             .expect("observed price");
         world.execute_monthly_payroll().expect("payroll");
+        assert_eq!(world.money_journal().len(), 1);
+        assert!(matches!(
+            world.money_journal()[0].purpose(),
+            crate::MoneyTransactionPurpose::Payroll { firm, cohort }
+                if firm == hired.firm && cohort == hired.cohort
+        ));
         assert_eq!(
             world.employment_agreements[&(hired.firm, hired.cohort)].arrears(),
             Money::default(),

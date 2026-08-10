@@ -40,6 +40,40 @@ impl FirmOperatingObservation {
     }
 }
 
+/// Every minor unit of money in the world, sorted by whose hands hold it.
+///
+/// Households earn wages and spend them on goods; firms take that spending in
+/// and pay wages, inputs and dividends out; owners receive dividends and put
+/// them back as founding capital; treasuries tax and spend. If the sum of the
+/// four is steady while one of them empties, the trouble is a circuit that
+/// does not return, not a world that ran out of money.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MoneyStock {
+    /// Liquid wealth held by household cohorts.
+    pub households: Money,
+    /// Cash held in firm tills or firm-owned investment escrow.
+    pub firms: Money,
+    /// Cash held by owning actors, outside any firm.
+    pub owners: Money,
+    /// Cash held by national treasuries or restricted public-program escrow.
+    pub treasuries: Money,
+}
+impl MoneyStock {
+    /// The whole stock of money in the world.
+    ///
+    /// # Errors
+    /// Returns an error if the total does not fit in the money type.
+    pub fn total(self) -> Result<Money, WorldError> {
+        let sum = i128::from(self.households.minor_units())
+            + i128::from(self.firms.minor_units())
+            + i128::from(self.owners.minor_units())
+            + i128::from(self.treasuries.minor_units());
+        i64::try_from(sum)
+            .map(Money::from_minor_units)
+            .map_err(|_| WorldError::ArithmeticOverflow("money stock total"))
+    }
+}
+
 pub(crate) struct ObservedOperatingBaseline {
     pub(crate) monthly_sales: Money,
     pub(crate) produced_batches: u64,
@@ -47,6 +81,49 @@ pub(crate) struct ObservedOperatingBaseline {
 }
 
 impl World {
+    /// Counts every minor unit of money in the world by whose hands hold it.
+    ///
+    /// # Errors
+    /// Returns an error if any of the four sums does not fit in the money type.
+    pub fn observed_money_stock(&self) -> Result<MoneyStock, WorldError> {
+        let fold = |sum: i128, value: i64| sum + i128::from(value);
+        let narrow = |sum: i128, what: &'static str| {
+            i64::try_from(sum)
+                .map(Money::from_minor_units)
+                .map_err(|_| WorldError::ArithmeticOverflow(what))
+        };
+        let households = self.cohorts.values().fold(0_i128, |sum, cohort| {
+            fold(sum, cohort.liquid_wealth().minor_units())
+        });
+        let firms = self
+            .firms
+            .values()
+            .fold(0_i128, |sum, firm| fold(sum, firm.cash().minor_units()));
+        let firms = self
+            .committed_investments
+            .values()
+            .fold(firms, |sum, cash| fold(sum, cash.minor_units()));
+        let owners = self
+            .actor_cash
+            .values()
+            .fold(0_i128, |sum, cash| fold(sum, cash.minor_units()));
+        let treasuries = self.countries.values().fold(0_i128, |sum, country| {
+            fold(sum, country.indicators().treasury().minor_units())
+        });
+        let treasuries = self
+            .government_programs
+            .values()
+            .fold(treasuries, |sum, program| {
+                fold(sum, program.carryover_funding().minor_units())
+            });
+        Ok(MoneyStock {
+            households: narrow(households, "household money stock")?,
+            firms: narrow(firms, "firm money stock")?,
+            owners: narrow(owners, "owner money stock")?,
+            treasuries: narrow(treasuries, "treasury money stock")?,
+        })
+    }
+
     /// Captures one bounded monthly observation before the monthly accounts are reset.
     /// # Errors
     /// Returns an error for an unknown firm or a missing observed input price.
@@ -114,6 +191,29 @@ impl World {
             input_prices,
             market_outcomes,
         };
+        // The month is closed here, so this is where the firm learns whether it
+        // earned anything. Earnings are what the trade brought in less what the
+        // work cost: wages actually paid and inputs actually bought. A loss is
+        // recorded as readily as a profit, because a firm that has been losing
+        // money has nothing to distribute no matter how full its till looks.
+        let input_spend = self
+            .monthly_firm_procurement_purchases
+            .iter()
+            .filter(|((buyer, _), _)| *buyer == firm)
+            .try_fold(0_i128, |sum, (_, (_, spend))| {
+                sum.checked_add(i128::from(spend.minor_units()))
+                    .ok_or(WorldError::ArithmeticOverflow("monthly input spend"))
+            })?;
+        let earned = i128::from(accounts.sales_revenue().minor_units())
+            .checked_sub(i128::from(accounts.wages_paid().minor_units()))
+            .and_then(|value| value.checked_sub(input_spend))
+            .ok_or(WorldError::ArithmeticOverflow("monthly firm earnings"))?;
+        let retained = self.firm_retained_earnings.entry(firm).or_default();
+        *retained = Money::from_minor_units(
+            i64::try_from(i128::from(retained.minor_units()).saturating_add(earned))
+                .map_err(|_| WorldError::ArithmeticOverflow("retained firm earnings"))?,
+        );
+
         let history = self.firm_operating_history.entry(firm).or_default();
         if history.len() == FIRM_OBSERVATION_HISTORY_LIMIT {
             history.remove(0);

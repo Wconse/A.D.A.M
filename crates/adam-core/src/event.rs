@@ -5,6 +5,30 @@ use crate::{
     ShipmentId, SimDate, TerminalId,
 };
 
+/// Why a region that plainly wanted a good got no new producer of it.
+///
+/// A shortage that goes unanswered is a fact about the world, not a silence.
+/// Recording which of the four scarce things was missing - a known way to make
+/// the good, a worker who can be had, prices to judge the venture by, or
+/// somebody with the money - is what lets a reader tell an economy that cannot
+/// respond from one that has decided not to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum FirmEntryObstacle {
+    /// Nobody in the world knows a recipe that produces this good.
+    NoKnownRecipe,
+    /// Nobody idle and nobody employed nearby who could do the work at all.
+    NoWorkerToBeHad,
+    /// A worker exists and could be bought away, but the raise it would take to
+    /// move them is more than the work earns at local prices, so the founder
+    /// would be buying labour it could never pay back.
+    RaiseExceedsWorkValue,
+    /// The region has no observed price for the output or for an input, so the
+    /// venture cannot be judged at all.
+    NoLocalPrices,
+    /// Nobody living in the region could fund the capital and the first wages.
+    NoSolventFounder,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DomainEvent {
     EconomicYearCompleted {
@@ -37,6 +61,7 @@ pub enum DomainEvent {
         pressure_months: u8,
         entry_feasible: bool,
         firm_founded: Option<FirmId>,
+        obstacle: Option<FirmEntryObstacle>,
     },
     FirmFoundedFromOpportunity {
         founder: ActorId,
@@ -352,8 +377,6 @@ pub enum DomainEvent {
         sold: QuantityMilli,
         unsold: QuantityMilli,
         unmet_demand: QuantityMilli,
-        cost_floor: Money,
-        floor_binding: bool,
     },
     FirmProcurementTrade {
         buyer: FirmId,
@@ -455,6 +478,17 @@ pub enum DomainEvent {
     DividendPaid {
         firm: FirmId,
         amount: Money,
+    },
+    /// Where the world's money sits at the close of an economic year.
+    ///
+    /// Nothing in the simulation reads this: it is a measurement, taken so that
+    /// a drained household purse cannot be mistaken for a shortage of goods.
+    MoneyStockMeasured {
+        households: Money,
+        firms: Money,
+        owners: Money,
+        treasuries: Money,
+        total: Money,
     },
     InvestmentProjectLaunched {
         project: ProjectId,

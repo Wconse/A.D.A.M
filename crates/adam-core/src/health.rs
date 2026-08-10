@@ -39,6 +39,42 @@ impl CohortHealth {
     pub(crate) const fn mortality_remainder_ppm(self) -> u64 {
         self.mortality_remainder_ppm
     }
+
+    /// Blends two health records by the number of people standing behind each.
+    ///
+    /// When a starving household joins a fed one, the famine it survived is
+    /// carried into the joined record instead of being washed away by the
+    /// arithmetic of merging.
+    pub(crate) fn blended_with(self, own_people: u64, other: Self, other_people: u64) -> Self {
+        let total = own_people.saturating_add(other_people);
+        if total == 0 {
+            return self;
+        }
+        let mix = |left: BasisPoints, right: BasisPoints| -> BasisPoints {
+            let weighted = u128::from(left.get()) * u128::from(own_people)
+                + u128::from(right.get()) * u128::from(other_people);
+            let value = u16::try_from(weighted / u128::from(total)).unwrap_or(BasisPoints::MAX);
+            bounded_basis_points(value)
+        };
+        Self {
+            survival_fulfillment: mix(self.survival_fulfillment, other.survival_fulfillment),
+            functional_capacity: mix(self.functional_capacity, other.functional_capacity),
+            mortality_remainder_ppm: self
+                .mortality_remainder_ppm
+                .max(other.mortality_remainder_ppm),
+        }
+    }
+
+    /// Builds an observed health record directly, for tests that need a world
+    /// where some households have been eating and others have not.
+    #[cfg(test)]
+    pub(crate) fn observed_for_test(survival_fulfillment: u16) -> Self {
+        Self {
+            survival_fulfillment: bounded_basis_points(survival_fulfillment),
+            functional_capacity: bounded_basis_points(survival_fulfillment),
+            mortality_remainder_ppm: 0,
+        }
+    }
 }
 
 impl World {
@@ -177,30 +213,61 @@ impl World {
         &self.cohort_health
     }
 
+    /// Reads how much of each survival need the settled month actually closed.
+    ///
+    /// A need is counted as a share of itself, never as a weight of goods.
+    /// Every consumption target states the quantity of that good which closes
+    /// the need alone, so half a ration of bread and half a ration of raw
+    /// grain feed a household exactly once between them. Adding raw quantities
+    /// across substitutes would make the food a person needs more of look the
+    /// more nourishing one, and falling back to it would become a free trick
+    /// instead of a worse meal.
+    ///
+    /// A household that bought nothing is hungry whether or not it ever placed
+    /// an order: the requirement is written in its profile, not in the market.
     fn survival_fulfillment_bps(&self, cohort: CohortId) -> Result<u16, WorldError> {
-        let met = self
-            .monthly_consumption
+        let record = self
+            .cohorts
+            .get(&cohort)
+            .ok_or(WorldError::UnknownCohort(cohort))?;
+        let profile = self
+            .consumption_profiles
+            .get(&record.need_profile())
+            .ok_or(WorldError::UnknownNeedProfile(record.need_profile()))?;
+        let scale = crate::demand::NEED_SHARE_SCALE;
+        let mut needs: BTreeMap<(u8, Option<crate::GoodId>), i128> = BTreeMap::new();
+        for target in profile
+            .targets()
             .iter()
-            .filter(|((id, _good, tier), _)| *id == cohort && *tier == NeedTier::Survival)
-            .try_fold(0_u128, |sum, (_, quantity)| {
-                sum.checked_add(u128::from(quantity.get()))
-                    .ok_or(WorldError::ArithmeticOverflow("survival consumption"))
-            })?;
-        let unmet = self
-            .unmet_demand
-            .iter()
-            .filter(|((id, _good, tier), _)| *id == cohort && *tier == NeedTier::Survival)
-            .try_fold(0_u128, |sum, (_, quantity)| {
-                sum.checked_add(u128::from(quantity.get()))
-                    .ok_or(WorldError::ArithmeticOverflow("unmet survival demand"))
-            })?;
-        let total = met
-            .checked_add(unmet)
-            .ok_or(WorldError::ArithmeticOverflow("total survival demand"))?;
-        if total == 0 {
+            .copied()
+            .filter(|target| target.tier() == NeedTier::Survival)
+        {
+            let count = match target.basis() {
+                crate::DemandBasis::PerPerson => record.people().people(),
+                crate::DemandBasis::PerHousehold => record.households(),
+            };
+            let required = i128::from(target.monthly_quantity().get()) * i128::from(count);
+            if required == 0 {
+                continue;
+            }
+            let consumed = i128::from(
+                self.monthly_consumption
+                    .get(&(cohort, target.good(), NeedTier::Survival))
+                    .copied()
+                    .unwrap_or_default()
+                    .get(),
+            );
+            *needs.entry(target.need_key()).or_default() += consumed * scale / required;
+        }
+        if needs.is_empty() {
             return Ok(BasisPoints::MAX);
         }
-        u16::try_from(met * u128::from(BasisPoints::MAX) / total)
+        // A share cannot exceed one: eating two rations does not feed a
+        // household twice. That is the domain of the ratio, not a policy.
+        let closed: i128 = needs.values().map(|share| (*share).min(scale)).sum();
+        let needs_count = i128::try_from(needs.len())
+            .map_err(|_| WorldError::ArithmeticOverflow("survival need count"))?;
+        u16::try_from(closed * i128::from(BasisPoints::MAX) / (needs_count * scale))
             .map_err(|_| WorldError::ArithmeticOverflow("survival fulfillment"))
     }
 }
@@ -332,6 +399,152 @@ mod tests {
             )
             .expect("cohort registration");
         world
+    }
+
+    /// One need - being fed - met by bread or, worse, by raw grain.
+    fn fed_world() -> World {
+        let mut world = World::new(WorldSeed::new(47), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "Aster").expect("country"))
+            .expect("country registration");
+        world
+            .register_good(Good::new(GoodId::new(1), "Grain").expect("good"))
+            .expect("good registration");
+        world
+            .register_good(Good::new(GoodId::new(2), "Bread").expect("good"))
+            .expect("good registration");
+        world
+            .register_consumption_profile(
+                ConsumptionProfile::new(
+                    NeedProfileId::new(1),
+                    "Fed",
+                    vec![
+                        ConsumptionTarget::new(
+                            GoodId::new(2),
+                            NeedTier::Survival,
+                            DemandBasis::PerPerson,
+                            QuantityMilli::new(1_000),
+                        )
+                        .in_need_group(1, 0),
+                        ConsumptionTarget::new(
+                            GoodId::new(1),
+                            NeedTier::Survival,
+                            DemandBasis::PerPerson,
+                            QuantityMilli::new(1_800),
+                        )
+                        .in_need_group(1, 1),
+                    ],
+                )
+                .expect("profile"),
+            )
+            .expect("profile registration");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Capital",
+                    Population::new(100),
+                    Money::from_minor_units(1_000_000),
+                )
+                .expect("region"),
+            )
+            .expect("region registration");
+        world
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    CohortId::new(1),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(100),
+                    40,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::from_minor_units(1_200),
+                    Money::default(),
+                    Money::default(),
+                )
+                .expect("cohort"),
+            )
+            .expect("cohort registration");
+        world
+    }
+
+    fn fulfillment(world: &World) -> u16 {
+        world
+            .survival_fulfillment_bps(CohortId::new(1))
+            .expect("fulfillment")
+    }
+
+    #[test]
+    fn a_full_ration_of_either_food_closes_the_same_need_once() {
+        let mut bread = fed_world();
+        bread.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(2), NeedTier::Survival),
+            QuantityMilli::new(100_000),
+        );
+        assert_eq!(fulfillment(&bread), BasisPoints::MAX);
+
+        let mut grain = fed_world();
+        grain.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(1), NeedTier::Survival),
+            QuantityMilli::new(180_000),
+        );
+        assert_eq!(
+            fulfillment(&grain),
+            BasisPoints::MAX,
+            "a full grain ration is a full ration, just a bigger and worse one"
+        );
+    }
+
+    #[test]
+    fn raw_grain_is_not_made_nourishing_by_weighing_more() {
+        let mut world = fed_world();
+        world.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(1), NeedTier::Survival),
+            QuantityMilli::new(100_000),
+        );
+        assert_eq!(
+            fulfillment(&world),
+            5_555,
+            "the weight of a full bread ration in raw grain feeds barely half the month"
+        );
+    }
+
+    #[test]
+    fn halves_of_two_substitutes_feed_a_cohort_exactly_once() {
+        let mut world = fed_world();
+        world.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(2), NeedTier::Survival),
+            QuantityMilli::new(50_000),
+        );
+        world.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(1), NeedTier::Survival),
+            QuantityMilli::new(90_000),
+        );
+        assert_eq!(fulfillment(&world), BasisPoints::MAX);
+    }
+
+    #[test]
+    fn eating_two_rations_does_not_feed_a_cohort_twice() {
+        let mut world = fed_world();
+        world.monthly_consumption.insert(
+            (CohortId::new(1), GoodId::new(2), NeedTier::Survival),
+            QuantityMilli::new(400_000),
+        );
+        assert_eq!(fulfillment(&world), BasisPoints::MAX);
+    }
+
+    #[test]
+    fn a_cohort_that_bought_nothing_is_hungry_even_without_a_recorded_order() {
+        let world = fed_world();
+        assert_eq!(
+            fulfillment(&world),
+            0,
+            "the requirement is written in the profile, not in the market"
+        );
     }
 
     #[test]

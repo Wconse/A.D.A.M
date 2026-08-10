@@ -1,5 +1,7 @@
+use crate::money_ledger::MoneyAccountBalances;
 use crate::{
-    CohortId, FirmId, GoodId, Money, NeedTier, QuantityMilli, RegionId, RouteId, WorldError,
+    CohortId, FirmId, GoodId, Money, MoneyAccountId, MoneyPosting, MoneyTransaction,
+    MoneyTransactionPurpose, NeedTier, QuantityMilli, RegionId, RouteId, WorldError,
 };
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MarketOffer {
@@ -151,6 +153,15 @@ impl crate::World {
                         / 10_000,
                 )
                 .map_err(|_| WorldError::ArithmeticOverflow("seller offer price"))?;
+                // A seller that would lose money on every unit asks its own cost
+                // rather than the going rate. Who pays for this refusal, and what
+                // does it cost them: the firm itself, in goods left on the shelf,
+                // in the revenue it does not take, and in wages it still owes out
+                // of the same till - so it can hold the line only while its cash
+                // lasts, and answers with layoffs or insolvency when it does not.
+                let unit_price = self
+                    .firm_variable_unit_cost(firm.id())?
+                    .map_or(unit_price, |cost| unit_price.max(cost.minor_units()));
                 Ok(FirmMarketOfferPlan {
                     seller: firm.id(),
                     region: firm.region(),
@@ -687,29 +698,64 @@ impl crate::World {
         validate_market_clearing(self, clearing)?;
         let mut cohorts = self.cohorts.clone();
         let mut firms = self.firms.clone();
+        let mut transactions = Vec::new();
         for fill in &clearing.fills {
-            cohorts
-                .get_mut(&fill.buyer)
-                .ok_or(WorldError::UnknownCohort(fill.buyer))?
-                .debit_wealth(fill.spend)?;
-            let firm = firms
+            firms
                 .get_mut(&fill.seller)
-                .ok_or(WorldError::UnknownFirm(fill.seller))?;
-            firm.debit_inventory(fill.good, fill.quantity)?;
-            firm.apply_cash_delta(fill.goods_spend)?;
-            if let Some(route) = fill.route {
-                let carrier = self
-                    .logistics_routes
-                    .get(&route)
-                    .and_then(crate::LogisticsRoute::carrier)
-                    .ok_or(WorldError::InvalidLogistics(
-                        "market import route requires a carrier",
-                    ))?;
-                firms
-                    .get_mut(&carrier)
-                    .ok_or(WorldError::UnknownFirm(carrier))?
-                    .apply_cash_delta(fill.freight_spend)?;
+                .ok_or(WorldError::UnknownFirm(fill.seller))?
+                .debit_inventory(fill.good, fill.quantity)?;
+            let carrier = fill
+                .route
+                .map(|route| {
+                    self.logistics_routes
+                        .get(&route)
+                        .and_then(crate::LogisticsRoute::carrier)
+                        .ok_or(WorldError::InvalidLogistics(
+                            "market import route requires a carrier",
+                        ))
+                })
+                .transpose()?;
+            if fill.spend.minor_units() == 0 {
+                if fill.goods_spend.minor_units() != 0 || fill.freight_spend.minor_units() != 0 {
+                    return Err(WorldError::InvalidMarketClearing(
+                        "zero-spend fill cannot contain monetary components",
+                    ));
+                }
+                continue;
             }
+            let mut postings = vec![MoneyPosting::decrease(
+                MoneyAccountId::HouseholdLiquid(fill.buyer),
+                fill.spend,
+            )];
+            if fill.goods_spend.minor_units() > 0 {
+                postings.push(MoneyPosting::increase(
+                    MoneyAccountId::FirmOperating(fill.seller),
+                    fill.goods_spend,
+                ));
+            }
+            if fill.freight_spend.minor_units() > 0 {
+                postings.push(MoneyPosting::increase(
+                    MoneyAccountId::FirmOperating(carrier.ok_or(WorldError::InvalidLogistics(
+                        "freight spend requires a carrier account",
+                    ))?),
+                    fill.freight_spend,
+                ));
+            }
+            let transaction = MoneyTransaction::new(
+                MoneyTransactionPurpose::HouseholdPurchase {
+                    buyer: fill.buyer,
+                    seller: fill.seller,
+                    good: fill.good,
+                    carrier,
+                },
+                postings,
+            )?;
+            MoneyAccountBalances::FirmsAndHouseholds {
+                firms: &mut firms,
+                cohorts: &mut cohorts,
+            }
+            .settle(&transaction)?;
+            transactions.push(transaction);
         }
         let mut consumption: std::collections::BTreeMap<
             (CohortId, GoodId, NeedTier),
@@ -729,8 +775,10 @@ impl crate::World {
         let import_dependence = derive_household_import_dependence(&cohorts, &clearing.fills)?;
         let import_events = household_import_dependence_events(self, &import_dependence)?;
         let supplier_preferences = derive_household_supplier_preferences(&clearing.fills)?;
+        let journal_entries = self.prepare_money_journal_entries(&transactions)?;
         self.cohorts = cohorts;
         self.firms = firms;
+        self.append_money_journal_entries(journal_entries);
         let mut weighted_desired: std::collections::BTreeMap<CohortId, u128> =
             std::collections::BTreeMap::new();
         let mut weighted_unmet: std::collections::BTreeMap<CohortId, u128> =
@@ -1098,6 +1146,120 @@ mod tests {
         assert_eq!(plans[0].market_offer().expect("offer").quantity.get(), 600);
     }
 
+    /// Puts one worker on the payroll at a stated wage, which is the only thing
+    /// that makes this firm's output cost anything to make.
+    fn employ_one(world: &mut World, wage: i64) {
+        world
+            .register_employment_agreement(
+                crate::EmploymentAgreement::new(
+                    FirmId::new(1),
+                    CohortId::new(1),
+                    1,
+                    Money::from_minor_units(wage),
+                )
+                .expect("agreement"),
+            )
+            .expect("register agreement");
+    }
+
+    fn price_and_policy(world: &mut World, reference: i64, markup_bps: u16) {
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(1),
+                Money::from_minor_units(reference),
+            )
+            .expect("price");
+        world.firm_policies.insert(
+            FirmId::new(1),
+            FirmPolicy::new(
+                0,
+                BasisPoints::new(markup_bps).expect("markup"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+                BasisPoints::new(0).expect("allocation"),
+            )
+            .expect("policy"),
+        );
+    }
+
+    #[test]
+    fn a_seller_asks_its_own_cost_rather_than_sell_at_a_loss() {
+        // The wage makes a unit cost fifty to produce, and the going rate is ten.
+        // Selling here would lose forty on every unit, so the firm asks what the
+        // work cost it and lets the market decide whether that is worth paying.
+        let mut world = settlement_world();
+        employ_one(&mut world, 50);
+        price_and_policy(&mut world, 10, 0);
+
+        let plans = world.plan_firm_market_offers().expect("offer plans");
+
+        assert_eq!(
+            plans[0].unit_price,
+            Money::from_minor_units(50),
+            "a seller does not hand over goods for less than they cost it, and the refusal is paid for out of its own unsold stock"
+        );
+    }
+
+    #[test]
+    fn a_seller_whose_costs_are_covered_asks_the_going_rate() {
+        // The same firm at a wage of five. Cost is below the marked-up reference,
+        // so nothing about the firm's own accounts has anything to say, and the
+        // market price stands. Without this direction the rule above would be a
+        // licence to charge cost forever rather than a refusal to sell below it.
+        let mut world = settlement_world();
+        employ_one(&mut world, 5);
+        price_and_policy(&mut world, 10, 1_000);
+
+        let plans = world.plan_firm_market_offers().expect("offer plans");
+
+        assert_eq!(
+            plans[0].unit_price,
+            Money::from_minor_units(11),
+            "a firm whose costs are covered has no reason to depart from the going rate"
+        );
+    }
+
+    #[test]
+    fn sub_minor_fill_moves_goods_without_a_fake_money_transaction() {
+        let mut world = settlement_world();
+        let buyer = CohortId::new(1);
+        let seller = FirmId::new(1);
+        let opening_wealth = world.cohorts[&buyer].liquid_wealth();
+        let opening_cash = world.firms[&seller].cash();
+        let clearing = clear_local_market(
+            &[MarketOrder {
+                buyer,
+                tier: NeedTier::Survival,
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1),
+                max_spend: Money::from_minor_units(100),
+            }],
+            &[MarketOffer {
+                seller,
+                region: RegionId::new(1),
+                good: GoodId::new(1),
+                quantity: QuantityMilli::new(1),
+                unit_price: Money::from_minor_units(1),
+            }],
+        )
+        .expect("sub-minor clearing");
+        assert_eq!(clearing.fills[0].spend, Money::default());
+
+        world
+            .settle_local_market(&clearing)
+            .expect("sub-minor settlement");
+
+        assert_eq!(world.cohorts[&buyer].liquid_wealth(), opening_wealth);
+        assert_eq!(world.firms[&seller].cash(), opening_cash);
+        assert_eq!(
+            world.monthly_consumption()[&(buyer, GoodId::new(1), NeedTier::Survival)],
+            QuantityMilli::new(1)
+        );
+        assert!(world.money_journal().is_empty());
+    }
+
     #[test]
     fn settlement_carries_offer_outcome_into_firm_history() {
         let mut world = settlement_world();
@@ -1120,6 +1282,18 @@ mod tests {
         )
         .expect("clearing");
         world.settle_local_market(&clearing).expect("settlement");
+        assert_eq!(world.money_journal().len(), 1);
+        assert!(matches!(
+            world.money_journal()[0].purpose(),
+            crate::MoneyTransactionPurpose::HouseholdPurchase {
+                buyer,
+                seller,
+                good,
+                carrier: None,
+            } if buyer == CohortId::new(1)
+                && seller == FirmId::new(1)
+                && good == GoodId::new(1)
+        ));
         assert!(
             world.monthly_firm_market_outcomes()[&FirmId::new(1)][0]
                 .sold_out_while_demand_remained()

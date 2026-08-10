@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
+use crate::money_ledger::MoneyAccountBalances;
 use crate::{
     ActorId, BasisPoints, CohortId, CountryId, DemandIntent, DomainEvent, MarketClearing, Money,
-    NeedTier, PowerNodeKind, QuantityMilli, RegionId, World, WorldCommand, WorldError,
+    MoneyAccountId, MoneyTransaction, MoneyTransactionPurpose, NeedTier, PowerNodeKind,
+    QuantityMilli, RegionId, World, WorldCommand, WorldError,
 };
 
 /// One treasury-funded transfer responding to survival goods that were available but unaffordable.
@@ -263,21 +265,23 @@ impl World {
         if treasury.minor_units() < amount.minor_units() {
             return Err(WorldError::InsufficientTreasury(country));
         }
+        let transaction = MoneyTransaction::transfer(
+            MoneyTransactionPurpose::EmergencyRelief { country, cohort },
+            MoneyAccountId::CountryTreasury(country),
+            MoneyAccountId::HouseholdLiquid(cohort),
+            amount,
+        )?;
         let mut countries = self.countries.clone();
         let mut cohorts = self.cohorts.clone();
-        countries
-            .get_mut(&country)
-            .ok_or(WorldError::UnknownCountry(country))?
-            .indicators_mut()
-            .set_treasury(Money::from_minor_units(
-                treasury.minor_units() - amount.minor_units(),
-            ));
-        cohorts
-            .get_mut(&cohort)
-            .ok_or(WorldError::UnknownCohort(cohort))?
-            .credit_wealth(amount)?;
+        MoneyAccountBalances::TreasuriesAndHouseholds {
+            countries: &mut countries,
+            cohorts: &mut cohorts,
+        }
+        .settle(&transaction)?;
+        let journal_entries = self.prepare_money_journal_entries(&[transaction])?;
         self.countries = countries;
         self.cohorts = cohorts;
+        self.append_money_journal_entries(journal_entries);
         self.events.append(
             self.date,
             DomainEvent::EmergencyReliefFunded {

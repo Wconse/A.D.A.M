@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
+use crate::money_ledger::MoneyAccountBalances;
 use crate::{
-    ActorId, BasisPoints, CountryId, DomainEvent, GoodId, Money, ProgramId, QuantityMilli,
-    RegionId, World, WorldError,
+    ActorId, BasisPoints, CountryId, DomainEvent, GoodId, Money, MoneyAccountId, MoneyPosting,
+    MoneyTransaction, MoneyTransactionPurpose, ProgramId, QuantityMilli, RegionId, World,
+    WorldError,
 };
 
 #[derive(
@@ -307,21 +309,18 @@ impl GovernmentProgram {
             .ok_or(WorldError::ArithmeticOverflow(
                 "government program appropriation",
             ))?;
-        let carryover = self
-            .carryover_funding
-            .minor_units()
-            .checked_add(amount.minor_units())
-            .ok_or(WorldError::ArithmeticOverflow(
-                "government program carryover",
-            ))?;
         self.appropriated_funding = Money::from_minor_units(cumulative);
-        self.carryover_funding = Money::from_minor_units(carryover);
         self.last_appropriation_year = Some(year);
         self.status = GovernmentProgramStatus::Active;
         Ok(())
     }
 
-    fn record_execution(&mut self, year: i32, delivered: Money) -> Result<(), WorldError> {
+    fn record_execution(
+        &mut self,
+        year: i32,
+        delivered: Money,
+        remaining_carryover: Money,
+    ) -> Result<(), WorldError> {
         let delivered_total = self
             .delivered_funding
             .minor_units()
@@ -329,25 +328,28 @@ impl GovernmentProgram {
             .ok_or(WorldError::ArithmeticOverflow(
                 "government program delivery",
             ))?;
-        let carryover = self
+        let expected_carryover = self
             .carryover_funding
             .minor_units()
             .checked_sub(delivered.minor_units())
             .ok_or(WorldError::ArithmeticOverflow(
                 "government program execution carryover",
             ))?;
-        if carryover < 0 {
+        if expected_carryover < 0 || expected_carryover != remaining_carryover.minor_units() {
             return Err(WorldError::InvalidGovernmentProgram(
                 "program cannot deliver more than committed carryover",
             ));
         }
         self.delivered_funding = Money::from_minor_units(delivered_total);
-        self.carryover_funding = Money::from_minor_units(carryover);
         self.last_execution_year = Some(year);
-        if carryover > 0 {
+        if remaining_carryover.minor_units() > 0 {
             self.years_delayed = self.years_delayed.saturating_add(1);
         }
         Ok(())
+    }
+
+    pub(crate) const fn set_carryover_funding(&mut self, value: Money) {
+        self.carryover_funding = value;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -541,16 +543,6 @@ impl World {
                 }
             }
         }
-        let new_treasury = match source {
-            ProgramFundingSource::Treasury => opening
-                .treasury()
-                .minor_units()
-                .checked_sub(amount.minor_units())
-                .ok_or(WorldError::ArithmeticOverflow(
-                    "program treasury appropriation",
-                ))?,
-            ProgramFundingSource::PublicDebt => opening.treasury().minor_units(),
-        };
         let new_debt = match source {
             ProgramFundingSource::Treasury => opening.public_debt().minor_units(),
             ProgramFundingSource::PublicDebt => opening
@@ -559,24 +551,68 @@ impl World {
                 .checked_add(amount.minor_units())
                 .ok_or(WorldError::ArithmeticOverflow("program public debt"))?,
         };
-        let mut next_program = state.clone();
-        next_program.record_appropriation(self.date.year(), amount)?;
+        let mut next_programs = self.government_programs.clone();
+        next_programs
+            .get_mut(&program)
+            .ok_or(WorldError::UnknownGovernmentProgram(program))?
+            .record_appropriation(self.date.year(), amount)?;
+        let mut next_countries = self.countries.clone();
+        next_countries
+            .get_mut(&country)
+            .ok_or(WorldError::UnknownCountry(country))?
+            .indicators_mut()
+            .set_public_debt(Money::from_minor_units(new_debt));
+        let transaction = if amount.minor_units() == 0 {
+            None
+        } else {
+            let purpose =
+                MoneyTransactionPurpose::GovernmentProgramAppropriation { program, country };
+            Some(match source {
+                ProgramFundingSource::Treasury => MoneyTransaction::transfer(
+                    purpose,
+                    MoneyAccountId::CountryTreasury(country),
+                    MoneyAccountId::GovernmentProgramEscrow(program),
+                    amount,
+                )?,
+                ProgramFundingSource::PublicDebt => MoneyTransaction::issue(
+                    purpose,
+                    MoneyAccountId::GovernmentProgramEscrow(program),
+                    amount,
+                )?,
+            })
+        };
+        let journal_entries = transaction
+            .as_ref()
+            .map(|transaction| {
+                self.prepare_money_journal_entries(std::slice::from_ref(transaction))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if let Some(transaction) = &transaction {
+            match source {
+                ProgramFundingSource::Treasury => {
+                    MoneyAccountBalances::TreasuriesAndPrograms {
+                        countries: &mut next_countries,
+                        programs: &mut next_programs,
+                    }
+                    .settle(transaction)?;
+                }
+                ProgramFundingSource::PublicDebt => {
+                    MoneyAccountBalances::Programs {
+                        programs: &mut next_programs,
+                    }
+                    .settle(transaction)?;
+                }
+            }
+        }
+        let carryover = next_programs[&program].carryover_funding();
         let shortfall = promised
             .minor_units()
             .saturating_sub(amount.minor_units())
             .max(0);
-        let country_state = self
-            .countries
-            .get_mut(&country)
-            .ok_or(WorldError::UnknownCountry(country))?;
-        country_state
-            .indicators_mut()
-            .set_treasury(Money::from_minor_units(new_treasury));
-        country_state
-            .indicators_mut()
-            .set_public_debt(Money::from_minor_units(new_debt));
-        let carryover = next_program.carryover_funding();
-        self.government_programs.insert(program, next_program);
+        self.countries = next_countries;
+        self.government_programs = next_programs;
+        self.append_money_journal_entries(journal_entries);
         self.events.append(
             self.date,
             DomainEvent::GovernmentProgramAppropriated {
@@ -852,29 +888,40 @@ impl World {
                 .ok_or(WorldError::ArithmeticOverflow("temporary program labor"))?;
             temporary_labor.push((*region, workers, Money::from_minor_units(*delivered)));
         }
-        let mut next_cohorts = self.cohorts.clone();
-        for (region, workers, wages) in &temporary_labor {
-            let recipients: Vec<_> = next_cohorts
-                .values()
-                .filter(|cohort| {
+        let mut outlay_recipients = Vec::new();
+        for (region, (_, delivered, _, _, _, workers_required)) in &deliveries {
+            if *delivered <= 0 {
+                continue;
+            }
+            let recipient = if *workers_required > 0 {
+                self.cohorts.values().find(|cohort| {
                     cohort.region() == *region
                         && cohort.employment() == crate::EmploymentStatus::Unemployed
                 })
-                .map(crate::HouseholdCohort::id)
-                .collect();
-            if let Some(cohort) = recipients.first() {
-                next_cohorts
-                    .get_mut(cohort)
-                    .expect("temporary labor cohort exists")
-                    .credit_wealth(*wages)?;
-            } else if *workers > 0 || wages.minor_units() > 0 {
-                return Err(WorldError::InvalidGovernmentProgram(
-                    "temporary program labor has no eligible wage recipient",
-                ));
+            } else {
+                self.cohorts
+                    .values()
+                    .find(|cohort| cohort.region() == *region)
             }
+            .map(crate::HouseholdCohort::id)
+            .ok_or(WorldError::InvalidGovernmentProgram(
+                "program delivery has no eligible local household counterparty",
+            ))?;
+            outlay_recipients.push((recipient, Money::from_minor_units(*delivered)));
         }
+        let remaining_after_delivery = opening_carryover
+            .minor_units()
+            .checked_sub(delivered_total)
+            .ok_or(WorldError::ArithmeticOverflow(
+                "government program execution carryover",
+            ))?;
+        let remaining_after_delivery = Money::from_minor_units(remaining_after_delivery);
         let mut next = state.clone();
-        next.record_execution(self.date.year(), Money::from_minor_units(delivered_total))?;
+        next.record_execution(
+            self.date.year(),
+            Money::from_minor_units(delivered_total),
+            remaining_after_delivery,
+        )?;
         let domestic_regions: Vec<_> = self
             .regions
             .values()
@@ -926,12 +973,53 @@ impl World {
             )?;
             regional_outcomes.push((region, share, memory, political_shift));
         }
-        let remaining_carryover = next.carryover_funding();
         let years_delayed = next.years_delayed();
-        self.government_programs.insert(program, next);
+        let mut next_programs = self.government_programs.clone();
+        next_programs.insert(program, next);
+        let mut next_cohorts = self.cohorts.clone();
+        let transaction = if delivered_total == 0 {
+            None
+        } else {
+            let mut postings = vec![MoneyPosting::decrease(
+                MoneyAccountId::GovernmentProgramEscrow(program),
+                Money::from_minor_units(delivered_total),
+            )];
+            for &(cohort, amount) in &outlay_recipients {
+                postings.push(MoneyPosting::increase(
+                    MoneyAccountId::HouseholdLiquid(cohort),
+                    amount,
+                ));
+            }
+            Some(MoneyTransaction::new(
+                MoneyTransactionPurpose::GovernmentProgramOutlay { program, country },
+                postings,
+            )?)
+        };
+        let journal_entries = transaction
+            .as_ref()
+            .map(|transaction| {
+                self.prepare_money_journal_entries(std::slice::from_ref(transaction))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        if let Some(transaction) = &transaction {
+            MoneyAccountBalances::ProgramsAndHouseholds {
+                programs: &mut next_programs,
+                cohorts: &mut next_cohorts,
+            }
+            .settle(transaction)?;
+        }
+        let remaining_carryover = next_programs[&program].carryover_funding();
+        if remaining_carryover != remaining_after_delivery {
+            return Err(WorldError::InvalidGovernmentProgram(
+                "program escrow settlement disagrees with planned carryover",
+            ));
+        }
+        self.government_programs = next_programs;
         self.government_reserves = next_reserves;
         self.government_program_labor_usage = next_labor_usage;
         self.cohorts = next_cohorts;
+        self.append_money_journal_entries(journal_entries);
         for (region, share, memory, political_shift) in regional_outcomes {
             self.events.append(
                 self.date,
@@ -1151,6 +1239,24 @@ mod tests {
                 )
                 .expect("region");
         }
+        for id in 1..=2 {
+            let cohort = crate::HouseholdCohort::new(
+                crate::CohortId::new(100 + id),
+                RegionId::new(id),
+                crate::NeedProfileId::new(1),
+                Population::new(100),
+                100,
+                crate::AgeBand::Adult,
+                crate::HouseholdType::WorkingAge,
+                crate::EducationLevel::Secondary,
+                crate::EmploymentStatus::Employed,
+                Money::default(),
+                Money::default(),
+                Money::default(),
+            )
+            .expect("local program counterparty");
+            world.cohorts.insert(cohort.id(), cohort);
+        }
         world
             .register_actor(
                 Actor::new(ActorId::new(1), "Premier", RegionId::new(1), 1980).expect("actor"),
@@ -1278,6 +1384,24 @@ mod tests {
                 .public_debt(),
             Money::from_minor_units(300)
         );
+        let issue = debt_world.money_journal().last().expect("debt issue");
+        assert_eq!(issue.kind(), crate::MoneyTransactionKind::Issue);
+        assert!(matches!(
+            issue.purpose(),
+            MoneyTransactionPurpose::GovernmentProgramAppropriation {
+                program,
+                country,
+            } if program == ProgramId::new(1) && country == CountryId::new(1)
+        ));
+        assert_eq!(
+            debt_world
+                .observed_money_stock()
+                .expect("issued money stock")
+                .total()
+                .expect("issued total"),
+            Money::from_minor_units(300),
+            "public-debt appropriation issues exactly the escrowed proceeds"
+        );
     }
 
     #[test]
@@ -1291,8 +1415,8 @@ mod tests {
             WorldCommand::AppropriateGovernmentProgram {
                 actor: ActorId::new(1),
                 program: ProgramId::new(1),
-                amount: Money::from_minor_units(0),
-                source: ProgramFundingSource::Treasury,
+                amount: Money::from_minor_units(300),
+                source: ProgramFundingSource::PublicDebt,
             },
             WorldCommand::CancelGovernmentProgram {
                 actor: ActorId::new(1),
@@ -1310,8 +1434,21 @@ mod tests {
         );
         assert_eq!(
             direct.government_programs()[&ProgramId::new(1)].appropriated_funding(),
-            Money::from_minor_units(0)
+            Money::from_minor_units(300)
         );
+        assert_eq!(
+            direct.government_programs()[&ProgramId::new(1)].carryover_funding(),
+            Money::from_minor_units(300),
+            "cancelled program still strands its unfunded carryover"
+        );
+        let report = direct
+            .economic_invariant_report()
+            .expect("invariant report");
+        assert!(report.findings.iter().all(|finding| {
+            !finding
+                .explanation
+                .contains("program carryover is not held in a restricted cash account")
+        }));
     }
 
     #[test]
@@ -1334,13 +1471,68 @@ mod tests {
                 ProgramFundingSource::Treasury,
             )
             .expect("appropriation");
+        let funded_stock = world
+            .observed_money_stock()
+            .expect("funded stock")
+            .total()
+            .expect("funded total");
         world
             .execute_government_program(ActorId::new(1), ProgramId::new(1))
             .expect("execution");
+        assert_eq!(
+            world
+                .observed_money_stock()
+                .expect("executed stock")
+                .total()
+                .expect("executed total"),
+            funded_stock
+        );
+        let outlay = world.money_journal().last().expect("program outlay");
+        assert_eq!(outlay.kind(), crate::MoneyTransactionKind::Transfer);
+        assert!(matches!(
+            outlay.purpose(),
+            MoneyTransactionPurpose::GovernmentProgramOutlay {
+                program,
+                country,
+            } if program == ProgramId::new(1) && country == CountryId::new(1)
+        ));
         let program = &world.government_programs()[&ProgramId::new(1)];
         assert_eq!(program.delivered_funding(), Money::from_minor_units(624));
         assert_eq!(program.carryover_funding(), Money::from_minor_units(376));
         assert_eq!(program.years_delayed(), 1);
+    }
+
+    #[test]
+    fn missing_local_outlay_counterparty_rejects_execution_atomically() {
+        let mut world = world();
+        world
+            .countries
+            .get_mut(&CountryId::new(1))
+            .expect("country")
+            .indicators_mut()
+            .set_treasury(Money::from_minor_units(1_000));
+        world
+            .declare_government_program(program(1, 1))
+            .expect("program");
+        world
+            .appropriate_government_program(
+                ActorId::new(1),
+                ProgramId::new(1),
+                Money::from_minor_units(1_000),
+                ProgramFundingSource::Treasury,
+            )
+            .expect("appropriation");
+        world
+            .cohorts
+            .retain(|_, cohort| cohort.region() != RegionId::new(2));
+        let before = world.clone();
+
+        let error = world
+            .execute_government_program(ActorId::new(1), ProgramId::new(1))
+            .expect_err("delivery without a local counterparty must fail");
+
+        assert!(matches!(error, WorldError::InvalidGovernmentProgram(_)));
+        assert_eq!(world, before);
     }
 
     #[test]

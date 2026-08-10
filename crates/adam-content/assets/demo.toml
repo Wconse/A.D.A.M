@@ -1,8 +1,8 @@
-# A.D.A.M content schema v8.
+# A.D.A.M content schema v9.
 # Stage 0 demo: two contrasting Arcadian stories plus the separate country of
 # Borealia, all under the 20% final-sales tax.
 # All money values are minor units; all quantities are milli-units (1000 = 1.0).
-schema_version = 8
+schema_version = 9
 
 [scenario]
 start_year = 2026
@@ -28,11 +28,28 @@ name = "Bread"
 id = 1
 name = "Households"
 
+# One need - being fed - with two ways of meeting it. Bread is what a
+# household wants; raw grain is what it chews when the bakery has nothing
+# left. A month of grain takes 1.8 units per person against 1.0 of bread,
+# because unbaked grain feeds a person worse, and the baker turns 1.0 of
+# grain into 2.0 of bread. Eating the harvest raw therefore costs the region
+# 3.6 times the grain that eating bread would, which is the whole reason a
+# starving Eastport competes with its own bakery for the same sacks.
 [[consumption_profiles.targets]]
 good = 2
 tier = "survival"
 basis = "per_person"
 quantity_milli = 1000
+need_group = 1
+preference = 0
+
+[[consumption_profiles.targets]]
+good = 1
+tier = "survival"
+basis = "per_person"
+quantity_milli = 1800
+need_group = 1
+preference = 1
 
 [[recipes]]
 id = 1
@@ -104,13 +121,13 @@ wage = 16
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions.firms]]
 id = 13
@@ -124,13 +141,13 @@ wage = 16
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions.firms]]
 id = 14
@@ -144,13 +161,13 @@ wage = 16
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions.firms]]
 id = 12
@@ -172,13 +189,13 @@ quantity_milli = 1000000
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions]]
 id = 2
@@ -226,13 +243,13 @@ wage = 24
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions.firms]]
 id = 22
@@ -254,13 +271,13 @@ quantity_milli = 1000000
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[regions]]
 id = 3
@@ -316,13 +333,13 @@ quantity_milli = 1000000
 
 [regions.firms.governance]
 owner_voting_bp = 6000
-owner_economic_bp = 6000
+owner_economic_bp = 10000
 manager_role = "operations_manager"
 
 [regions.firms.policy]
 inventory_buffer_days = 0
 price_markup_bp = 0
-allocations_bp = [0, 0, 0]
+allocations_bp = [0, 0, 3000]
 
 [[routes]]
 id = 1

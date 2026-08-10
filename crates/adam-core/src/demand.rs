@@ -76,6 +76,8 @@ pub struct ConsumptionTarget {
     tier: NeedTier,
     basis: DemandBasis,
     monthly_quantity: QuantityMilli,
+    need_group: u8,
+    preference: u8,
 }
 
 impl ConsumptionTarget {
@@ -91,6 +93,34 @@ impl ConsumptionTarget {
             tier,
             basis,
             monthly_quantity,
+            need_group: 0,
+            preference: 0,
+        }
+    }
+
+    /// Declares this target as one way of meeting a shared need.
+    ///
+    /// Targets carrying the same non-zero `need_group` within a tier satisfy
+    /// one and the same need, and `monthly_quantity` is the amount of this
+    /// good that meets that need on its own. A household works through them in
+    /// `preference` order and falls back to the next only for the part of the
+    /// need the better good could not cover. A `need_group` of zero means the
+    /// good stands alone and cannot be replaced by anything.
+    #[must_use]
+    pub const fn in_need_group(self, need_group: u8, preference: u8) -> Self {
+        Self {
+            need_group,
+            preference,
+            ..self
+        }
+    }
+
+    /// Identifies the need this target contributes to.
+    pub(crate) const fn need_key(self) -> (u8, Option<GoodId>) {
+        if self.need_group == 0 {
+            (0, Some(self.good))
+        } else {
+            (self.need_group, None)
         }
     }
     #[must_use]
@@ -108,6 +138,14 @@ impl ConsumptionTarget {
     #[must_use]
     pub const fn monthly_quantity(self) -> QuantityMilli {
         self.monthly_quantity
+    }
+    #[must_use]
+    pub const fn need_group(self) -> u8 {
+        self.need_group
+    }
+    #[must_use]
+    pub const fn preference(self) -> u8 {
+        self.preference
     }
 }
 
@@ -149,7 +187,25 @@ impl ConsumptionProfile {
                 "a good may appear only once in a profile",
             ));
         }
-        targets.sort_by_key(|target| (target.tier(), target.good()));
+        let grouped: Vec<_> = targets
+            .iter()
+            .filter(|target| target.need_group() != 0)
+            .map(|target| (target.tier(), target.need_group(), target.preference()))
+            .collect();
+        let unique_preferences: BTreeSet<_> = grouped.iter().copied().collect();
+        if unique_preferences.len() != grouped.len() {
+            return Err(WorldError::InvalidConsumptionProfile(
+                "two goods may not share one preference within a need",
+            ));
+        }
+        targets.sort_by_key(|target| {
+            (
+                target.tier(),
+                target.need_group(),
+                target.preference(),
+                target.good(),
+            )
+        });
         Ok(Self { id, name, targets })
     }
     #[must_use]
@@ -366,13 +422,13 @@ impl World {
                     let budgeted = if row.cost == 0 {
                         0
                     } else {
-                        spend * row.quantity / row.cost
+                        spend * row.obtainable / row.cost
                     };
                     intents.push(DemandIntent {
                         cohort: cohort.id(),
                         good: row.good,
                         tier,
-                        desired: QuantityMilli::new(to_u64(row.quantity, "desired quantity")?),
+                        desired: QuantityMilli::new(to_u64(row.desired, "desired quantity")?),
                         budgeted: QuantityMilli::new(to_u64(budgeted, "budgeted quantity")?),
                         reserved_spend: Money::from_minor_units(to_i64(spend, "reserved spend")?),
                     });
@@ -411,6 +467,18 @@ impl World {
         )?))
     }
 
+    /// Prices one tier of a profile by walking every need through its
+    /// substitutes in preference order.
+    ///
+    /// A need is measured as the share of itself that is still open, never in
+    /// kilograms: a target's `monthly_quantity` is the amount of *that* good
+    /// which closes the whole need on its own, so a food that feeds a person
+    /// worse asks for more units to close the same share. The household buys
+    /// from its preferred good only what the offer book actually holds, and
+    /// carries the share it could not cover to the next preference, which
+    /// quotes its own price for its own larger ration. Substitution therefore
+    /// costs somebody: the household eats worse and usually pays differently,
+    /// and the preferred seller loses the sale it could not supply.
     fn price_targets(
         &self,
         cohort: &crate::HouseholdCohort,
@@ -418,50 +486,84 @@ impl World {
         tier: NeedTier,
         ledger: &mut SurvivalSupplyLedger<'_>,
     ) -> Result<Vec<PricedTarget>, WorldError> {
-        profile
+        let mut needs: BTreeMap<(u8, Option<GoodId>), Vec<ConsumptionTarget>> = BTreeMap::new();
+        for target in profile
             .targets()
             .iter()
             .copied()
             .filter(|target| target.tier() == tier)
-            .map(|target| {
+        {
+            needs.entry(target.need_key()).or_default().push(target);
+        }
+        let mut rows = Vec::new();
+        for substitutes in needs.values_mut() {
+            substitutes.sort_by_key(|target| (target.preference(), target.good()));
+            // Share of this need still open, in millionths. This is an
+            // arithmetic scale for a ratio, not an economic limit.
+            let mut open = NEED_SHARE_SCALE;
+            for target in substitutes.iter().copied() {
+                if open == 0 {
+                    break;
+                }
                 let count = match target.basis() {
                     DemandBasis::PerPerson => cohort.people().people(),
                     DemandBasis::PerHousehold => cohort.households(),
                 };
-                let quantity = i128::from(target.monthly_quantity().get()) * i128::from(count);
-                let cost = self.household_target_cost(
+                let full = i128::from(target.monthly_quantity().get()) * i128::from(count);
+                if full == 0 {
+                    continue;
+                }
+                // Round the open share up: a household asks for the whole
+                // remainder of its need, not for the floor of it.
+                let desired = (full * open + NEED_SHARE_SCALE - 1) / NEED_SHARE_SCALE;
+                let (obtainable, cost) = self.household_target_purchase(
                     cohort.region(),
                     target.good(),
                     tier,
-                    quantity,
+                    desired,
                     ledger,
                 )?;
-                Ok(PricedTarget {
+                let covered = (obtainable * NEED_SHARE_SCALE / full).min(open);
+                open -= covered;
+                rows.push(PricedTarget {
                     good: target.good(),
-                    quantity,
+                    desired,
+                    obtainable,
                     cost,
-                })
-            })
-            .collect()
+                });
+            }
+        }
+        Ok(rows)
     }
 
-    fn household_target_cost(
+    /// Reads how much of a wanted quantity the household could actually take
+    /// home this month, and what that costs it.
+    ///
+    /// With an offer book in hand the answer is bounded by the goods that are
+    /// genuinely on sale and by the road capacity that could carry them; the
+    /// part nobody is selling is not quoted at the reference price, because a
+    /// price with no seller behind it would let a household budget for food
+    /// that does not exist. Without an offer book there is no evidence of
+    /// scarcity at all, so the reference price stands for the whole wanted
+    /// quantity: that is the case of a plain cost estimate, not of a purchase.
+    fn household_target_purchase(
         &self,
         region: RegionId,
         good: GoodId,
         tier: NeedTier,
         quantity: i128,
         ledger: &mut SurvivalSupplyLedger<'_>,
-    ) -> Result<i128, WorldError> {
+    ) -> Result<(i128, i128), WorldError> {
         let reference = self
             .regional_prices
             .get(&(region, good))
             .copied()
             .ok_or(WorldError::MissingRegionalPrice { region, good })?;
-        if tier != NeedTier::Survival {
-            return Ok(
-                quantity * i128::from(reference.minor_units()) / i128::from(QuantityMilli::SCALE)
-            );
+        if tier != NeedTier::Survival || ledger.supply.is_empty() {
+            return Ok((
+                quantity,
+                quantity * i128::from(reference.minor_units()) / i128::from(QuantityMilli::SCALE),
+            ));
         }
         let mut candidates = Vec::new();
         for (index, offer) in ledger.supply.iter().enumerate() {
@@ -530,14 +632,11 @@ impl World {
                 }
             }
             if needed == 0 {
-                return Ok(cost);
+                break;
             }
         }
-        cost.checked_add(
-            i128::from(reference.minor_units()) * i128::from(needed)
-                / i128::from(QuantityMilli::SCALE),
-        )
-        .ok_or(WorldError::ArithmeticOverflow("household survival cost"))
+        let purchased = quantity - i128::from(needed);
+        Ok((purchased, cost))
     }
 
     fn all_shortage_policies_use_market_allocation(&self) -> bool {
@@ -563,10 +662,19 @@ struct SupplyCandidate {
     route: Option<RouteId>,
 }
 
+/// Fixed-point scale for the share of a need that is still open. Arithmetic,
+/// not economics: a share cannot exceed one by the domain of its type.
+pub(crate) const NEED_SHARE_SCALE: i128 = 1_000_000;
+
 #[derive(Clone, Copy, Debug)]
 struct PricedTarget {
     good: GoodId,
-    quantity: i128,
+    /// What the household set out to buy of this good at its turn in the
+    /// preference order, in the good's own units.
+    desired: i128,
+    /// How much of that intent the offer book can actually deliver.
+    obtainable: i128,
+    /// What the obtainable part costs at the prices actually offered.
     cost: i128,
 }
 
@@ -722,6 +830,175 @@ mod tests {
             .map(|intent| intent.reserved_spend().minor_units())
             .sum();
         assert_eq!(reserved, 1_500);
+    }
+
+    /// One need - being fed - met either by bread or, worse, by raw grain.
+    fn substitution_world() -> World {
+        let mut world = World::new(WorldSeed::new(1), SimDate::new(2025, 1).expect("date"));
+        world
+            .register_country(Country::new(CountryId::new(1), "A").expect("country"))
+            .expect("country");
+        world
+            .register_good(Good::new(GoodId::new(1), "Grain").expect("good"))
+            .expect("good");
+        world
+            .register_good(Good::new(GoodId::new(2), "Bread").expect("good"))
+            .expect("good");
+        world
+            .register_consumption_profile(
+                ConsumptionProfile::new(
+                    NeedProfileId::new(1),
+                    "Fed",
+                    vec![
+                        ConsumptionTarget::new(
+                            GoodId::new(2),
+                            NeedTier::Survival,
+                            DemandBasis::PerPerson,
+                            QuantityMilli::new(1_000),
+                        )
+                        .in_need_group(1, 0),
+                        ConsumptionTarget::new(
+                            GoodId::new(1),
+                            NeedTier::Survival,
+                            DemandBasis::PerPerson,
+                            QuantityMilli::new(1_800),
+                        )
+                        .in_need_group(1, 1),
+                    ],
+                )
+                .expect("profile"),
+            )
+            .expect("profile");
+        world
+            .register_region(
+                Region::new(
+                    RegionId::new(1),
+                    CountryId::new(1),
+                    "Capital",
+                    Population::new(1),
+                    Money::from_minor_units(1_000),
+                )
+                .expect("region"),
+            )
+            .expect("region");
+        world
+            .set_regional_price(RegionId::new(1), GoodId::new(1), Money::from_minor_units(5))
+            .expect("grain price");
+        world
+            .set_regional_price(
+                RegionId::new(1),
+                GoodId::new(2),
+                Money::from_minor_units(10),
+            )
+            .expect("bread price");
+        world
+            .register_household_cohort(
+                HouseholdCohort::new(
+                    CohortId::new(1),
+                    RegionId::new(1),
+                    NeedProfileId::new(1),
+                    Population::new(1),
+                    1,
+                    AgeBand::Adult,
+                    HouseholdType::WorkingAge,
+                    EducationLevel::Secondary,
+                    EmploymentStatus::Employed,
+                    Money::from_minor_units(120_000),
+                    Money::from_minor_units(0),
+                    Money::from_minor_units(0),
+                )
+                .expect("cohort"),
+            )
+            .expect("cohort");
+        world
+            .execute_monthly_household_cashflows()
+            .expect("monthly cashflow");
+        world
+    }
+
+    fn offer(seller: u32, good: u32, quantity: u64, price: i64) -> MarketOffer {
+        MarketOffer {
+            seller: crate::FirmId::new(seller),
+            region: RegionId::new(1),
+            good: GoodId::new(good),
+            quantity: QuantityMilli::new(quantity),
+            unit_price: Money::from_minor_units(price),
+        }
+    }
+
+    fn survival_intents(world: &World, offers: &[MarketOffer]) -> Vec<DemandIntent> {
+        let mut capacity = BTreeMap::new();
+        world
+            .plan_monthly_household_demand_against_offers(offers, &mut capacity)
+            .expect("demand")
+            .into_iter()
+            .filter(|intent| intent.tier() == NeedTier::Survival)
+            .collect()
+    }
+
+    #[test]
+    fn a_household_that_can_buy_bread_never_reaches_for_raw_grain() {
+        let world = substitution_world();
+        let intents = survival_intents(&world, &[offer(1, 2, 1_000, 10), offer(2, 1, 50_000, 5)]);
+        assert_eq!(intents.len(), 1, "a closed need asks nobody else");
+        assert_eq!(intents[0].good(), GoodId::new(2));
+        assert_eq!(intents[0].budgeted(), QuantityMilli::new(1_000));
+    }
+
+    #[test]
+    fn only_the_share_of_the_need_that_bread_could_not_close_falls_to_grain() {
+        let world = substitution_world();
+        let intents = survival_intents(&world, &[offer(1, 2, 400, 10), offer(2, 1, 50_000, 5)]);
+        assert_eq!(intents.len(), 2);
+        assert_eq!(intents[0].good(), GoodId::new(2));
+        assert_eq!(intents[0].desired(), QuantityMilli::new(1_000));
+        assert_eq!(
+            intents[0].budgeted(),
+            QuantityMilli::new(400),
+            "only what the baker actually put on the counter"
+        );
+        assert_eq!(intents[1].good(), GoodId::new(1));
+        assert_eq!(
+            intents[1].desired(),
+            QuantityMilli::new(1_080),
+            "the remaining 60% of the need takes 60% of a full grain ration"
+        );
+        assert_eq!(intents[1].budgeted(), QuantityMilli::new(1_080));
+    }
+
+    #[test]
+    fn a_need_met_by_grain_alone_costs_the_region_a_larger_ration() {
+        let world = substitution_world();
+        let intents = survival_intents(&world, &[offer(2, 1, 50_000, 5)]);
+        assert_eq!(intents.len(), 2);
+        assert_eq!(intents[0].good(), GoodId::new(2));
+        assert_eq!(
+            intents[0].budgeted(),
+            QuantityMilli::new(0),
+            "a bakery with nothing on the shelf sells nothing"
+        );
+        assert_eq!(
+            intents[0].reserved_spend(),
+            Money::default(),
+            "and is paid nothing"
+        );
+        assert_eq!(intents[1].good(), GoodId::new(1));
+        assert_eq!(
+            intents[1].budgeted(),
+            QuantityMilli::new(1_800),
+            "eating the harvest raw takes 1.8 units where bread took 1.0"
+        );
+    }
+
+    #[test]
+    fn an_empty_offer_book_prices_the_whole_need_at_its_preferred_good() {
+        let world = substitution_world();
+        // No offer book at all is the estimating case, not a purchase: there is
+        // no evidence of scarcity, so nothing constrains the preferred ration.
+        let intents = survival_intents(&world, &[]);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].good(), GoodId::new(2));
+        assert_eq!(intents[0].desired(), QuantityMilli::new(1_000));
     }
 
     #[test]

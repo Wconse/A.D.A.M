@@ -293,8 +293,25 @@ fn collected_sales_tax_equals_recorded_revenue() {
         })
         .sum();
     let (revenue, _) = fiscal_closure(&world);
+    let journal_paid: i64 = world
+        .money_journal()
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.purpose(),
+                adam_core::MoneyTransactionPurpose::SalesTax {
+                    country,
+                    ..
+                } if country == CountryId::new(1)
+            )
+        })
+        .flat_map(adam_core::MoneyJournalEntry::postings)
+        .filter(|posting| posting.direction() == adam_core::MoneyPostingDirection::Decrease)
+        .map(|posting| posting.amount().minor_units())
+        .sum();
     assert!(paid > 0, "a producing economy must pay some sales tax");
     assert_eq!(paid, revenue, "revenue is exactly what firms handed over");
+    assert_eq!(journal_paid, paid, "the tax journal names every paid unit");
 }
 
 #[test]

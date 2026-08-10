@@ -306,12 +306,19 @@ fn emergent_hostility_deescalates_after_material_cause_ends() {
 
     // A domestic producer ends the material dependence: demand is met, the
     // grievance decays month by month, and when it is gone the emergent
-    // hostility lifts itself through the same journaled transition.
+    // hostility lifts itself through the same journaled transition. The tail
+    // is longer than the bare decay of the accrued level, because a works
+    // that has just opened needs a few months before its harvest covers the
+    // need, and the scarcity price it inherited has to walk back down before
+    // the buyer will pay it at all. Neither delay is charged to the
+    // neighbour: a price declined and a till run dry are the buyer's own
+    // affair.
     register_domestic_grain_farm(&mut world, &mut replayed);
-    for _ in 0..30 {
+    for _ in 0..41 {
         assert!(world.countries_are_hostile(CountryId::new(1), CountryId::new(2)));
         run_month(&mut world, &mut replayed);
     }
+    run_month(&mut world, &mut replayed);
     assert_eq!(grievance_level(&world), None);
     assert!(world.bilateral_grievances().is_empty());
     assert!(!world.countries_are_hostile(CountryId::new(1), CountryId::new(2)));
